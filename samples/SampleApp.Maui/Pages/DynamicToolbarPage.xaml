@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:minted="https://schemas.mintedtexteditor.com/2026"
+             x:Class="SampleApp.Maui.Pages.DynamicToolbarPage"
+             Title="Dynamic Toolbar">
+
+    <Grid RowDefinitions="Auto,*">
+
+        <!-- ── Control panel ──────────────────────────────────────── -->
+        <VerticalStackLayout Grid.Row="0" Padding="12,10" Spacing="8"
+                             BackgroundColor="#F0F4F8">
+
+            <!-- Preset row -->
+            <Label Text="TOOLBAR PRESET" FontSize="11" FontAttributes="Bold"
+                   TextColor="#6B7280" CharacterSpacing="1" />
+            <HorizontalStackLayout Spacing="6">
+                <Button x:Name="BtnDefault"
+                        Text="Default"
+                        Clicked="OnPresetDefault"
+                        BackgroundColor="#2563EB" TextColor="White"
+                        HeightRequest="34" FontSize="13" />
+                <Button x:Name="BtnFormatting"
+                        Text="Formatting Only"
+                        Clicked="OnPresetFormatting"
+                        BackgroundColor="#9CA3AF" TextColor="White"
+                        HeightRequest="34" FontSize="13" />
+                <Button x:Name="BtnMinimal"
+                        Text="Minimal"
+                        Clicked="OnPresetMinimal"
+                        BackgroundColor="#9CA3AF" TextColor="White"
+                        HeightRequest="34" FontSize="13" />
+            </HorizontalStackLayout>
+
+            <!-- Runtime toggles row -->
+            <Label Text="RUNTIME TOGGLES" FontSize="11" FontAttributes="Bold"
+                   TextColor="#6B7280" CharacterSpacing="1" Margin="0,4,0,0" />
+            <HorizontalStackLayout Spacing="6">
+                <Button x:Name="BtnToggleToolbar"
+                        Text="Hide Toolbar"
+                        Clicked="OnToggleToolbar"
+                        BackgroundColor="#7C3AED" TextColor="White"
+                        HeightRequest="34" FontSize="13" />
+                <Button x:Name="BtnToggleInsert"
+                        Text="Remove Insert"
+                        Clicked="OnToggleInsert"
+                        BackgroundColor="#0891B2" TextColor="White"
+                        HeightRequest="34" FontSize="13" />
+                <Button x:Name="BtnToggleBold"
+                        Text="Disable Bold"
+                        Clicked="OnToggleBold"
+                        BackgroundColor="#DC2626" TextColor="White"
+                        HeightRequest="34" FontSize="13" />
+            </HorizontalStackLayout>
+
+            <!-- Max rows row -->
+            <Label Text="MAX ROWS (overflow)" FontSize="11" FontAttributes="Bold"
+                   TextColor="#6B7280" CharacterSpacing="1" Margin="0,4,0,0" />
+            <HorizontalStackLayout Spacing="6">
+                <Button x:Name="BtnRowsAll"
+                        Text="Unlimited"
+                        Clicked="OnRowsUnlimited"
+                        BackgroundColor="#2563EB" TextColor="White"
+                        HeightRequest="34" FontSize="13" />
+                <Button x:Name="BtnRows1"
+                        Text="1 Row"
+                        Clicked="OnRows1"
+                        BackgroundColor="#9CA3AF" TextColor="White"
+                        HeightRequest="34" FontSize="13" />
+                <Button x:Name="BtnRows2"
+                        Text="2 Rows"
+                        Clicked="OnRows2"
+                        BackgroundColor="#9CA3AF" TextColor="White"
+                        HeightRequest="34" FontSize="13" />
+            </HorizontalStackLayout>
+
+        </VerticalStackLayout>
+
+        <!-- ── Editor ─────────────────────────────────────────────── -->
+        <minted:MintedEditorView
+            x:Name="Editor"
+            Grid.Row="1"
+            ShowToolbar="True"
+            PlaceholderText="Edit text here to see formatting in action…" />
+
+    </Grid>
+
+</ContentPage>

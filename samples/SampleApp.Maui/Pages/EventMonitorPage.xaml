@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:minted="https://schemas.mintedtexteditor.com/2026"
+             x:Class="SampleApp.Maui.Pages.EventMonitorPage"
+             Title="Event Monitor">
+
+    <Grid RowDefinitions="*,Auto,160">
+
+        <minted:MintedEditorView
+            x:Name="Editor"
+            Grid.Row="0"
+            PlaceholderText="Type or click here to see events…"
+            TextChanged="OnTextChanged"
+            SelectionChanged="OnSelectionChanged"
+            HyperlinkClicked="OnHyperlinkClicked" />
+
+        <BoxView Grid.Row="1" HeightRequest="1"
+                 Color="#CCCCCC" HorizontalOptions="Fill" />
+
+        <ScrollView Grid.Row="2">
+            <Label x:Name="LblLog"
+                   Padding="8"
+                   FontFamily="Courier New" FontSize="11"
+                   TextColor="#333"
+                   Text="Event log — interact with the editor above…"
+                   VerticalOptions="Start" />
+        </ScrollView>
+
+    </Grid>
+
+</ContentPage>

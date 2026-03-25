@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:minted="https://schemas.mintedtexteditor.com/2026"
+             x:Class="SampleApp.Maui.Pages.LoadSavePage"
+             Title="Load &amp; Save">
+
+    <Grid RowDefinitions="Auto,*">
+
+        <VerticalStackLayout Grid.Row="0" Padding="12,10" Spacing="8"
+                             BackgroundColor="#F0F0F0">
+            <HorizontalStackLayout Spacing="8">
+                <Button Text="Load Sample" Clicked="OnLoadClicked"
+                        BackgroundColor="#107C10" TextColor="White"
+                        HeightRequest="36" />
+                <Button Text="Save to File" Clicked="OnSaveClicked"
+                        BackgroundColor="#0078D4" TextColor="White"
+                        HeightRequest="36" />
+                <Button Text="Clear" Clicked="OnClearClicked"
+                        BackgroundColor="#888" TextColor="White"
+                        HeightRequest="36" />
+            </HorizontalStackLayout>
+            <Label x:Name="LblStatus" Text="Ready."
+                   TextColor="#555" FontSize="12" />
+        </VerticalStackLayout>
+
+        <minted:MintedEditorView
+            x:Name="Editor"
+            Grid.Row="1"
+            PlaceholderText="Editor is empty. Press 'Load Sample' to load content." />
+
+    </Grid>
+
+</ContentPage>

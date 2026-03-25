@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell
+    x:Class="SampleApp.Maui.AppShell"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:local="clr-namespace:SampleApp.Maui"
+    xmlns:pages="clr-namespace:SampleApp.Maui.Pages"
+    Title="MintedTextEditor Sample"
+    FlyoutBehavior="Flyout"
+    FlyoutBackground="{AppThemeBinding Light=#FFFFFF, Dark=#1E1E2E}"
+    Shell.BackgroundColor="{AppThemeBinding Light=#2563EB, Dark=#0F172A}"
+    Shell.ForegroundColor="{AppThemeBinding Light=#0F172A, Dark=#F8FAFC}"
+    Shell.TitleColor="{AppThemeBinding Light=#0F172A, Dark=#F8FAFC}"
+    Shell.UnselectedColor="{AppThemeBinding Light=#475569, Dark=#CBD5E1}">
+
+    <!-- Main editor -->
+    <FlyoutItem Title="Main Editor" Icon="house.png">
+        <ShellContent
+            Title="MintedTextEditor"
+            ContentTemplate="{DataTemplate local:MainPage}"
+            Route="MainPage" />
+    </FlyoutItem>
+
+    <!-- Demo pages -->
+    <FlyoutItem Title="Basic Editing" Icon="edit.png">
+        <ShellContent
+            Title="Basic Editing"
+            ContentTemplate="{DataTemplate pages:BasicEditingPage}"
+            Route="BasicEditing" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Formatting" Icon="format.png">
+        <ShellContent
+            Title="Formatting"
+            ContentTemplate="{DataTemplate pages:FormattingPage}"
+            Route="Formatting" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="HTML Interop" Icon="code.png">
+        <ShellContent
+            Title="HTML Interop"
+            ContentTemplate="{DataTemplate pages:HtmlInteropPage}"
+            Route="HtmlInterop" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Theming" Icon="paint.png">
+        <ShellContent
+            Title="Theming"
+            ContentTemplate="{DataTemplate pages:ThemingPage}"
+            Route="Theming" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Tables" Icon="table.png">
+        <ShellContent
+            Title="Tables"
+            ContentTemplate="{DataTemplate pages:TablesPage}"
+            Route="Tables" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Read Only" Icon="lock.png">
+        <ShellContent
+            Title="Read Only"
+            ContentTemplate="{DataTemplate pages:ReadOnlyPage}"
+            Route="ReadOnly" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Event Monitor" Icon="monitor.png">
+        <ShellContent
+            Title="Event Monitor"
+            ContentTemplate="{DataTemplate pages:EventMonitorPage}"
+            Route="EventMonitor" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Custom Command" Icon="command.png">
+        <ShellContent
+            Title="Custom Command"
+            ContentTemplate="{DataTemplate pages:CustomCommandPage}"
+            Route="CustomCommand" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Dynamic Toolbar" Icon="edit.png">
+        <ShellContent
+            Title="Dynamic Toolbar"
+            ContentTemplate="{DataTemplate pages:DynamicToolbarPage}"
+            Route="DynamicToolbar" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Localization" Icon="globe.png">
+        <ShellContent
+            Title="Localization"
+            ContentTemplate="{DataTemplate pages:LocalizationPage}"
+            Route="Localization" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Images &amp; Hyperlinks" Icon="link.png">
+        <ShellContent
+            Title="Images &amp; Hyperlinks"
+            ContentTemplate="{DataTemplate pages:ImagesHyperlinksPage}"
+            Route="ImagesHyperlinks" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Load / Save" Icon="save.png">
+        <ShellContent
+            Title="Load / Save"
+            ContentTemplate="{DataTemplate pages:LoadSavePage}"
+            Route="LoadSave" />
+    </FlyoutItem>
+
+</Shell>

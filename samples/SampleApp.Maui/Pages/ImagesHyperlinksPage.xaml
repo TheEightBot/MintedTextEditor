@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:minted="https://schemas.mintedtexteditor.com/2026"
+             x:Class="SampleApp.Maui.Pages.ImagesHyperlinksPage"
+             Title="Images &amp; Hyperlinks">
+
+    <Grid RowDefinitions="Auto,Auto,*">
+
+        <!-- Hyperlink toolbar -->
+        <VerticalStackLayout Grid.Row="0" Padding="12,8" Spacing="6"
+                             BackgroundColor="#F5F5FF">
+            <Label Text="Insert hyperlink (select text or leave empty):" FontSize="12" />
+            <HorizontalStackLayout Spacing="6">
+                <Entry x:Name="UrlEntry"
+                       Text="https://example.com"
+                       Placeholder="URL"
+                       WidthRequest="200" HeightRequest="34" />
+                <Button Text="Insert Link" Clicked="OnInsertLinkClicked"
+                        BackgroundColor="#0078D4" TextColor="White"
+                        HeightRequest="34" />
+            </HorizontalStackLayout>
+        </VerticalStackLayout>
+
+        <!-- Image toolbar -->
+        <VerticalStackLayout Grid.Row="1" Padding="12,8" Spacing="6"
+                             BackgroundColor="#F5FFF5">
+            <Label Text="Insert image at caret:" FontSize="12" />
+            <HorizontalStackLayout Spacing="6">
+                <Entry x:Name="ImageSrcEntry"
+                       Text="https://picsum.photos/120/60"
+                       Placeholder="Image URL"
+                       WidthRequest="200" HeightRequest="34" />
+                <Button Text="Insert Image" Clicked="OnInsertImageClicked"
+                        BackgroundColor="#107C10" TextColor="White"
+                        HeightRequest="34" />
+            </HorizontalStackLayout>
+            <Label x:Name="LblHyperlinkResult"
+                   Text="Tap a hyperlink in the editor to see the URL here."
+                   TextColor="#555" FontSize="12" />
+        </VerticalStackLayout>
+
+        <minted:MintedEditorView
+            x:Name="Editor"
+            Grid.Row="2"
+            ShowToolbar="True"
+            HyperlinkClicked="OnHyperlinkClicked" />
+
+    </Grid>
+
+</ContentPage>

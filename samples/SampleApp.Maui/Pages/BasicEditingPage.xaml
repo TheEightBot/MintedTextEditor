@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:minted="https://schemas.mintedtexteditor.com/2026"
+             x:Class="SampleApp.Maui.Pages.BasicEditingPage"
+             Title="Basic Editing">
+
+    <Grid RowDefinitions="Auto,*">
+        <Label Grid.Row="0"
+               Text="Type below to edit text. Tap to position the caret."
+               Padding="12,8" FontSize="13" TextColor="#555"
+               BackgroundColor="#F5F5F5" />
+        <minted:MintedEditorView
+            x:Name="Editor"
+            Grid.Row="1"
+            PlaceholderText="Type here…" />
+    </Grid>
+
+</ContentPage>

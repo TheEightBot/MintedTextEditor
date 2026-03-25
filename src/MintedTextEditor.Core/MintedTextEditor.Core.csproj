@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- NuGet Package Metadata (Authors, License, URLs inherited from Directory.Build.props) -->
+    <PackageId>MintedTextEditor.Core</PackageId>
+    <Version>1.0.0</Version>
+    <Description>Core document model, abstractions, and editing logic for the MintedTextEditor control. Platform-independent — no rendering or UI framework references.</Description>
+    <PackageTags>maui;richtexteditor;rte;editor;core;text;document</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MintedTextEditor.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Toolbar icon SVGs for all three built-in packs, embedded so they are available
+         on every platform without requiring app-bundle assets. -->
+    <EmbeddedResource Include="Icons/**/*.svg" />
+  </ItemGroup>
+
+</Project>

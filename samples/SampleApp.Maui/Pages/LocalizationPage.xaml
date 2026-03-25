@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:minted="https://schemas.mintedtexteditor.com/2026"
+             x:Class="SampleApp.Maui.Pages.LocalizationPage"
+             Title="Localization">
+
+    <Grid RowDefinitions="Auto,Auto,*">
+
+        <VerticalStackLayout Grid.Row="0" Padding="12,10" Spacing="8"
+                             BackgroundColor="#F0F0F0">
+            <Label Text="Switch UI string locale:" FontAttributes="Bold" />
+            <HorizontalStackLayout Spacing="8">
+                <Button Text="English" Clicked="OnEnglishClicked"
+                        BackgroundColor="#0078D4" TextColor="White"
+                        HeightRequest="36" />
+                <Button Text="Español" Clicked="OnSpanishClicked"
+                        BackgroundColor="#D4280C" TextColor="White"
+                        HeightRequest="36" />
+                <Button Text="Français" Clicked="OnFrenchClicked"
+                        BackgroundColor="#003189" TextColor="White"
+                        HeightRequest="36" />
+            </HorizontalStackLayout>
+        </VerticalStackLayout>
+
+        <Frame Grid.Row="1" Margin="8,4" Padding="8"
+               BorderColor="#CCCCCC" CornerRadius="4"
+               BackgroundColor="#FFFDE7">
+            <Label x:Name="LblStrings" FontFamily="Courier New"
+                   FontSize="12" LineBreakMode="WordWrap" />
+        </Frame>
+
+        <minted:MintedEditorView
+            x:Name="Editor"
+            Grid.Row="2" />
+
+    </Grid>
+
+</ContentPage>

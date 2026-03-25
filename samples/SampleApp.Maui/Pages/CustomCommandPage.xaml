@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:minted="https://schemas.mintedtexteditor.com/2026"
+             x:Class="SampleApp.Maui.Pages.CustomCommandPage"
+             Title="Custom Commands">
+
+    <Grid RowDefinitions="Auto,*">
+
+        <VerticalStackLayout Grid.Row="0" Padding="12,10" Spacing="8"
+                             BackgroundColor="#F0F0F0">
+            <Label Text="Custom IEditorCommand demo" FontAttributes="Bold" />
+            <HorizontalStackLayout Spacing="8">
+                <Button Text="Count Words" Clicked="OnCountWordsClicked"
+                        BackgroundColor="#0078D4" TextColor="White"
+                        HeightRequest="36" />
+                <Button Text="Count Paragraphs" Clicked="OnCountParagraphsClicked"
+                        BackgroundColor="#107C10" TextColor="White"
+                        HeightRequest="36" />
+            </HorizontalStackLayout>
+            <Label x:Name="LblResult" Text="Run a command to see the result."
+                   TextColor="#555" FontSize="13" />
+        </VerticalStackLayout>
+
+        <minted:MintedEditorView
+            x:Name="Editor"
+            Grid.Row="1"
+            PlaceholderText="Select text then choose a wrap tag…" />
+
+    </Grid>
+
+</ContentPage>

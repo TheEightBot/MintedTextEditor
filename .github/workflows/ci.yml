@@ -1,0 +1,121 @@
+name: CI
+
+"on":
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1: Build & Test (Core + SkiaSharp) ──────────────────────────────────
+  build-and-test:
+    name: Build & Test (Core + SkiaSharp)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history required for SourceLink
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Restore
+        run: |
+          dotnet restore src/MintedTextEditor.Core/
+          dotnet restore src/MintedTextEditor.SkiaSharp/
+          dotnet restore tests/MintedTextEditor.Core.Tests/
+
+      - name: Build
+        run: |
+          dotnet build src/MintedTextEditor.Core/ --no-restore --configuration Release
+          dotnet build src/MintedTextEditor.SkiaSharp/ --no-restore --configuration Release
+          dotnet build tests/MintedTextEditor.Core.Tests/ --no-restore --configuration Release
+
+      - name: Test
+        run: >
+          dotnet test tests/MintedTextEditor.Core.Tests/
+          --no-build
+          --configuration Release
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory ./test-results
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: ./test-results/*.trx
+
+      - name: Pack dry-run (Core)
+        run: >
+          dotnet pack src/MintedTextEditor.Core/MintedTextEditor.Core.csproj
+          --no-build
+          --configuration Release
+          --output ./packages
+
+      - name: Pack dry-run (SkiaSharp)
+        run: >
+          dotnet pack src/MintedTextEditor.SkiaSharp/MintedTextEditor.SkiaSharp.csproj
+          --no-build
+          --configuration Release
+          --output ./packages
+
+  # ── Job 2: Build (MAUI) ─────────────────────────────────────────────────────
+  build-maui:
+    name: Build (MAUI)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache MAUI workloads
+        uses: actions/cache@v4
+        id: maui-cache
+        with:
+          path: |
+            ~/.dotnet/workloads
+            ~/.nuget/packages
+          key: maui-workloads-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: maui-workloads-${{ runner.os }}-
+
+      - name: Install MAUI workloads
+        if: steps.maui-cache.outputs.cache-hit != 'true'
+        run: dotnet workload install maui --source https://api.nuget.org/v3/index.json
+
+      - name: Restore
+        run: dotnet restore src/MintedTextEditor.Maui/
+
+      - name: Build
+        run: >
+          dotnet build src/MintedTextEditor.Maui/
+          --no-restore
+          --configuration Release
+
+      - name: Pack dry-run (MAUI)
+        run: >
+          dotnet pack src/MintedTextEditor.Maui/MintedTextEditor.Maui.csproj
+          --no-build
+          --configuration Release
+          --output ./packages

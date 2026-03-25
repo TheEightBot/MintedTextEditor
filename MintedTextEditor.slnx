@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/SampleApp.Maui/SampleApp.Maui.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/MintedTextEditor.Core/MintedTextEditor.Core.csproj" />
+    <Project Path="src/MintedTextEditor.Maui/MintedTextEditor.Maui.csproj" />
+    <Project Path="src/MintedTextEditor.SkiaSharp/MintedTextEditor.SkiaSharp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MintedTextEditor.Core.Tests/MintedTextEditor.Core.Tests.csproj" />
+  </Folder>
+</Solution>

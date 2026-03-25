@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:minted="https://schemas.mintedtexteditor.com/2026"
+             x:Class="SampleApp.Maui.Pages.ThemingPage"
+             Title="Theming">
+
+        <Grid RowDefinitions="Auto,Auto,*">
+
+        <HorizontalStackLayout Grid.Row="0" Spacing="8" Padding="8,8"
+                               BackgroundColor="#F0F0F0">
+            <Button Text="☀ Light"  Clicked="OnLightClicked"
+                    BackgroundColor="#FFFFFF" TextColor="#222"
+                    HeightRequest="36" />
+            <Button Text="🌙 Dark"  Clicked="OnDarkClicked"
+                    BackgroundColor="#1E1E2E" TextColor="#CDD6F4"
+                    HeightRequest="36" />
+            <Button Text="◑ High Contrast" Clicked="OnHighContrastClicked"
+                    BackgroundColor="#000000" TextColor="#FFFFFF"
+                    HeightRequest="36" />
+        </HorizontalStackLayout>
+
+                <HorizontalStackLayout Grid.Row="1" Spacing="8" Padding="8,0,8,8"
+                                                           BackgroundColor="#F0F0F0">
+                        <Label Text="Icon Pack:" VerticalOptions="Center" />
+                        <Picker x:Name="IconPackPicker"
+                                        WidthRequest="200"
+                                        SelectedIndexChanged="OnIconPackChanged">
+                                <Picker.Items>
+                                        <x:String>Lucide</x:String>
+                                        <x:String>Heroicons</x:String>
+                                        <x:String>Material Symbols</x:String>
+                                </Picker.Items>
+                        </Picker>
+                </HorizontalStackLayout>
+
+                <minted:MintedEditorView x:Name="Editor" Grid.Row="2" />
+
+    </Grid>
+
+</ContentPage>

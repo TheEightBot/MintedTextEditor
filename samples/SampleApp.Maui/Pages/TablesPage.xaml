@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:minted="https://schemas.mintedtexteditor.com/2026"
+             x:Class="SampleApp.Maui.Pages.TablesPage"
+             Title="Tables">
+
+    <Grid RowDefinitions="Auto,*">
+
+        <HorizontalStackLayout Grid.Row="0" Spacing="8" Padding="8,8"
+                               BackgroundColor="#F0F0F0">
+            <Label Text="Rows:" VerticalOptions="Center" />
+            <Entry x:Name="RowsEntry" Text="3" WidthRequest="50"
+                   Keyboard="Numeric" HeightRequest="36" />
+            <Label Text="Cols:" VerticalOptions="Center" />
+            <Entry x:Name="ColsEntry" Text="3" WidthRequest="50"
+                   Keyboard="Numeric" HeightRequest="36" />
+            <Button Text="Insert Table" Clicked="OnInsertTableClicked"
+                    BackgroundColor="#0078D4" TextColor="White"
+                    HeightRequest="36" />
+        </HorizontalStackLayout>
+
+        <minted:MintedEditorView x:Name="Editor" Grid.Row="1" ShowToolbar="True" />
+
+    </Grid>
+
+</ContentPage>

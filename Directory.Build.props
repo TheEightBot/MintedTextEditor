@@ -1,0 +1,48 @@
+<Project>
+  <!--
+    Shared NuGet package metadata inherited by every project in the repository.
+    Per-project values (PackageId, Version, Description, PackageTags) are kept
+    in the individual .csproj files.
+
+    The Version can be overridden at build time by passing /p:Version=x.y.z
+    (done automatically by the GitHub Actions publish workflow).
+  -->
+  <PropertyGroup>
+    <Authors>Eight-Bot, Inc.; Michael Stonis</Authors>
+    <Company>Eight-Bot, Inc.</Company>
+    <Copyright>Copyright © Eight-Bot, Inc. $([System.DateTime]::UtcNow.Year)</Copyright>
+
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/TheEightBot/MintedTextEditor</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/TheEightBot/MintedTextEditor</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- Embed the README in every package (path relative to each project) -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- NuGet package icon -->
+    <PackageIcon>logo.png</PackageIcon>
+
+    <!-- Deterministic builds for reproducibility -->
+    <Deterministic>true</Deterministic>
+
+    <!-- Embed portable PDB in the package for source-link / debugging -->
+    <DebugType>portable</DebugType>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+
+    <!-- Enable SourceLink for GitHub -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- Include README and icon in every package -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\"/>
+    <None Include="$(MSBuildThisFileDirectory)images/logo.png" Pack="true" PackagePath="\"/>
+  </ItemGroup>
+
+  <!-- SourceLink for GitHub (requires Microsoft.SourceLink.GitHub package) -->
+  <ItemGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All"/>
+  </ItemGroup>
+</Project>

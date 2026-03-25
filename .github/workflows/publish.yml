@@ -1,0 +1,251 @@
+name: Publish
+
+"on":
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (e.g. 1.2.3 or 1.2.3-preview.1)'
+        required: true
+
+jobs:
+  # ── Job 1: Pack Core & SkiaSharp ────────────────────────────────────────────
+  pack-core:
+    name: Pack Core & SkiaSharp
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # required for SourceLink
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Restore
+        run: |
+          dotnet restore src/MintedTextEditor.Core/
+          dotnet restore src/MintedTextEditor.SkiaSharp/
+
+      - name: Build
+        run: |
+          dotnet build src/MintedTextEditor.Core/ --no-restore --configuration Release /p:Version=${{ steps.version.outputs.version }}
+          dotnet build src/MintedTextEditor.SkiaSharp/ --no-restore --configuration Release /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack Core
+        run: >
+          dotnet pack src/MintedTextEditor.Core/MintedTextEditor.Core.csproj
+          --no-build
+          --configuration Release
+          /p:Version=${{ steps.version.outputs.version }}
+          --include-symbols
+          -p:SymbolPackageFormat=snupkg
+          --output ./packages
+
+      - name: Pack SkiaSharp
+        run: >
+          dotnet pack src/MintedTextEditor.SkiaSharp/MintedTextEditor.SkiaSharp.csproj
+          --no-build
+          --configuration Release
+          /p:Version=${{ steps.version.outputs.version }}
+          --include-symbols
+          -p:SymbolPackageFormat=snupkg
+          --output ./packages
+
+      - name: Upload .nupkg artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-core
+          path: ./packages/*.nupkg
+
+      - name: Upload .snupkg artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: symbol-packages-core
+          path: ./packages/*.snupkg
+
+  # ── Job 2: Pack MAUI ────────────────────────────────────────────────────────
+  pack-maui:
+    name: Pack MAUI
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache MAUI workloads
+        uses: actions/cache@v4
+        id: maui-cache
+        with:
+          path: |
+            ~/.dotnet/workloads
+            ~/.nuget/packages
+          key: maui-workloads-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: maui-workloads-${{ runner.os }}-
+
+      - name: Install MAUI workloads
+        if: steps.maui-cache.outputs.cache-hit != 'true'
+        run: dotnet workload install maui --source https://api.nuget.org/v3/index.json
+
+      - name: Restore
+        run: dotnet restore src/MintedTextEditor.Maui/
+
+      - name: Build
+        run: >
+          dotnet build src/MintedTextEditor.Maui/
+          --no-restore
+          --configuration Release
+          /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack MAUI
+        run: >
+          dotnet pack src/MintedTextEditor.Maui/MintedTextEditor.Maui.csproj
+          --no-build
+          --configuration Release
+          /p:Version=${{ steps.version.outputs.version }}
+          --include-symbols
+          -p:SymbolPackageFormat=snupkg
+          --output ./packages
+
+      - name: Upload .nupkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-maui
+          path: ./packages/*.nupkg
+
+      - name: Upload .snupkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: symbol-packages-maui
+          path: ./packages/*.snupkg
+
+  # ── Job 3: Publish to NuGet.org ─────────────────────────────────────────────
+  publish-nuget:
+    name: Publish to NuGet.org
+    needs: [pack-core, pack-maui]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Core packages
+        uses: actions/download-artifact@v4
+        with:
+          name: packages-core
+          path: ./packages
+
+      - name: Download MAUI packages
+        uses: actions/download-artifact@v4
+        with:
+          name: packages-maui
+          path: ./packages
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Push to NuGet.org
+        run: >
+          dotnet nuget push "./packages/*.nupkg"
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+  # ── Job 4: Create GitHub Release ────────────────────────────────────────────
+  create-release:
+    name: Create GitHub Release
+    needs: [pack-core, pack-maui]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Resolve version and tag
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VER="${{ github.event.inputs.version }}"
+            echo "version=${VER}" >> "$GITHUB_OUTPUT"
+            echo "tag=v${VER}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download Core packages
+        uses: actions/download-artifact@v4
+        with:
+          name: packages-core
+          path: ./packages
+
+      - name: Download MAUI packages
+        uses: actions/download-artifact@v4
+        with:
+          name: packages-maui
+          path: ./packages
+
+      - name: Create release and attach packages
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const version = '${{ steps.version.outputs.version }}';
+            const tag = '${{ steps.version.outputs.tag }}';
+            const isPreRelease = version.includes('-');
+
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `MintedTextEditor v${version}`,
+              generate_release_notes: true,
+              draft: false,
+              prerelease: isPreRelease,
+            });
+
+            const packagesDir = './packages';
+            const nupkgs = fs.readdirSync(packagesDir).filter(f => f.endsWith('.nupkg'));
+            for (const file of nupkgs) {
+              const filePath = path.join(packagesDir, file);
+              const data = fs.readFileSync(filePath);
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.data.id,
+                name: file,
+                data: data,
+                headers: { 'content-type': 'application/zip' },
+              });
+            }
