@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/logo.png" alt="MintedTextEditor logo" width="120" />
+</p>
+
 # MintedTextEditor
 
 [![CI](https://github.com/TheEightBot/MintedTextEditor/actions/workflows/ci.yml/badge.svg)](https://github.com/TheEightBot/MintedTextEditor/actions/workflows/ci.yml)
