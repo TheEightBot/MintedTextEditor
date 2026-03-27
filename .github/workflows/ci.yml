@@ -90,19 +90,8 @@ jobs:
         with:
           dotnet-version: '10.x'
 
-      - name: Cache MAUI workloads
-        uses: actions/cache@v4
-        id: maui-cache
-        with:
-          path: |
-            ~/.dotnet/workloads
-            ~/.nuget/packages
-          key: maui-workloads-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
-          restore-keys: maui-workloads-${{ runner.os }}-
-
       - name: Install MAUI workloads
-        if: steps.maui-cache.outputs.cache-hit != 'true'
-        run: dotnet workload install maui --source https://api.nuget.org/v3/index.json
+        run: dotnet workload restore src/MintedTextEditor.Maui/MintedTextEditor.Maui.csproj
 
       - name: Restore
         run: dotnet restore src/MintedTextEditor.Maui/
