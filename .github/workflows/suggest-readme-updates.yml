@@ -1,0 +1,202 @@
+name: Suggest README Updates
+
+# Triggers on any push to main that touches source files.
+# Skips documentation-only changes since those wouldn't affect what needs documenting.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'samples/**'
+
+permissions:
+  contents: read   # read source files and README
+  issues: write    # create / comment on suggestion issues
+  models: read     # access GitHub Models API
+
+jobs:
+  suggest-readme-updates:
+    name: Suggest README Updates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed to diff against the previous commit
+
+      - name: Analyze commits and generate suggestions
+        uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+
+            // ── 1. Gather commit context ──────────────────────────────────────
+
+            // Commits on this push (exclude merge commits for noise reduction)
+            const commitMessages = execSync(
+              'git log --no-merges --format="%h %s" ${{ github.event.before }}..HEAD'
+            ).toString().trim();
+
+            // File-level diff stat (what changed, not the full patch)
+            const diffStat = execSync(
+              'git diff --stat ${{ github.event.before }}..HEAD -- src/ tests/ samples/'
+            ).toString().trim();
+
+            // Focused patch for public API surface: only .cs files that are NOT tests
+            // Limit to ~200 lines to stay within model token limits
+            const rawPatch = execSync(
+              'git diff ${{ github.event.before }}..HEAD -- "src/**/*.cs" | head -n 200'
+            ).toString().trim();
+
+            if (!commitMessages) {
+              console.log('No non-merge commits found in this push — skipping.');
+              return;
+            }
+
+            // ── 2. Read current README ────────────────────────────────────────
+            const readme = fs.readFileSync('README.md', 'utf8');
+            // Truncate to ~8 000 chars so the prompt stays manageable
+            const readmeSummary = readme.length > 8000
+              ? readme.slice(0, 8000) + '\n... (truncated)'
+              : readme;
+
+            // ── 3. Call GitHub Models API ─────────────────────────────────────
+            const apiUrl = 'https://models.inference.ai.azure.com/chat/completions';
+
+            const systemPrompt = [
+              'You are an expert technical writer maintaining documentation for an open-source',
+              '.NET MAUI rich text editor library (MintedTextEditor).',
+              'Your job is to review recent code changes and propose targeted, actionable updates',
+              'to the project README. Focus only on user-visible functionality — new features,',
+              'changed APIs, removed features, or updated usage examples.',
+              'Do NOT suggest changes for internal refactors, test changes, or CI fixes.',
+              'Format your response in Markdown.',
+            ].join(' ');
+
+            const userPrompt = `## Recent commits
+            ${commitMessages}
+
+            ## Files changed (stat)
+            ${diffStat || '(none)'}
+
+            ## Public API patch (first 200 lines)
+            \`\`\`diff
+            ${rawPatch || '(no source diff)'}
+            \`\`\`
+
+            ## Current README (may be truncated)
+            ${readmeSummary}
+
+            ---
+            Based on the above, please provide:
+            1. **Summary of user-visible changes** – one or two sentences describing what changed from a user perspective.
+            2. **Suggested README edits** – for each edit, quote the existing text (or say "new section") and provide the proposed replacement or addition. If no documentation update is warranted, say so clearly.`;
+
+            const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: 'gpt-4o',
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user',   content: userPrompt   },
+                ],
+                max_tokens: 2048,
+                temperature: 0.2,
+              }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+              core.setFailed(`GitHub Models API error (${response.status}): ${JSON.stringify(data)}`);
+              return;
+            }
+
+            const suggestions = data.choices?.[0]?.message?.content;
+            if (!suggestions) {
+              core.setFailed('Unexpected empty response from model.');
+              return;
+            }
+
+            // ── 4. Post suggestions as a GitHub Issue ─────────────────────────
+            const shortSha  = context.sha.slice(0, 7);
+            const runUrl    = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const compareUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/compare/${{ github.event.before }}...${context.sha}`;
+
+            const label = 'readme-suggestions';
+
+            // Ensure the label exists (create it if not)
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                name:  label,
+              });
+            } catch {
+              await github.rest.issues.createLabel({
+                owner:       context.repo.owner,
+                repo:        context.repo.repo,
+                name:        label,
+                color:       '0075ca',
+                description: 'AI-generated README update suggestions',
+              });
+            }
+
+            // Look for an existing open issue to append to (avoid issue spam)
+            const existing = await github.rest.issues.listForRepo({
+              owner:  context.repo.owner,
+              repo:   context.repo.repo,
+              state:  'open',
+              labels: label,
+              per_page: 1,
+            });
+
+            const commentBody = [
+              `### Suggestions for [\`${shortSha}\`](${compareUrl})`,
+              '',
+              suggestions,
+              '',
+              `---`,
+              `*Generated by [workflow run](${runUrl}) · ${new Date().toUTCString()}*`,
+            ].join('\n');
+
+            if (existing.data.length > 0) {
+              // Append a comment to the existing tracking issue
+              const issueNumber = existing.data[0].number;
+              await github.rest.issues.createComment({
+                owner:        context.repo.owner,
+                repo:         context.repo.repo,
+                issue_number: issueNumber,
+                body:         commentBody,
+              });
+              console.log(`Appended suggestions to existing issue #${issueNumber}`);
+            } else {
+              // Create a new issue
+              const issueBody = [
+                'This issue tracks AI-generated suggestions for keeping the README in sync with',
+                'recent changes to `main`. Each comment below corresponds to one push.',
+                'Review the suggestions, apply what makes sense, then close this issue.',
+                '',
+                '---',
+                '',
+                commentBody,
+              ].join('\n');
+
+              const issue = await github.rest.issues.create({
+                owner:  context.repo.owner,
+                repo:   context.repo.repo,
+                title:  `📝 README update suggestions`,
+                body:   issueBody,
+                labels: [label],
+              });
+              console.log(`Created issue #${issue.data.number}: ${issue.data.html_url}`);
+            }
