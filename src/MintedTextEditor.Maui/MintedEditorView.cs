@@ -4,6 +4,7 @@ using MintedTextEditor.Core.Editing;
 using MintedTextEditor.Core.Events;
 using MintedTextEditor.Core.Formatting;
 using MintedTextEditor.Core.Html;
+using MintedTextEditor.Core.Markdown;
 using MintedTextEditor.Core.Input;
 using MintedTextEditor.Core.Layout;
 using MintedTextEditor.Core.Rendering;
@@ -726,6 +727,33 @@ public class MintedEditorView : ContentView
     public void AppendHtml(string html)
     {
         _document.AppendHtml(html);
+        InvalidateCanvas();
+    }
+
+    /// <summary>Exports the entire document as a Markdown string.</summary>
+    public string GetMarkdown(MarkdownExportOptions? options = null) => _document.GetMarkdown(options);
+
+    /// <summary>Replaces document content with the parsed Markdown.</summary>
+    public void LoadMarkdown(string markdown)
+    {
+        var imported = new MarkdownImporter().Import(markdown);
+        _document.Blocks.Clear();
+        foreach (var block in imported.Blocks)
+            _document.AddBlock(block);
+        if (_document.Blocks.Count == 0)
+            _document.AddBlock(new Paragraph());
+
+        _document.NotifyChanged(
+            new DocumentChangedEventArgs(DocumentChangeType.TextInserted, TextRange.Empty));
+        _inputController.Selection.CollapseTo(new DocumentPosition(0, 0, 0));
+        _caret.Position = new DocumentPosition(0, 0, 0);
+        InvalidateCanvas();
+    }
+
+    /// <summary>Appends the parsed Markdown at the end of the current document.</summary>
+    public void AppendMarkdown(string markdown)
+    {
+        _document.AppendMarkdown(markdown);
         InvalidateCanvas();
     }
 

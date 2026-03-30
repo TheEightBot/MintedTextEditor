@@ -43,6 +43,13 @@
             Route="HtmlInterop" />
     </FlyoutItem>
 
+    <FlyoutItem Title="Markdown Interop" Icon="code.png">
+        <ShellContent
+            Title="Markdown Interop"
+            ContentTemplate="{DataTemplate pages:MarkdownInteropPage}"
+            Route="MarkdownInterop" />
+    </FlyoutItem>
+
     <FlyoutItem Title="Theming" Icon="paint.png">
         <ShellContent
             Title="Theming"
