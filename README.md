@@ -40,7 +40,7 @@ MintedTextEditor is organized into three packages:
 - Toolbar and command architecture with customizable item sets.
 - Three built-in toolbar icon packs (Lucide, Heroicons, Material Symbols) — all embedded in the `MintedTextEditor.Core` package, no app-bundle asset setup required.
 - Theme-aware toolbar icons: automatically recolored to the current theme's foreground at draw time, including full dark-mode support.
-- HTML import/export pipeline.
+- HTML and Markdown import/export pipelines, including support for GitHub Flavored Markdown (GFM).
 - Theming support (light, dark, high contrast, and custom styles).
 - Accessibility and localization support including RTL scenarios.
 
@@ -112,12 +112,26 @@ Editor.LoadHtml("<p>Hello <strong>world</strong></p>");
 string html = Editor.GetHtml();
 ```
 
+### 5) Load or export Markdown
+
+```csharp
+using MintedTextEditor.Core.Markdown;
+
+// Load a document from Markdown
+var document = EditorDocumentExtensions.LoadMarkdown("# Hello World\nThis is a paragraph.");
+
+// Export the current document to a Markdown string
+var markdown = editor.Document.GetMarkdown();
+```
+
+For full import/export options, including GitHub Flavored Markdown (GFM) support, see [docs/markdown-interop.md](docs/markdown-interop.md).
+
 ## Sample App
 
 The repository includes a runnable MAUI sample with focused pages for:
 - basic editing
 - formatting
-- load/save and HTML
+- load/save, HTML, and Markdown
 - images and hyperlinks
 - tables
 - localization
@@ -152,6 +166,39 @@ Editor.ToolbarIconPack = ToolbarIconPack.MaterialSymbols;
 
 All icons are rendered with black ink and recolored at draw time using `SKColorFilter` (SrcIn) to match the current theme color. Switching between light and dark themes updates icon colors automatically without reloading assets.
 
+### Markdown Interop
+
+#### Import Markdown
+You can load Markdown content into the editor using the `LoadMarkdown` or `AppendMarkdown` methods:
+```csharp
+using MintedTextEditor.Core.Markdown;
+
+// Load a new document from Markdown
+var document = EditorDocumentExtensions.LoadMarkdown("# Hello World\nThis is a paragraph.");
+
+// Append Markdown to an existing document
+editor.Document.AppendMarkdown("## Subheading\nAnother paragraph.");
+```
+
+#### Export Markdown
+Export the current document to a Markdown string:
+```csharp
+using MintedTextEditor.Core.Markdown;
+
+var markdown = editor.Document.GetMarkdown();
+```
+
+#### Export Options
+Customize the Markdown export behavior using the `MarkdownExportOptions` class:
+```csharp
+var options = new MarkdownExportOptions
+{
+    UseGfmExtensions = true, // Enable GitHub Flavored Markdown (default: true)
+    LineEnding = "\r\n"      // Customize line endings (default: "\n")
+};
+var markdown = editor.Document.GetMarkdown(options);
+```
+
 ### Events
 
 ```csharp
@@ -173,6 +220,7 @@ For deeper API details, see [docs/getting-started.md](docs/getting-started.md), 
 | [Theming](docs/theming.md) | Built-in and custom themes |
 | [Commands & Events](docs/commands-events.md) | Command and event reference |
 | [HTML Interop](docs/html-interop.md) | HTML import/export behavior |
+| [Markdown Interop](docs/markdown-interop.md) | Markdown import/export behavior |
 | [Images & Hyperlinks](docs/images-hyperlinks.md) | Inline media and links |
 | [Tables](docs/tables.md) | Table creation and editing |
 | [Accessibility](docs/accessibility.md) | Accessibility guidance |
