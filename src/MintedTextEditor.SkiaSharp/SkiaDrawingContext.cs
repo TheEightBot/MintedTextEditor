@@ -291,6 +291,20 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
     // measure each segment with an SKFont built on its own typeface. A matched color-emoji
     // typeface renders color glyphs automatically and ignores the paint's color, so no
     // SKColorFilter is ever applied; the run's paint is reused unchanged for every segment.
+    //
+    // Segmentation is GRAPHEME-CLUSTER aware. Multi-code-point sequences such as
+    //   base + U+FE0F (variation selector-16, emoji presentation)
+    //   base + skin-tone modifier (U+1F3FB–U+1F3FF)
+    //   ZWJ sequences (U+200D between emoji)
+    //   regional-indicator letter pairs (flags)
+    //   enclosing keycap (U+20E3)
+    //   general Unicode combining marks (categories Mn / Me / Mc)
+    // are always kept together in one cluster so no combining/modifier/selector code
+    // point ever ends up in its own segment. When rendered alone such code points have
+    // no glyph and produce .notdef boxes. The cluster is drawn with the base code point
+    // only (variation selectors and other zero-width formatting code points are stripped
+    // from the drawn string) because color emoji fonts map the color glyph to the BASE
+    // code point — U+FE0F is merely a presentation hint.
 
     /// <summary>
     /// Draws <paramref name="text"/> starting at the baseline point
@@ -308,15 +322,15 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         }
 
         float penX = x;
-        foreach (var (segment, font) in SegmentByTypeface(text, primaryFont, editorPaint))
+        foreach (var (drawString, font) in SegmentByTypeface(text, primaryFont, editorPaint))
         {
             // The run's paint is reused for every segment. Color-emoji typefaces carry their
             // own color tables and ignore the paint's color (verified: an emoji drawn with a
             // red paint still renders in its native colors), while monochrome fallback glyphs
             // (e.g. CJK from a system font) correctly honour the requested color. No
             // SKColorFilter is applied to either.
-            _canvas.DrawText(segment, penX, y, SKTextAlign.Left, font, paint);
-            penX += font.MeasureText(segment, paint);
+            _canvas.DrawText(drawString, penX, y, SKTextAlign.Left, font, paint);
+            penX += font.MeasureText(drawString, paint);
         }
     }
 
@@ -330,8 +344,8 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
             return primaryFont.MeasureText(text, paint);
 
         float width = 0f;
-        foreach (var (segment, font) in SegmentByTypeface(text, primaryFont, editorPaint))
-            width += font.MeasureText(segment, paint);
+        foreach (var (drawString, font) in SegmentByTypeface(text, primaryFont, editorPaint))
+            width += font.MeasureText(drawString, paint);
 
         return width;
     }
@@ -354,52 +368,207 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         return true;
     }
 
+    // ── Grapheme-cluster helpers ──────────────────────────────────
+
     /// <summary>
-    /// Splits <paramref name="text"/> into consecutive segments, each tagged with the SKFont that
-    /// can render it. Consecutive code points that resolve to the same typeface are grouped
-    /// into one segment. Surrogate pairs are handled atomically so emoji are never split.
+    /// Returns <c>true</c> when <paramref name="codePoint"/> is a cluster-extending
+    /// code point — it must always be attached to the preceding base and must never
+    /// start a new segment or be drawn as a standalone glyph.
     /// </summary>
-    private List<(string Segment, SKFont Font)> SegmentByTypeface(
+    private static bool IsClusterExtender(int codePoint)
+    {
+        // Variation selectors (text/emoji presentation selectors U+FE00–U+FE0F)
+        if (codePoint is >= 0xFE00 and <= 0xFE0F) return true;
+        // Zero-width joiner (joins emoji in ZWJ sequences like 👨‍👩‍👧)
+        if (codePoint == 0x200D) return true;
+        // Emoji skin-tone modifiers (Fitzpatrick scale U+1F3FB–U+1F3FF)
+        if (codePoint is >= 0x1F3FB and <= 0x1F3FF) return true;
+        // Combining enclosing keycap (e.g. 1️⃣ = '1' + VS16 + U+20E3)
+        if (codePoint == 0x20E3) return true;
+        // General Unicode combining marks (Mn = Non-spacing, Me = Enclosing, Mc = Spacing combining)
+        var cat = char.GetUnicodeCategory(char.ConvertFromUtf32(codePoint), 0);
+        return cat is System.Globalization.UnicodeCategory.NonSpacingMark
+                   or System.Globalization.UnicodeCategory.EnclosingMark
+                   or System.Globalization.UnicodeCategory.SpacingCombiningMark;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="codePoint"/> is a zero-width formatting
+    /// code point that should be stripped from the drawn string (the underlying glyph in
+    /// a color-emoji font is addressed by the base code point alone; these are hints only).
+    /// </summary>
+    private static bool IsZeroWidthFormatting(int codePoint)
+    {
+        // Variation selectors U+FE00–U+FE0F
+        if (codePoint is >= 0xFE00 and <= 0xFE0F) return true;
+        // Zero-width joiner
+        if (codePoint == 0x200D) return true;
+        // Zero-width non-joiner
+        if (codePoint == 0x200C) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="codePoint"/> is a Regional Indicator letter
+    /// (U+1F1E6–U+1F1FF) used to form flag emoji pairs.
+    /// </summary>
+    private static bool IsRegionalIndicator(int codePoint)
+        => codePoint is >= 0x1F1E6 and <= 0x1F1FF;
+
+    /// <summary>
+    /// Collects a full grapheme cluster starting at <paramref name="index"/> in
+    /// <paramref name="text"/> and returns the number of UTF-16 chars consumed.
+    /// The cluster always contains at least one code point (the base); cluster-extending
+    /// code points that immediately follow are absorbed. Regional-indicator letters are
+    /// paired so flag emoji stay together.
+    /// <para/>
+    /// <paramref name="hasEmojiPresentation"/> is set to <c>true</c> when the cluster
+    /// contains U+FE0F (VARIATION SELECTOR-16), indicating the base should be rendered
+    /// with the emoji (color) typeface even if the primary font has a monochrome glyph.
+    /// </summary>
+    private static int ReadGraphemeCluster(string text, int index,
+        out bool hasEmojiPresentation)
+    {
+        hasEmojiPresentation = false;
+        int start = index;
+
+        // Consume the base code point
+        int baseCodePoint = NextCodePoint(text, index, out int baseCharCount);
+        index += baseCharCount;
+
+        // Regional-indicator pair: consume exactly one more RI if present
+        if (IsRegionalIndicator(baseCodePoint))
+        {
+            if (index < text.Length)
+            {
+                int next = NextCodePoint(text, index, out int nextCount);
+                if (IsRegionalIndicator(next))
+                    index += nextCount;
+            }
+            return index - start;
+        }
+
+        // Consume any trailing cluster-extending code points
+        while (index < text.Length)
+        {
+            int extender = NextCodePoint(text, index, out int extCount);
+            if (!IsClusterExtender(extender))
+                break;
+            if (extender == 0xFE0F)
+                hasEmojiPresentation = true;
+            index += extCount;
+        }
+
+        return index - start;
+    }
+
+    /// <summary>
+    /// Strips zero-width formatting code points (variation selectors, ZWJ, ZWNJ) from
+    /// <paramref name="cluster"/> and returns the drawable string. For color-emoji fonts
+    /// the color glyph is indexed by the base code point; VS16 / ZWJ are hints only and
+    /// produce .notdef when drawn directly.
+    /// </summary>
+    private static string StripZeroWidthFormatting(string cluster)
+    {
+        // Fast path: scan first before allocating
+        bool needsStrip = false;
+        for (int i = 0; i < cluster.Length;)
+        {
+            int cp = NextCodePoint(cluster, i, out int cc);
+            if (IsZeroWidthFormatting(cp)) { needsStrip = true; break; }
+            i += cc;
+        }
+        if (!needsStrip) return cluster;
+
+        var sb = new System.Text.StringBuilder(cluster.Length);
+        for (int i = 0; i < cluster.Length;)
+        {
+            int cp = NextCodePoint(cluster, i, out int cc);
+            if (!IsZeroWidthFormatting(cp))
+                sb.Append(cluster, i, cc);
+            i += cc;
+        }
+        return sb.ToString();
+    }
+
+    // ── Segmentation ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Splits <paramref name="text"/> into consecutive drawable segments, each tagged with
+    /// the <see cref="SKFont"/> that should render it.
+    /// <para/>
+    /// Segmentation is grapheme-cluster aware: combining/modifier/variation-selector code
+    /// points are always grouped with their base cluster and never produce standalone
+    /// segments. When a cluster contains U+FE0F (emoji presentation selector) the whole
+    /// cluster is resolved against the emoji fallback typeface so color rendering is
+    /// preferred even if the primary font has a monochrome glyph for the base. Zero-width
+    /// formatting code points (VS, ZWJ) are stripped from the drawn string because
+    /// color-emoji fonts address their color glyph via the base code point alone.
+    /// </summary>
+    private List<(string DrawString, SKFont Font)> SegmentByTypeface(
         string text, SKFont primaryFont, EditorPaint editorPaint)
     {
         var segments = new List<(string, SKFont)>();
         var primaryTypeface = primaryFont.Typeface;
         float size = primaryFont.Size;
 
-        int segmentStart = 0;
         SKFont? currentFont = null;
+        var currentDraw = new System.Text.StringBuilder();
 
         int i = 0;
         while (i < text.Length)
         {
-            int codePoint = NextCodePoint(text, i, out int charCount);
+            // Read a full grapheme cluster (base + any combining/modifier/selector code points)
+            int clusterLen = ReadGraphemeCluster(text, i, out bool hasEmojiPresentation);
+            string clusterRaw = text.Substring(i, clusterLen);
+            string clusterDraw = StripZeroWidthFormatting(clusterRaw);
 
-            // Resolve the font for this code point: prefer the primary typeface, else
-            // fall back to a system typeface that contains the glyph. When no fallback is
-            // available (e.g. a CI host with no emoji font) keep the primary font so the
-            // segment still measures/draws — as .notdef — rather than vanishing.
-            SKFont resolvedFont =
-                primaryTypeface.GetGlyph(codePoint) != 0
-                    ? primaryFont
-                    : GetFallbackFont(editorPaint, codePoint, size) ?? primaryFont;
+            // Resolve which font to use for this cluster.
+            // If the cluster carries U+FE0F we force the emoji fallback typeface (color) even
+            // when the primary typeface has a monochrome glyph for the base code point.
+            int baseCodePoint = NextCodePoint(clusterRaw, 0, out _);
+            SKFont resolvedFont;
+            if (hasEmojiPresentation)
+            {
+                // Force emoji (color) typeface for variation-selector clusters.
+                // Fall back to primary if no emoji font is installed (e.g. CI host).
+                resolvedFont = GetFallbackFont(editorPaint, baseCodePoint, size) ?? primaryFont;
+            }
+            else if (primaryTypeface.GetGlyph(baseCodePoint) != 0)
+            {
+                resolvedFont = primaryFont;
+            }
+            else
+            {
+                resolvedFont = GetFallbackFont(editorPaint, baseCodePoint, size) ?? primaryFont;
+            }
 
             if (currentFont is null)
             {
                 currentFont = resolvedFont;
+                currentDraw.Append(clusterDraw);
             }
-            else if (!ReferenceEquals(resolvedFont, currentFont))
+            else if (ReferenceEquals(resolvedFont, currentFont))
             {
-                // Typeface changed — flush the accumulated segment.
-                segments.Add((text[segmentStart..i], currentFont));
-                segmentStart = i;
+                // Same font — accumulate into current segment
+                currentDraw.Append(clusterDraw);
+            }
+            else
+            {
+                // Font changed — flush the accumulated segment
+                if (currentDraw.Length > 0)
+                    segments.Add((currentDraw.ToString(), currentFont));
                 currentFont = resolvedFont;
+                currentDraw.Clear();
+                currentDraw.Append(clusterDraw);
             }
 
-            i += charCount;
+            i += clusterLen;
         }
 
-        if (currentFont is not null && segmentStart < text.Length)
-            segments.Add((text[segmentStart..], currentFont));
+        // Flush the final segment
+        if (currentFont is not null && currentDraw.Length > 0)
+            segments.Add((currentDraw.ToString(), currentFont));
 
         return segments;
     }
@@ -486,20 +655,23 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
         if (available <= 0) return ellipsis;
 
-        // Walk code points (not UTF-16 chars) so a surrogate pair — e.g. an emoji — is
-        // never split mid-pair, and measure with font fallback so widths match what is
-        // drawn. Accumulate code points greedily until the next one would overflow.
+        // Walk grapheme clusters so multi-code-point sequences (emoji + VS16, skin-tone
+        // modifiers, ZWJ sequences) are never split mid-cluster, and measure with font
+        // fallback so widths match what is drawn. Accumulate clusters greedily until the
+        // next one would overflow.
         int cut = 0;
         float consumed = 0f;
         int i = 0;
         while (i < text.Length)
         {
-            int charCount = char.IsSurrogatePair(text, i) ? 2 : 1;
-            float w = MeasureSegmented(text.Substring(i, charCount), font, paint, editorPaint);
+            int clusterLen = ReadGraphemeCluster(text, i, out _);
+            string clusterRaw = text.Substring(i, clusterLen);
+            string clusterDraw = StripZeroWidthFormatting(clusterRaw);
+            float w = MeasureSegmented(clusterDraw, font, paint, editorPaint);
             if (consumed + w > available)
                 break;
             consumed += w;
-            i += charCount;
+            i += clusterLen;
             cut = i;
         }
 
