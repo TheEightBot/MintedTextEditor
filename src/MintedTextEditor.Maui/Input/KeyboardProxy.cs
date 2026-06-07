@@ -16,6 +16,28 @@ internal sealed class KeyboardProxy : View
     /// <summary>Raised when a navigation or editing key is pressed.</summary>
     public event EventHandler<EditorKeyEventArgs>? KeyDown;
 
+    /// <summary>
+    /// Raised when the editor wants the platform soft keyboard shown.
+    /// The platform handler subscribes to this and brings up the IME.
+    /// </summary>
+    internal event EventHandler? ShowKeyboardRequested;
+
+    /// <summary>
+    /// Raised when the editor wants the platform soft keyboard hidden.
+    /// </summary>
+    internal event EventHandler? HideKeyboardRequested;
+
     internal void RaiseTextInput(string text) => TextInput?.Invoke(this, text);
     internal void RaiseKeyDown(EditorKeyEventArgs args) => KeyDown?.Invoke(this, args);
+
+    /// <summary>
+    /// Requests that the platform soft keyboard be shown. Unlike <see cref="View.Focus"/>,
+    /// this also re-shows the keyboard when the proxy already holds focus (e.g. the user
+    /// dismissed the keyboard with the back button and then tapped the editor again).
+    /// No-op on platforms whose handler does not subscribe.
+    /// </summary>
+    internal void ShowKeyboard() => ShowKeyboardRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>Requests that the platform soft keyboard be hidden.</summary>
+    internal void HideKeyboard() => HideKeyboardRequested?.Invoke(this, EventArgs.Empty);
 }

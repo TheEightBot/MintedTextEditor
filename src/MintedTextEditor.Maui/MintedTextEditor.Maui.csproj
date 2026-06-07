@@ -23,6 +23,21 @@
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 	</PropertyGroup>
 
+	<!--
+		KeyboardProxyHandler is split into one partial file per platform. Each file
+		compiles only for its target platform; iOS and Mac Catalyst share the
+		.Apple.cs file. (EnableDefaultCompileItems includes each file once; these
+		conditional Removes exclude it from the platforms it doesn't target.)
+	-->
+	<ItemGroup>
+		<Compile Remove="Input/KeyboardProxyHandler.Apple.cs"
+		         Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'ios' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'maccatalyst'" />
+		<Compile Remove="Input/KeyboardProxyHandler.Android.cs"
+		         Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'android'" />
+		<Compile Remove="Input/KeyboardProxyHandler.Windows.cs"
+		         Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'windows'" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="SkiaSharp.Views.Maui.Controls" Version="3.119.2" />

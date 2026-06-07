@@ -1241,6 +1241,9 @@ public class MintedEditorView : ContentView
                 _caret.ResetBlink();
                 _inputController.Selection.CollapseTo(hitPosition);
                 _keyboardProxy.Focus();
+                // Bring up the soft keyboard on tap. ShowKeyboard() re-shows it even when
+                // the proxy already holds focus (e.g. dismissed via the back button).
+                _keyboardProxy.ShowKeyboard();
                 InvalidateCanvas();
                 RaiseSelectionChanged();
                 break;
@@ -1399,6 +1402,7 @@ public class MintedEditorView : ContentView
     public new bool Focus()
     {
         _keyboardProxy.Focus();
+        _keyboardProxy.ShowKeyboard();
         var result = base.Focus();
         EditorFocusChanged?.Invoke(this, new FocusChangedEventArgs(true));
         return result;
@@ -1406,6 +1410,7 @@ public class MintedEditorView : ContentView
 
     public new void Unfocus()
     {
+        _keyboardProxy.HideKeyboard();
         base.Unfocus();
         EditorFocusChanged?.Invoke(this, new FocusChangedEventArgs(false));
     }
