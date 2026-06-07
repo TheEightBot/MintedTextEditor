@@ -101,6 +101,137 @@ public class TextInputTests
         Assert.Equal("Courier New", inserted.Style.FontFamily);
     }
 
+    // ── HandleTextInput with newlines (Android soft-keyboard Enter) ────
+
+    [Fact]
+    public void HandleTextInput_LoneNewline_SplitsBlockAtCaret()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("HelloWorld"));
+        caret.MoveTo(new DocumentPosition(0, 0, 5));
+
+        ctrl.HandleTextInput("\n", doc);
+
+        Assert.Equal(2, doc.Blocks.Count);
+        Assert.Equal("Hello", doc.Blocks[0].GetText());
+        Assert.Equal("World", doc.Blocks[1].GetText());
+        Assert.Equal(new DocumentPosition(1, 0, 0), caret.Position);
+        Assert.True(ctrl.Selection.IsEmpty);
+    }
+
+    [Fact]
+    public void HandleTextInput_NewlineAtBlockEnd_CreatesEmptyBlock()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("Hello"));
+        caret.MoveTo(new DocumentPosition(0, 0, 5));
+
+        ctrl.HandleTextInput("\n", doc);
+
+        Assert.Equal(2, doc.Blocks.Count);
+        Assert.Equal("Hello", doc.Blocks[0].GetText());
+        Assert.Equal("", doc.Blocks[1].GetText());
+        Assert.Equal(new DocumentPosition(1, 0, 0), caret.Position);
+    }
+
+    [Fact]
+    public void HandleTextInput_TextWithNewline_SplitsIntoParagraphs()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para(""));
+        caret.MoveTo(new DocumentPosition(0, 0, 0));
+
+        ctrl.HandleTextInput("Hello\nWorld", doc);
+
+        Assert.Equal(2, doc.Blocks.Count);
+        Assert.Equal("Hello", doc.Blocks[0].GetText());
+        Assert.Equal("World", doc.Blocks[1].GetText());
+        Assert.Equal(new DocumentPosition(1, 0, 5), caret.Position);
+    }
+
+    [Fact]
+    public void HandleTextInput_MultipleNewlines_CreatesMultipleBlocks()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para(""));
+        caret.MoveTo(new DocumentPosition(0, 0, 0));
+
+        ctrl.HandleTextInput("a\nb\nc", doc);
+
+        Assert.Equal(3, doc.Blocks.Count);
+        Assert.Equal("a", doc.Blocks[0].GetText());
+        Assert.Equal("b", doc.Blocks[1].GetText());
+        Assert.Equal("c", doc.Blocks[2].GetText());
+        Assert.Equal(new DocumentPosition(2, 0, 1), caret.Position);
+    }
+
+    [Fact]
+    public void HandleTextInput_ConsecutiveNewlines_CreateEmptyBlock()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para(""));
+        caret.MoveTo(new DocumentPosition(0, 0, 0));
+
+        ctrl.HandleTextInput("a\n\nb", doc);
+
+        Assert.Equal(3, doc.Blocks.Count);
+        Assert.Equal("a", doc.Blocks[0].GetText());
+        Assert.Equal("", doc.Blocks[1].GetText());
+        Assert.Equal("b", doc.Blocks[2].GetText());
+    }
+
+    [Fact]
+    public void HandleTextInput_CrLf_TreatedAsSingleSplit()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para(""));
+        caret.MoveTo(new DocumentPosition(0, 0, 0));
+
+        ctrl.HandleTextInput("Hello\r\nWorld", doc);
+
+        Assert.Equal(2, doc.Blocks.Count);
+        Assert.Equal("Hello", doc.Blocks[0].GetText());
+        Assert.Equal("World", doc.Blocks[1].GetText());
+    }
+
+    [Fact]
+    public void HandleTextInput_LoneCarriageReturn_SplitsBlock()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("HelloWorld"));
+        caret.MoveTo(new DocumentPosition(0, 0, 5));
+
+        ctrl.HandleTextInput("\r", doc);
+
+        Assert.Equal(2, doc.Blocks.Count);
+        Assert.Equal("Hello", doc.Blocks[0].GetText());
+        Assert.Equal("World", doc.Blocks[1].GetText());
+    }
+
+    [Fact]
+    public void HandleTextInput_NewlineWithSelection_ReplacesThenSplits()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("Hello World"));
+        ctrl.Selection.Set(new DocumentPosition(0, 0, 5), new DocumentPosition(0, 0, 6));
+        caret.MoveTo(new DocumentPosition(0, 0, 6));
+
+        ctrl.HandleTextInput("\n", doc);
+
+        Assert.Equal(2, doc.Blocks.Count);
+        Assert.Equal("Hello", doc.Blocks[0].GetText());
+        Assert.Equal("World", doc.Blocks[1].GetText());
+        Assert.True(ctrl.Selection.IsEmpty);
+    }
+
+    [Fact]
+    public void HandleTextInput_NewlineSplit_IsUndoable()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("HelloWorld"));
+        ctrl.UndoManager = new UndoManager();
+        caret.MoveTo(new DocumentPosition(0, 0, 5));
+
+        ctrl.HandleTextInput("\n", doc);
+        Assert.Equal(2, doc.Blocks.Count);
+
+        ctrl.UndoManager.Undo();
+
+        Assert.Equal(1, doc.Blocks.Count);
+        Assert.Equal("HelloWorld", doc.GetText());
+    }
+
     // ── Backspace ─────────────────────────────────────────────────────
 
     [Fact]
