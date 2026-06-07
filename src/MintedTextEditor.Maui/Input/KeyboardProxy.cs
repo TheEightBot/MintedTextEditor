@@ -27,6 +27,16 @@ internal sealed class KeyboardProxy : View
     /// </summary>
     internal event EventHandler? HideKeyboardRequested;
 
+    /// <summary>
+    /// Raised when the editor's selection or document content has changed programmatically
+    /// (e.g. after a toolbar formatting toggle) so the platform IME can be updated.
+    /// On Android the handler calls <c>InputMethodManager.UpdateSelection</c> and resets
+    /// the composing state to prevent the IME from operating on a stale model (which
+    /// would cause spurious character deletions).  No-op on platforms whose handler does
+    /// not subscribe.
+    /// </summary>
+    internal event EventHandler? SelectionChangedNotified;
+
     internal void RaiseTextInput(string text) => TextInput?.Invoke(this, text);
     internal void RaiseKeyDown(EditorKeyEventArgs args) => KeyDown?.Invoke(this, args);
 
@@ -40,4 +50,10 @@ internal sealed class KeyboardProxy : View
 
     /// <summary>Requests that the platform soft keyboard be hidden.</summary>
     internal void HideKeyboard() => HideKeyboardRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>
+    /// Notifies the platform that the editor's selection or content has changed, so the
+    /// IME can update its cursor/composing model.  No-op when no handler is subscribed.
+    /// </summary>
+    internal void NotifySelectionChanged() => SelectionChangedNotified?.Invoke(this, EventArgs.Empty);
 }

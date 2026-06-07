@@ -5,7 +5,7 @@ namespace MintedTextEditor.Core.Commands;
 
 // ── Toggle Bold ─────────────────────────────────────────────────────────────
 
-public sealed class ToggleBoldCommand : IEditorCommand
+public sealed class ToggleBoldCommand : ICharacterFormattingCommand
 {
     public string Name => "ToggleBold";
     public string Description => "Toggles bold formatting on the selected text.";
@@ -18,7 +18,7 @@ public sealed class ToggleBoldCommand : IEditorCommand
 
 // ── Toggle Italic ────────────────────────────────────────────────────────────
 
-public sealed class ToggleItalicCommand : IEditorCommand
+public sealed class ToggleItalicCommand : ICharacterFormattingCommand
 {
     public string Name => "ToggleItalic";
     public string Description => "Toggles italic formatting on the selected text.";
@@ -31,7 +31,7 @@ public sealed class ToggleItalicCommand : IEditorCommand
 
 // ── Toggle Underline ─────────────────────────────────────────────────────────
 
-public sealed class ToggleUnderlineCommand : IEditorCommand
+public sealed class ToggleUnderlineCommand : ICharacterFormattingCommand
 {
     public string Name => "ToggleUnderline";
     public string Description => "Toggles underline formatting on the selected text.";
@@ -44,7 +44,7 @@ public sealed class ToggleUnderlineCommand : IEditorCommand
 
 // ── Toggle Strikethrough ─────────────────────────────────────────────────────
 
-public sealed class ToggleStrikethroughCommand : IEditorCommand
+public sealed class ToggleStrikethroughCommand : ICharacterFormattingCommand
 {
     public string Name => "ToggleStrikethrough";
     public string Description => "Toggles strikethrough formatting on the selected text.";
@@ -57,7 +57,7 @@ public sealed class ToggleStrikethroughCommand : IEditorCommand
 
 // ── Toggle Subscript ─────────────────────────────────────────────────────────
 
-public sealed class ToggleSubscriptCommand : IEditorCommand
+public sealed class ToggleSubscriptCommand : ICharacterFormattingCommand
 {
     public string Name => "ToggleSubscript";
     public string Description => "Toggles subscript formatting on the selected text.";
@@ -70,7 +70,7 @@ public sealed class ToggleSubscriptCommand : IEditorCommand
 
 // ── Toggle Superscript ───────────────────────────────────────────────────────
 
-public sealed class ToggleSuperscriptCommand : IEditorCommand
+public sealed class ToggleSuperscriptCommand : ICharacterFormattingCommand
 {
     public string Name => "ToggleSuperscript";
     public string Description => "Toggles superscript formatting on the selected text.";
@@ -83,7 +83,7 @@ public sealed class ToggleSuperscriptCommand : IEditorCommand
 
 // ── Clear Formatting ─────────────────────────────────────────────────────────
 
-public sealed class ClearFormattingCommand : IEditorCommand
+public sealed class ClearFormattingCommand : ICharacterFormattingCommand
 {
     public string Name => "ClearFormatting";
     public string Description => "Removes all character formatting from the selected text.";

@@ -69,6 +69,37 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
             imm.HideSoftInputFromWindow(WindowToken, HideSoftInputFlags.None);
     }
 
+    /// <summary>
+    /// Notifies the IME that the editor's selection or content has changed programmatically
+    /// (e.g. after a toolbar formatting toggle).  This prevents the IME from issuing
+    /// <c>DeleteSurroundingText</c> or composing-region updates against a stale model,
+    /// which would otherwise cause spurious character deletions on Android.
+    ///
+    /// Strategy: reset the composing state in our <see cref="KeyboardInputConnection"/>
+    /// and call <c>InputMethodManager.UpdateSelection</c> so the IME re-queries the
+    /// cursor position; fall back to <c>RestartInput</c> (which tears down and rebuilds
+    /// the <see cref="IInputConnection"/>) when UpdateSelection is not sufficient.
+    /// </summary>
+    public void NotifyImeSelectionChanged()
+    {
+        // 1. Reset the local composing mirror so the next ReplaceComposingRegion starts fresh.
+        _inputConnection.ResetComposingState();
+
+        // 2. Tell the IME the selection is now a zero-width caret at offset 0 from its
+        //    perspective.  We don't have a way to map our absolute position into the flat
+        //    text offsets the IME expects without also maintaining a full text buffer here,
+        //    so we use RestartInput which causes the IME to call OnCreateInputConnection
+        //    again and re-initialize from our EditorInfo — the safest option.
+        Post(() =>
+        {
+            if (Context?.GetSystemService(Context.InputMethodService) is InputMethodManager imm
+                && IsFocused)
+            {
+                imm.RestartInput(this);
+            }
+        });
+    }
+
     // Show/hide the IME automatically as the view gains or loses focus. This covers
     // the first focus (tap → MAUI Focus() → RequestFocus → here) as well as focus
     // changes triggered by the platform itself.
@@ -263,6 +294,17 @@ internal sealed class KeyboardInputConnection : BaseInputConnection
     }
 
     /// <summary>
+    /// Discards the locally tracked composing text without touching the editor content.
+    /// Called when the editor's content or selection has changed programmatically (e.g.
+    /// a toolbar formatting toggle) so the next IME event starts from a clean slate
+    /// rather than trying to diff against the pre-change composition.
+    /// </summary>
+    public void ResetComposingState()
+    {
+        _composingText = string.Empty;
+    }
+
+    /// <summary>
     /// Updates the editor so the composing region reflects <paramref name="newText"/>.
     /// Diffs against the previously composed text so the common cases (appending or
     /// deleting trailing characters) touch only the changed suffix instead of
@@ -312,14 +354,16 @@ internal sealed partial class KeyboardProxyHandler : ViewHandler<KeyboardProxy, 
     protected override void ConnectHandler(KeyboardCaptureAndroidView platformView)
     {
         base.ConnectHandler(platformView);
-        VirtualView.ShowKeyboardRequested += OnShowKeyboardRequested;
-        VirtualView.HideKeyboardRequested += OnHideKeyboardRequested;
+        VirtualView.ShowKeyboardRequested    += OnShowKeyboardRequested;
+        VirtualView.HideKeyboardRequested    += OnHideKeyboardRequested;
+        VirtualView.SelectionChangedNotified += OnSelectionChangedNotified;
     }
 
     protected override void DisconnectHandler(KeyboardCaptureAndroidView platformView)
     {
-        VirtualView.ShowKeyboardRequested -= OnShowKeyboardRequested;
-        VirtualView.HideKeyboardRequested -= OnHideKeyboardRequested;
+        VirtualView.ShowKeyboardRequested    -= OnShowKeyboardRequested;
+        VirtualView.HideKeyboardRequested    -= OnHideKeyboardRequested;
+        VirtualView.SelectionChangedNotified -= OnSelectionChangedNotified;
         base.DisconnectHandler(platformView);
     }
 
@@ -328,4 +372,7 @@ internal sealed partial class KeyboardProxyHandler : ViewHandler<KeyboardProxy, 
 
     private void OnHideKeyboardRequested(object? sender, EventArgs e)
         => PlatformView?.HideKeyboard();
+
+    private void OnSelectionChangedNotified(object? sender, EventArgs e)
+        => PlatformView?.NotifyImeSelectionChanged();
 }

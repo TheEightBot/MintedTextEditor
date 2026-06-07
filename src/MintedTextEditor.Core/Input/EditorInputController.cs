@@ -174,8 +174,7 @@ public class EditorInputController
             case EditorKey.B when ctrl:
                 if (FormattingEngine != null)
                 {
-                    var bRange = _selection.Range;
-                    FormattingEngine.ToggleBold(document, bRange);
+                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleBold(document, r));
                     return true;
                 }
                 return false;
@@ -183,8 +182,7 @@ public class EditorInputController
             case EditorKey.I when ctrl:
                 if (FormattingEngine != null)
                 {
-                    var iRange = _selection.Range;
-                    FormattingEngine.ToggleItalic(document, iRange);
+                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleItalic(document, r));
                     return true;
                 }
                 return false;
@@ -192,8 +190,7 @@ public class EditorInputController
             case EditorKey.U when ctrl:
                 if (FormattingEngine != null)
                 {
-                    var uRange = _selection.Range;
-                    FormattingEngine.ToggleUnderline(document, uRange);
+                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleUnderline(document, r));
                     return true;
                 }
                 return false;
@@ -883,6 +880,22 @@ public class EditorInputController
             MoveDown(document, layout, context, extend);
             if (_caret.Position == before) break; // already at bottom
         }
+    }
+
+    // ── Character Formatting helper ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Applies a character-formatting operation while preserving the selection across
+    /// run splits and merges.  Uses <see cref="DocumentEditor.ApplyCharacterFormatting"/>
+    /// so the selection is rebuilt from absolute character offsets after
+    /// <see cref="DocumentEditor.NormalizeInlines"/> is called on all affected paragraphs.
+    /// </summary>
+    private void ApplyFormattingWithSelectionRestore(Document.Document document, Action<TextRange> applyOp)
+    {
+        var (newAnchor, newActive) = DocumentEditor.ApplyCharacterFormatting(
+            document, _selection.Anchor, _selection.Active, applyOp);
+        _selection.Set(newAnchor, newActive);
+        _caret.MoveTo(newActive);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────

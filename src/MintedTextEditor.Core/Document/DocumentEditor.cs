@@ -586,15 +586,31 @@ public static class DocumentEditor
         }
     }
 
+    /// <summary>
+    /// Applies a style transform to the sub-range [<paramref name="startOffset"/>,
+    /// <paramref name="endOffset"/>) of the run at <paramref name="inlineIndex"/>.
+    /// Offsets are clamped to [0, run.Text.Length] and start is forced ≤ end,
+    /// so the method is guaranteed lossless regardless of the caller's input.
+    /// </summary>
     private static void ApplyStyleToRunSegment(Paragraph paragraph, int inlineIndex, int startOffset, int endOffset, Func<TextStyle, TextStyle> transform)
     {
         if (paragraph.Inlines[inlineIndex] is not TextRun run) return;
 
-        if (startOffset == 0 && endOffset >= run.Text.Length)
+        // Clamp and enforce start ≤ end so stale/drifted offsets never throw or drop text.
+        int len = run.Text.Length;
+        startOffset = Math.Clamp(startOffset, 0, len);
+        endOffset   = Math.Clamp(endOffset,   0, len);
+        if (startOffset > endOffset)
+            (startOffset, endOffset) = (endOffset, startOffset);
+
+        if (startOffset == 0 && endOffset >= len)
         {
             run.Style = transform(run.Style);
             return;
         }
+
+        // Nothing to style (zero-length segment): leave the run untouched.
+        if (startOffset == endOffset) return;
 
         // Need to split the run: [before][styled][after]
         var originalText = run.Text;
@@ -606,7 +622,7 @@ public static class DocumentEditor
             paragraph.InsertInline(inlineIndex + 1, after);
         }
 
-        var styledRun = new TextRun(originalText[startOffset..Math.Min(endOffset, originalText.Length)], transform(originalStyle));
+        var styledRun = new TextRun(originalText[startOffset..endOffset], transform(originalStyle));
         paragraph.InsertInline(inlineIndex + 1, styledRun);
 
         if (startOffset > 0)
@@ -620,9 +636,10 @@ public static class DocumentEditor
     }
 
     /// <summary>
-    /// Merges adjacent TextRuns with the same style and removes empty runs.
+    /// Merges adjacent <see cref="TextRun"/>s with the same style and removes empty runs.
+    /// Call this after any operation that may split or empty runs (e.g. style toggles).
     /// </summary>
-    private static void NormalizeInlines(Paragraph paragraph)
+    public static void NormalizeInlines(Paragraph paragraph)
     {
         for (int i = paragraph.Inlines.Count - 1; i >= 0; i--)
         {
@@ -638,6 +655,125 @@ public static class DocumentEditor
                 paragraph.RemoveInline(i + 1);
             }
         }
+    }
+
+    /// <summary>
+    /// Applies a character-formatting operation (e.g. a <see cref="Formatting.FormattingEngine"/>
+    /// toggle) while preserving the caller's selection across run splits and merges.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The problem: <see cref="ApplyTextStyle"/> splits and the toolbar's
+    /// <see cref="NormalizePosition"/> call merges runs; the selection is stored as
+    /// <c>(inlineIndex, offset)</c> pairs, which become stale after structural changes.
+    /// Across repeated toggle cycles the selection drifts, causing "disable does nothing"
+    /// and feeding wrong offsets to subsequent operations (data loss).
+    /// </para>
+    /// <para>
+    /// The solution: capture the selection's Anchor and Active as absolute character offsets
+    /// within their respective paragraphs BEFORE the operation; execute the operation (which
+    /// may split/merge runs); call <see cref="NormalizeInlines"/> on every affected paragraph;
+    /// then rebuild Anchor/Active from the captured absolute offsets.  This is correct after
+    /// both splits (which increase inline count) and merges (which decrease it).
+    /// </para>
+    /// <para>
+    /// The caller supplies an <paramref name="applyOp"/> delegate that receives the current
+    /// <see cref="TextRange"/> built from the (already valid) Anchor/Active.  The delegate
+    /// must not itself modify the selection.
+    /// </para>
+    /// </remarks>
+    /// <param name="document">The document to mutate.</param>
+    /// <param name="anchor">Anchor endpoint of the current selection.</param>
+    /// <param name="active">Active (caret) endpoint of the current selection.</param>
+    /// <param name="applyOp">
+    /// Delegate that receives the <see cref="TextRange"/> and performs the formatting op
+    /// (e.g. <c>range =&gt; formattingEngine.ToggleSuperscript(doc, range)</c>).
+    /// </param>
+    /// <returns>
+    /// A tuple with the rebuilt <c>Anchor</c> and <c>Active</c> after normalization.
+    /// </returns>
+    public static (DocumentPosition Anchor, DocumentPosition Active) ApplyCharacterFormatting(
+        Document document,
+        DocumentPosition anchor,
+        DocumentPosition active,
+        Action<TextRange> applyOp)
+    {
+        // 1. Capture absolute offsets BEFORE the operation so we can survive run splits/merges.
+        int anchorAbs = GetAbsoluteCharOffset(document, anchor);
+        int activeAbs = GetAbsoluteCharOffset(document, active);
+
+        // 2. Apply the formatting operation.
+        var range = new TextRange(anchor, active);
+        applyOp(range);
+
+        // 3. Normalize inlines in every paragraph touched by the range (re-merge same-style
+        //    adjacent runs, drop empties) so the inline structure is clean before we remap.
+        var start = range.Start;
+        var end   = range.End;
+        for (int bi = start.BlockIndex; bi <= end.BlockIndex && bi < document.Blocks.Count; bi++)
+        {
+            if (document.Blocks[bi] is Paragraph para)
+                NormalizeInlines(para);
+        }
+
+        // 4. Rebuild Anchor and Active from the captured absolute offsets.
+        var newAnchor = AbsoluteCharOffsetToPosition(document, anchor, anchorAbs);
+        var newActive = AbsoluteCharOffsetToPosition(document, active, activeAbs);
+        return (newAnchor, newActive);
+    }
+
+    /// <summary>
+    /// Computes the absolute character offset of <paramref name="position"/> within its
+    /// paragraph (or table-cell paragraph). Uses the current inline lengths.
+    /// </summary>
+    public static int GetAbsoluteCharOffset(Document document, DocumentPosition position)
+    {
+        Paragraph paragraph;
+        try { paragraph = GetParagraph(document, position); }
+        catch { return 0; }
+
+        int offset = 0;
+        for (int i = 0; i < position.InlineIndex && i < paragraph.Inlines.Count; i++)
+            offset += paragraph.Inlines[i].Length;
+        // Clamp the inline-level offset to the actual length of that inline (if it exists)
+        // so that a stale position that overshoots a run still maps to the run boundary.
+        if (position.InlineIndex < paragraph.Inlines.Count)
+            offset += Math.Min(position.Offset, paragraph.Inlines[position.InlineIndex].Length);
+        else
+            offset += position.Offset; // past-end sentinel; AbsoluteCharOffsetToPosition will clamp
+        return offset;
+    }
+
+    /// <summary>
+    /// Maps an absolute character offset back to a <see cref="DocumentPosition"/> in the
+    /// same block / cell as <paramref name="context"/>.
+    /// </summary>
+    public static DocumentPosition AbsoluteCharOffsetToPosition(Document document, DocumentPosition context, int absoluteOffset)
+    {
+        Paragraph paragraph;
+        try { paragraph = GetParagraph(document, context); }
+        catch
+        {
+            int lastBlock = Math.Max(0, document.Blocks.Count - 1);
+            return new DocumentPosition(lastBlock, 0, 0);
+        }
+
+        int remaining = Math.Max(0, absoluteOffset);
+        for (int i = 0; i < paragraph.Inlines.Count; i++)
+        {
+            int inlineLen = paragraph.Inlines[i].Length;
+            if (remaining <= inlineLen)
+                return context.With(i, remaining);
+            remaining -= inlineLen;
+        }
+
+        // Past end — clamp to end of last inline (or origin if empty).
+        if (paragraph.Inlines.Count > 0)
+        {
+            int last = paragraph.Inlines.Count - 1;
+            return context.With(last, paragraph.Inlines[last].Length);
+        }
+        return context.With(0, 0);
     }
 
     private static void NotifyTextInserted(Document document, DocumentPosition start, DocumentPosition end)
