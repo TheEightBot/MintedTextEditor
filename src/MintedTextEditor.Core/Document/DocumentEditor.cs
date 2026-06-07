@@ -307,18 +307,17 @@ public static class DocumentEditor
                 {
                     ApplyStyleToRunSegment(paragraph, ii, 0, end.Offset, transform);
                 }
-                else if (bi > start.BlockIndex && bi < end.BlockIndex)
+                else
                 {
-                    // Entire intermediate block
-                    run.Style = transform(run.Style);
-                }
-                else if (bi == start.BlockIndex && ii > start.InlineIndex)
-                {
-                    run.Style = transform(run.Style);
-                }
-                else if (bi == end.BlockIndex && ii < end.InlineIndex)
-                {
-                    run.Style = transform(run.Style);
+                    // A run that is neither the first nor the last in the range receives the
+                    // transform only when it lies STRICTLY INSIDE the range: after the start
+                    // boundary AND before the end boundary. (Whole intermediate blocks are a
+                    // subset of this.) Requiring both halves prevents the transform from leaking
+                    // to runs past end.InlineIndex when the selection spans inlines in a single block.
+                    bool afterStart = bi > start.BlockIndex || (bi == start.BlockIndex && ii > start.InlineIndex);
+                    bool beforeEnd  = bi < end.BlockIndex   || (bi == end.BlockIndex   && ii < end.InlineIndex);
+                    if (afterStart && beforeEnd)
+                        run.Style = transform(run.Style);
                 }
             }
         }
