@@ -52,10 +52,16 @@ internal class MockDrawingContext : IDrawingContext
     public void DrawRoundRect(EditorRect rect, float cornerRadius, EditorPaint paint) { }
     public void FillRoundRect(EditorRect rect, float cornerRadius, EditorPaint paint) { }
     public void DrawLine(float x1, float y1, float x2, float y2, EditorPaint paint) { }
-    public void ClipRect(EditorRect rect) { }
-    public void Save() { }
-    public void Restore() { }
-    public void Translate(float dx, float dy) { }
+    /// <summary>Clip, state and transform calls in order, e.g. "Translate(10,20)".</summary>
+    public List<string> TransformCalls { get; } = new();
+
+    public void ClipRect(EditorRect rect) => TransformCalls.Add($"ClipRect({rect.X},{rect.Y},{rect.Width},{rect.Height})");
+    public void Save() => TransformCalls.Add("Save");
+    public void Restore() => TransformCalls.Add("Restore");
+    public void Translate(float dx, float dy) => TransformCalls.Add($"Translate({dx},{dy})");
+    public void Scale(float sx, float sy) => TransformCalls.Add($"Scale({sx},{sy})");
+    public void ClipRoundRect(EditorRect rect, float cornerRadius)
+        => TransformCalls.Add($"ClipRoundRect({rect.X},{rect.Y},{rect.Width},{rect.Height},{cornerRadius})");
     public void DrawImage(object image, EditorRect destRect) { }
 
     public record DrawTextCall(string Text, float X, float Y, EditorPaint Paint);

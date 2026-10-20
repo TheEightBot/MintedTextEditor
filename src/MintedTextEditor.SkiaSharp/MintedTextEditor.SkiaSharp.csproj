@@ -14,10 +14,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="MintedTextEditor.SkiaSharp.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../MintedTextEditor.Core/MintedTextEditor.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="HarfBuzzSharp" Version="14.2.1.301" />
     <PackageReference Include="SkiaSharp" Version="4.153.1" />
   </ItemGroup>
 

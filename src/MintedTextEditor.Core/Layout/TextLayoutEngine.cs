@@ -452,7 +452,8 @@ public class TextLayoutEngine
             int fitCount = FindCharacterFitCount(text, charIndex, availableWidth - (currentX - indent), paint, context);
 
             if (fitCount == 0 && currentLine.Runs.Count == 0)
-                fitCount = 1; // Always make progress — at least one character per line
+                // Always make progress — at least one whole character (grapheme) per line
+                fitCount = Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(text, charIndex));
 
             if (fitCount == 0)
             {
@@ -505,14 +506,22 @@ public class TextLayoutEngine
     {
         if (maxWidth <= 0) return 0;
 
-        int remaining = text.Length - startIndex;
+        // Only break between graphemes: a cut inside an emoji ZWJ sequence or surrogate pair
+        // splits a character, and the shaped width of such a partial prefix can even exceed
+        // the width of the whole sequence, which would mislead the search.
+        var boundaries = new List<int>();
+        for (int i = startIndex; i < text.Length;)
+        {
+            i += Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(text, i));
+            boundaries.Add(i - startIndex);
+        }
 
-        // Binary search for the maximum characters that fit
-        int lo = 0, hi = remaining;
+        // Binary search for the most graphemes that fit
+        int lo = -1, hi = boundaries.Count - 1;
         while (lo < hi)
         {
             int mid = (lo + hi + 1) / 2;
-            string segment = text[startIndex..(startIndex + mid)];
+            string segment = text[startIndex..(startIndex + boundaries[mid])];
             var size = context.MeasureText(segment, paint);
             if (size.Width <= maxWidth)
                 lo = mid;
@@ -520,7 +529,7 @@ public class TextLayoutEngine
                 hi = mid - 1;
         }
 
-        return lo;
+        return lo >= 0 ? boundaries[lo] : 0;
     }
 
     private static void FinalizeLayoutLine(LayoutLine line, float maxAscent, float maxDescent, float maxLeading, EditorFontMetrics defaultMetrics)

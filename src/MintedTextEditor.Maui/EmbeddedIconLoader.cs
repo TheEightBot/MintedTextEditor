@@ -78,6 +78,8 @@ internal static class EmbeddedIconLoader
         }
 
         canvas.Flush();
+        // Never drawn into again: immutable lets the renderer cache its SKImage.
+        bitmap.SetImmutable();
         return bitmap;
     }
 }

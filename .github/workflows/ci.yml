@@ -38,12 +38,18 @@ jobs:
           dotnet restore src/MintedTextEditor.Core/
           dotnet restore src/MintedTextEditor.SkiaSharp/
           dotnet restore tests/MintedTextEditor.Core.Tests/
+          dotnet restore tests/MintedTextEditor.SkiaSharp.Tests/
 
       - name: Build
         run: |
           dotnet build src/MintedTextEditor.Core/ --no-restore --configuration Release
           dotnet build src/MintedTextEditor.SkiaSharp/ --no-restore --configuration Release
           dotnet build tests/MintedTextEditor.Core.Tests/ --no-restore --configuration Release
+          dotnet build tests/MintedTextEditor.SkiaSharp.Tests/ --no-restore --configuration Release
+
+      # The SkiaSharp tests render emoji; without a color emoji font they return early.
+      - name: Install emoji font
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-color-emoji
 
       - name: Test
         run: >
@@ -51,6 +57,14 @@ jobs:
           --no-build
           --configuration Release
           --logger "trx;LogFileName=test-results.trx"
+          --results-directory ./test-results
+
+      - name: Test (SkiaSharp)
+        run: >
+          dotnet test tests/MintedTextEditor.SkiaSharp.Tests/
+          --no-build
+          --configuration Release
+          --logger "trx;LogFileName=skiasharp-test-results.trx"
           --results-directory ./test-results
 
       - name: Upload test results

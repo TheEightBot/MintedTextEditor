@@ -47,6 +47,18 @@ public class HitTestingTests
         Assert.False(result.IsAtLineEnd);
     }
 
+    [Theory]
+    [InlineData(20f, 1)]  // left half of 👩‍💻 (x 8..48) → before it
+    [InlineData(40f, 6)]  // right half → after it, never inside the ZWJ sequence
+    public void HitTest_ClickOnEmojiZwjSequence_SnapsToClusterBoundary(float x, int expectedOffset)
+    {
+        var (doc, layout) = CreateSingleLineDoc("a👩‍💻b");
+
+        var result = DocumentHitTester.HitTest(x, 5f, layout, doc, _context);
+
+        Assert.Equal(expectedOffset, result.Position.Offset);
+    }
+
     [Fact]
     public void HitTest_ClickAtStartOfLine_ReturnsOffsetZero()
     {

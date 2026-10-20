@@ -26,6 +26,24 @@ public class WordWrapTests
             "Expected multiple lines when word-wrap is enabled with narrow width.");
     }
 
+    [Theory]
+    [InlineData(60f)]   // room for one emoji and part of the next
+    [InlineData(30f)]   // narrower than a single emoji: still never split it
+    public void WordWrap_LongUnbrokenEmojiRun_BreaksOnlyBetweenGraphemes(float width)
+    {
+        // 👩‍💻 is 5 UTF-16 code units (40px in the mock); a break inside it would split the
+        // ZWJ sequence or a surrogate pair.
+        var engine = new TextLayoutEngine { WordWrap = true };
+        var doc = new EditorDocument();
+        ((Paragraph)doc.Blocks[0]).AppendRun(string.Concat(Enumerable.Repeat("👩\u200D💻", 4)));
+
+        var layout = engine.Layout(doc, width, _ctx);
+
+        var runs = layout.Blocks[0].Lines.SelectMany(l => l.Runs).ToList();
+        Assert.True(runs.Count > 1);
+        Assert.All(runs, r => Assert.Equal(0, r.Text.Length % 5));
+    }
+
     [Fact]
     public void WordWrap_Enabled_ShortLine_FitsOnOneLine()
     {
