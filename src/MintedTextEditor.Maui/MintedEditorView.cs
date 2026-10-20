@@ -82,6 +82,9 @@ public class MintedEditorView : ContentView
     private IDispatcherTimer? _longPressTimer;
     private bool _isCaretDragging;
     private long _gestureTouchId = -1; // the finger that owns the long press / caret drag
+    // Fingers that went down during a caret drag: ignored until they lift, even if the drag
+    // ends first, so they can never move the caret, select or tap a link.
+    private readonly HashSet<long> _ignoredTouchIds = new();
     private readonly Magnifier _magnifier = new();
     private readonly MagnifierRenderer _magnifierRenderer = new();
     private int _resizingRowIndex = -1;
@@ -1327,13 +1330,24 @@ public class MintedEditorView : ContentView
         float y = rawY - toolbarH + _scrollOffset;
         float docViewHeight = (Height > 0 ? (float)Height : 400f) - toolbarH;
 
+        if (_ignoredTouchIds.Contains(e.Id))
+        {
+            if (e.ActionType is SKTouchAction.Released or SKTouchAction.Cancelled)
+                _ignoredTouchIds.Remove(e.Id);
+            e.Handled = true;
+            return;
+        }
+
         switch (e.ActionType)
         {
             case SKTouchAction.Pressed:
             {
                 // Another finger going down mid-drag must not move the caret the drag owns.
                 if (_isCaretDragging)
+                {
+                    _ignoredTouchIds.Add(e.Id);
                     break;
+                }
 
                 StopInertiaTimer();
 
@@ -1586,6 +1600,7 @@ public class MintedEditorView : ContentView
     private void CancelCaretGesture()
     {
         _longPress.Cancel();
+        _ignoredTouchIds.Clear();
         if (_isCaretDragging)
             EndCaretDrag();
     }

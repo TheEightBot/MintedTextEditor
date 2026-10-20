@@ -184,6 +184,19 @@ public class SkiaDrawingContextTests : IDisposable
         Assert.NotEqual(typeface.GetGlyph(0x0633), arabicAlone[0]); // initial form, not isolated
     }
 
+    [Fact]
+    public void Shape_LongRun_ReusesTheLastResult()
+    {
+        // Hit-testing asks for caret offsets in the same long run once per character; it
+        // must not reshape the whole run every time.
+        var shaper = HarfBuzzTextShaper.Get(SKTypeface.Default)!;
+        string longText = string.Concat(Enumerable.Repeat("long unwrapped line ", 40));
+
+        var first = shaper.Shape(longText, 32f);
+        Assert.Same(first, shaper.Shape(new string(longText.AsSpan()), 32f));
+        Assert.NotSame(first, shaper.Shape(longText, 16f));
+    }
+
     private static SKTypeface? DejaVu => SKFontManager.Default.MatchFamily("DejaVu Sans") is { FamilyName: "DejaVu Sans" } t ? t : null;
 
     [Theory]

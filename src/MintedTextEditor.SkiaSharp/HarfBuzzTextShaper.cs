@@ -145,10 +145,23 @@ internal sealed class HarfBuzzTextShaper
     /// </summary>
     public ShapedRun Shape(string text, float size)
     {
-        // Long runs are rare (word wrap off, very long lines) but hit-testing one measures
-        // every prefix; caching those would retain megabytes. Shape them uncached.
+        // Long runs are rare (word wrap off, very long lines). Hit-testing one used to measure
+        // every prefix, and caching all of those would retain megabytes, so long runs skip
+        // the shared cache. Caret queries ask about the same whole run once per character, so
+        // the most recent long run is kept on its own: one entry, bounded memory.
         if (text.Length > MaxCachedTextLength)
-            return ShapeUncached(text, size);
+        {
+            lock (_results)
+            {
+                if (_lastLongRun is { } last && last.Size == size && string.Equals(last.Text, text, StringComparison.Ordinal))
+                    return last.Run;
+            }
+
+            var longRun = ShapeUncached(text, size);
+            lock (_results)
+                _lastLongRun = (text, size, longRun);
+            return longRun;
+        }
 
         var key = (text, size);
         lock (_results)
@@ -172,6 +185,7 @@ internal sealed class HarfBuzzTextShaper
 
     private const int MaxCachedResults = 4096;
     private const int MaxCachedTextLength = 256;
+    private (string Text, float Size, ShapedRun Run)? _lastLongRun;
     private readonly Dictionary<(string Text, float Size), ShapedRun> _results = new();
 
     private ShapedRun ShapeUncached(string text, float size)
