@@ -18,7 +18,7 @@ MintedTextEditor is structured in three layers, each with a clear responsibility
 │  SkiaSharpEngine : IDrawingEngine                                  │
 │  SkiaDrawingContext : IDrawingContext                               │
 │  ├─ SKPaint / SKFont pool (per-frame cache)                       │
-│  ├─ Text shaping (SKTextBlob + HarfBuzz via SkiaSharp)            │
+│  ├─ Text shaping (HarfBuzz → SKTextBlob) + emoji font fallback    │
 │  └─ Image decoding (SKBitmap)                                     │
 ├──────────────────────────────────────────────────────────────────┤
 │                    MintedTextEditor.Core                           │
@@ -76,7 +76,7 @@ The core layer is **fully platform-independent** — it targets `net10.0` only a
 
 ### MintedTextEditor.SkiaSharp
 
-This layer provides the `IDrawingContext` implementation backed by SkiaSharp. It targets `net10.0` and has a dependency on `SkiaSharp`.
+This layer provides the `IDrawingContext` implementation backed by SkiaSharp. It targets `net10.0` and has dependencies on `SkiaSharp` and `HarfBuzzSharp` (text shaping).
 
 **SkiaDrawingContext** wraps an `SKCanvas` and translates drawing calls (draw text run, draw rect, draw image, clip) into `SKCanvas` API calls. It maintains a pool of `SKPaint` and `SKFont` objects keyed by `TextStyle` to avoid per-frame GC pressure.
 

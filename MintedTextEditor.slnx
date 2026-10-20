@@ -9,5 +9,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/MintedTextEditor.Core.Tests/MintedTextEditor.Core.Tests.csproj" />
+    <Project Path="tests/MintedTextEditor.SkiaSharp.Tests/MintedTextEditor.SkiaSharp.Tests.csproj" />
   </Folder>
 </Solution>

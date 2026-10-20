@@ -65,7 +65,12 @@ public sealed class MauiImageProvider : IImageProvider
             }
         }
 
-        return bmp ?? throw new InvalidOperationException($"Unable to load image source '{source}'.");
+        if (bmp is null)
+            throw new InvalidOperationException($"Unable to load image source '{source}'.");
+
+        // Decoded images are never modified: immutable lets the renderer cache its SKImage.
+        bmp.SetImmutable();
+        return bmp;
     }
 
     private static bool IsSvgSource(string source)

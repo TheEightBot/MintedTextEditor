@@ -1028,14 +1028,15 @@ public class MintedEditorView : ContentView
         try
         {
             SKBitmap? bmp = null;
+            SKBitmap? providerBitmap = null;
 
             if (ImageProvider is not null)
             {
                 try
                 {
                     var loaded = await ImageProvider.LoadImageAsync(source).ConfigureAwait(false);
-                    if (loaded is SKBitmap providerBitmap)
-                        bmp = providerBitmap;
+                    if (loaded is SKBitmap loadedBitmap)
+                        bmp = providerBitmap = loadedBitmap;
                 }
                 catch
                 {
@@ -1073,6 +1074,11 @@ public class MintedEditorView : ContentView
 
             if (bmp is not null)
             {
+                // Images decoded here are never modified, so mark them immutable to let the
+                // renderer cache their SKImage. A provider's bitmap is left as it is: if the
+                // provider keeps changing it, those changes must keep showing.
+                if (!ReferenceEquals(bmp, providerBitmap))
+                    bmp.SetImmutable();
                 _imageCache[source] = bmp;
                 InvalidateCanvas();
             }

@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **Emoji ZWJ sequences (#9)**: 👨‍👩‍👧, 👩‍💻 and other joined emoji draw as one glyph instead of separate people; flags draw as one flag.
+- **Grapheme clusters (#9)**: the Skia renderer keeps whole ZWJ sequences together, so truncating text with an ellipsis can no longer cut an emoji in half.
+- **Emoji presentation (#9)**: `❤️` and other VS16 sequences use the color emoji font even when the text font has a monochrome glyph, and emoji such as 😀 no longer fall back to a monochrome font (e.g. DejaVu Sans on Linux).
+- **Bitmap updates (#9)**: changes to a mutable `SKBitmap` after it was first drawn now show. Only immutable bitmaps are cached; icons and images the editor loads are marked immutable so they stay cached.
+
+### Changed
+- Text in the Skia renderer is shaped with HarfBuzz (new dependency: `HarfBuzzSharp`), adding kerning, ligatures and complex-script shaping. Line widths may change slightly. Set `SkiaDrawingContext.ShapeAllText = false` at startup to shape only emoji and fallback-font text.
+
 ---
 
 ## [0.2.0] — 2026-10-20
