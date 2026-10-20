@@ -133,6 +133,22 @@ public class SkiaDrawingContextTests : IDisposable
         Assert.Equal(emoji, heart, 0.5f);
     }
 
+    [Fact]
+    public void DrawText_EmojiCoveredByTextFont_StillUsesColorEmoji()
+    {
+        // DejaVu Sans has its own monochrome 😀 (it is the default font on Linux CI), so the
+        // text font "covers" the string, but the emoji must still come from the color font.
+        if (!HasEmojiFont || SKFontManager.Default.MatchFamily("DejaVu Sans") is not { } dejaVu
+            || !dejaVu.ContainsGlyph(0x1F600))
+            return;
+
+        var paint = new EditorPaint { Color = new EditorColor(0, 0, 0), Font = new EditorFont("DejaVu Sans", 32f) };
+        Assert.Equal(_ctx.MeasureText("👨", _paint).Width, _ctx.MeasureText("😀", paint).Width, 0.5f);
+
+        _ctx.DrawText("😀", 10, 60, paint);
+        Assert.True(HasYellowPixel(), "😀 should use the color emoji typeface, not DejaVu Sans' monochrome glyph");
+    }
+
     // ── Bitmap image cache ──────────────────────────────────────
 
     [Fact]
@@ -217,6 +233,20 @@ public class SkiaDrawingContextTests : IDisposable
         }
 
         return left == int.MaxValue ? SKRectI.Empty : new SKRectI(left, 0, right, bitmap.Height);
+    }
+
+    private bool HasYellowPixel()
+    {
+        using var bitmap = Snapshot();
+        for (int y = 0; y < bitmap.Height; y++)
+        for (int x = 0; x < bitmap.Width; x++)
+        {
+            var c = bitmap.GetPixel(x, y);
+            if (c.Red > 200 && c.Green > 150 && c.Blue < 100)
+                return true;
+        }
+
+        return false;
     }
 
     private bool HasColoredPixel()

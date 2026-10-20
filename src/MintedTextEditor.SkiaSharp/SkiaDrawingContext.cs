@@ -461,9 +461,9 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         for (int i = 0; i < text.Length;)
         {
             int codePoint = NextCodePoint(text, i, out int charCount);
-            // VS16 asks for the color emoji glyph even where the text font has its own
-            // (monochrome) glyph for the base, e.g. ❤️ — that needs the segmented path.
-            if (codePoint == 0xFE0F || !primaryFont.ContainsGlyph(codePoint))
+            // Emoji go to the color emoji font even where the text font has its own
+            // monochrome glyph (❤️, or 😀 in DejaVu Sans) — that needs the segmented path.
+            if (PrefersEmojiPresentation(codePoint) || !primaryFont.ContainsGlyph(codePoint))
                 return false;
             i += charCount;
         }
@@ -496,26 +496,31 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
     /// combining marks are each returned whole.
     /// <para/>
     /// <paramref name="prefersEmoji"/> is set when the cluster should be drawn with the color
-    /// emoji typeface even if another font has a (monochrome) glyph for it: its base lies in
-    /// the emoji planes (U+1F000–U+1FAFF, default emoji presentation — system fallback can
-    /// otherwise pick a monochrome font such as DejaVu Sans for 😀), or it contains a code
-    /// point that only has meaning in an emoji sequence — VS16 (U+FE0F), ZWJ (U+200D), the
-    /// keycap mark (U+20E3) or a skin-tone modifier.
+    /// emoji typeface even if another font has a (monochrome) glyph for it — fonts such as
+    /// DejaVu Sans carry their own 😀 — because it contains a code point for which
+    /// <see cref="PrefersEmojiPresentation"/> is true.
     /// </summary>
     private static int ReadGraphemeCluster(string text, int index, out bool prefersEmoji)
     {
         int length = Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(text, index));
 
-        prefersEmoji = NextCodePoint(text, index, out _) is >= 0x1F000 and <= 0x1FAFF;
+        prefersEmoji = false;
         for (int i = index; !prefersEmoji && i < index + length;)
         {
-            int codePoint = NextCodePoint(text, i, out int charCount);
-            prefersEmoji = codePoint is 0xFE0F or 0x200D or 0x20E3 or (>= 0x1F3FB and <= 0x1F3FF);
+            prefersEmoji = PrefersEmojiPresentation(NextCodePoint(text, i, out int charCount));
             i += charCount;
         }
 
         return length;
     }
+
+    /// <summary>
+    /// Returns <c>true</c> for a code point that makes its cluster an emoji: one in the emoji
+    /// planes (U+1F000–U+1FAFF, default emoji presentation; this includes flags and skin-tone
+    /// modifiers), VS16 (U+FE0F), ZWJ (U+200D) or the keycap mark (U+20E3).
+    /// </summary>
+    private static bool PrefersEmojiPresentation(int codePoint)
+        => codePoint is (>= 0x1F000 and <= 0x1FAFF) or 0xFE0F or 0x200D or 0x20E3;
 
     /// <summary>
     /// Returns <c>true</c> when <paramref name="font"/> has a glyph for every code point in
