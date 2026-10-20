@@ -12,6 +12,33 @@ internal record HyperChildSnapshot(string Text, TextStyle Style);
 internal record HyperlinkInlineSnapshot(string Url, string? Title, IReadOnlyList<HyperChildSnapshot> Children) : InlineSnapshot;
 internal record ParagraphSnapshot(ParagraphStyle Style, IReadOnlyList<InlineSnapshot> Inlines);
 
+/// <summary>
+/// A position stored as a character offset within its paragraph (or table-cell paragraph)
+/// instead of an (inline index, offset) pair. Run splits and merges from formatting are not
+/// on the undo stack, so inline indices recorded by an action can go stale; paragraph
+/// offsets stay valid and are resolved back to a position when the action replays.
+/// </summary>
+internal readonly struct ParagraphAnchor
+{
+    private readonly DocumentPosition _context;
+    private readonly int _offset;
+
+    public ParagraphAnchor(Document.Document document, DocumentPosition position)
+    {
+        _context = position;
+        _offset = DocumentEditor.GetAbsoluteCharOffset(document, position);
+    }
+
+    public DocumentPosition Resolve(Document.Document document)
+        => DocumentEditor.AbsoluteCharOffsetToPosition(document, _context, _offset);
+
+    public bool SameAs(ParagraphAnchor other)
+        => _context.BlockIndex == other._context.BlockIndex
+           && _context.CellRow == other._context.CellRow
+           && _context.CellCol == other._context.CellCol
+           && _offset == other._offset;
+}
+
 internal static class SnapshotHelper
 {
     internal static ParagraphSnapshot Capture(Paragraph p) =>
@@ -79,6 +106,8 @@ public sealed class InsertTextAction : IUndoableAction
     private string _text;
     private readonly TextStyle? _style;
     private DocumentPosition _resultPosition;
+    private ParagraphAnchor? _startAnchor;
+    private ParagraphAnchor _endAnchor;
 
     public InsertTextAction(Document.Document document, DocumentPosition position, string text, TextStyle? style = null)
     {
@@ -92,14 +121,19 @@ public sealed class InsertTextAction : IUndoableAction
 
     public DocumentPosition Execute()
     {
-        _resultPosition = DocumentEditor.InsertText(_document, _position, _text, _style);
+        var start = _startAnchor is { } anchor ? anchor.Resolve(_document) : _position;
+        _startAnchor ??= new ParagraphAnchor(_document, start);
+        _resultPosition = DocumentEditor.InsertText(_document, start, _text, _style);
+        _endAnchor = new ParagraphAnchor(_document, _resultPosition);
         return _resultPosition;
     }
 
     public DocumentPosition Undo()
     {
-        DocumentEditor.DeleteRange(_document, new TextRange(_position, _resultPosition));
-        return _position;
+        var start = _startAnchor?.Resolve(_document) ?? _position;
+        var end = _endAnchor.Resolve(_document);
+        DocumentEditor.DeleteRange(_document, new TextRange(start, end));
+        return start;
     }
 
     public DocumentPosition Redo() => Execute();
@@ -111,11 +145,13 @@ public sealed class InsertTextAction : IUndoableAction
     public bool MergeWith(IUndoableAction next)
     {
         if (next is InsertTextAction insert &&
-            insert._position.Equals(_resultPosition) &&
+            insert._startAnchor is { } nextStart &&
+            nextStart.SameAs(_endAnchor) &&
             insert._style == _style)
         {
             _text += insert._text;
             _resultPosition = insert._resultPosition;
+            _endAnchor = insert._endAnchor;
             return true;
         }
         return false;
@@ -131,19 +167,24 @@ public sealed class InsertTextAction : IUndoableAction
 public sealed class DeleteRangeAction : IUndoableAction
 {
     private readonly Document.Document _document;
-    private readonly TextRange _range;
+    private TextRange _range;
+    private readonly ParagraphAnchor _startAnchor;
+    private readonly ParagraphAnchor _endAnchor;
     private List<ParagraphSnapshot> _snapshots = [];
 
     public DeleteRangeAction(Document.Document document, TextRange range)
     {
         _document = document;
         _range = range;
+        _startAnchor = new ParagraphAnchor(document, range.Start);
+        _endAnchor = new ParagraphAnchor(document, range.End);
     }
 
     public string Description => "Delete";
 
     public DocumentPosition Execute()
     {
+        _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
         _snapshots.Clear();
         for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
         {
@@ -172,7 +213,7 @@ public sealed class DeleteRangeAction : IUndoableAction
         }
 
         _document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.TextInserted, _range));
-        return _range.Start;
+        return _startAnchor.Resolve(_document);
     }
 
     public DocumentPosition Redo() => Execute();
@@ -190,26 +231,28 @@ public sealed class SplitBlockAction : IUndoableAction
 {
     private readonly Document.Document _document;
     private readonly DocumentPosition _position;
+    private readonly ParagraphAnchor _anchor;
     private DocumentPosition _resultPosition;
 
     public SplitBlockAction(Document.Document document, DocumentPosition position)
     {
         _document = document;
         _position = position;
+        _anchor = new ParagraphAnchor(document, position);
     }
 
     public string Description => "Split Paragraph";
 
     public DocumentPosition Execute()
     {
-        _resultPosition = DocumentEditor.SplitBlock(_document, _position);
+        _resultPosition = DocumentEditor.SplitBlock(_document, _anchor.Resolve(_document));
         return _resultPosition;
     }
 
     public DocumentPosition Undo()
     {
         DocumentEditor.MergeBlocks(_document, _position.BlockIndex);
-        return _position;
+        return _anchor.Resolve(_document);
     }
 
     public DocumentPosition Redo() => Execute();
@@ -285,7 +328,9 @@ public sealed class MergeBlocksAction : IUndoableAction
 public sealed class ApplyStyleAction : IUndoableAction
 {
     private readonly Document.Document _document;
-    private readonly TextRange _range;
+    private TextRange _range;
+    private readonly ParagraphAnchor _startAnchor;
+    private readonly ParagraphAnchor _endAnchor;
     private readonly Func<TextStyle, TextStyle> _transform;
     private List<ParagraphSnapshot> _snapshots = [];
 
@@ -293,6 +338,8 @@ public sealed class ApplyStyleAction : IUndoableAction
     {
         _document = document;
         _range = range;
+        _startAnchor = new ParagraphAnchor(document, range.Start);
+        _endAnchor = new ParagraphAnchor(document, range.End);
         _transform = transform;
     }
 
@@ -300,6 +347,7 @@ public sealed class ApplyStyleAction : IUndoableAction
 
     public DocumentPosition Execute()
     {
+        _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
         _snapshots.Clear();
         for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
         {

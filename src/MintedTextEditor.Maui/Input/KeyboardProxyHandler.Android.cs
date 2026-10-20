@@ -1,6 +1,7 @@
 // Android implementation of the KeyboardProxy handler.
 // Compiled only for android (see the Compile conditions in the .csproj).
 
+using System.Text;
 using Microsoft.Maui.Handlers;
 using MintedTextEditor.Core.Input;
 using Android.Content;
@@ -19,6 +20,9 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
 {
     private readonly KeyboardProxy _proxy;
     private readonly KeyboardInputConnection _inputConnection;
+
+    /// <summary>Dead-key (accent) state shared by the view and its InputConnection.</summary>
+    internal DeadKeyComposer DeadKeys { get; } = new(KeyCharacterMap.GetDeadChar);
 
     public KeyboardCaptureAndroidView(Context context, KeyboardProxy proxy) : base(context)
     {
@@ -125,8 +129,9 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
         }
         else
         {
-            // Any in-flight composition belongs to the old focus session.
+            // Any in-flight composition or dead key belongs to the old focus session.
             _inputConnection.ResetComposingState();
+            DeadKeys.Reset();
             HideKeyboard();
         }
         _proxy.RaiseNativeFocusChanged(gainFocus);
@@ -142,7 +147,10 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
         var editorKey = MapKeyCode(keyCode);
         if (editorKey != EditorKey.None)
         {
+            DeadKeys.Reset();
             _proxy.RaiseKeyDown(new EditorKeyEventArgs(editorKey, '\0', mods));
+            // A hardware key moved the caret or edited text: any IME composition is stale.
+            NotifyImeSelectionChanged();
             return true;
         }
 
@@ -164,10 +172,12 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
         //    soft keyboard's InputConnection could produce text — so on devices with
         //    a (hardware/host) keyboard, typed characters were silently dropped while
         //    Backspace still worked through path (1).
-        int unicode = e.UnicodeChar;
-        if (unicode != 0)
+        //    Dead keys (accents on international layouts) carry a flag bit and must be
+        //    combined with the next key rather than converted directly.
+        var text = DeadKeys.Process(e.UnicodeChar);
+        if (text is not null)
         {
-            _proxy.RaiseTextInput(char.ConvertFromUtf32(unicode));
+            if (text.Length > 0) _proxy.RaiseTextInput(text);
             return true;
         }
 
@@ -367,10 +377,13 @@ internal sealed class KeyboardInputConnection : BaseInputConnection
             }
 
             // Printable character delivered as a key event (some IMEs / hardware keys).
-            int unicode = e.UnicodeChar;
-            if (unicode != 0)
+            var deadKeys = (_view as KeyboardCaptureAndroidView)?.DeadKeys;
+            var text = deadKeys is not null
+                ? deadKeys.Process(e.UnicodeChar)
+                : (Rune.IsValid(e.UnicodeChar) && e.UnicodeChar != 0 ? char.ConvertFromUtf32(e.UnicodeChar) : null);
+            if (text is not null)
             {
-                _proxy.RaiseTextInput(char.ConvertFromUtf32(unicode));
+                if (text.Length > 0) _proxy.RaiseTextInput(text);
                 ReportSelection();
                 return true;
             }
