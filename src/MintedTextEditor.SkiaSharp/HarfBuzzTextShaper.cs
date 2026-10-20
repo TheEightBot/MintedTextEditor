@@ -108,6 +108,11 @@ internal sealed class HarfBuzzTextShaper
     /// </summary>
     public ShapedRun Shape(string text, float size)
     {
+        // Long runs are rare (word wrap off, very long lines) but hit-testing one measures
+        // every prefix; caching those would retain megabytes. Shape them uncached.
+        if (text.Length > MaxCachedTextLength)
+            return ShapeUncached(text, size);
+
         var key = (text, size);
         lock (_results)
         {
@@ -129,6 +134,7 @@ internal sealed class HarfBuzzTextShaper
     }
 
     private const int MaxCachedResults = 4096;
+    private const int MaxCachedTextLength = 256;
     private readonly Dictionary<(string Text, float Size), ShapedRun> _results = new();
 
     private ShapedRun ShapeUncached(string text, float size)

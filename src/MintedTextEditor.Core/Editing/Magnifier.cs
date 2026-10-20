@@ -92,12 +92,13 @@ public sealed class Magnifier
 
     /// <summary>
     /// The lens rectangle: centred horizontally on the focus and <see cref="MagnifierOptions.VerticalOffset"/>
-    /// above it, then moved inside <paramref name="bounds"/> so it is never cut off.
+    /// above it, then moved inside <paramref name="bounds"/> so it is never cut off. A lens
+    /// larger than the bounds is shrunk to fit.
     /// </summary>
     public EditorRect GetLensRect(EditorRect bounds)
     {
-        float width = Options.Width;
-        float height = Options.Height;
+        float width = Math.Min(Options.Width, bounds.Width);
+        float height = Math.Min(Options.Height, bounds.Height);
 
         float left = FocusX - width / 2f;
         left = Math.Min(left, bounds.Right - width);

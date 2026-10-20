@@ -106,6 +106,14 @@ public class MagnifierTests
     }
 
     [Fact]
+    public void GetLensRect_LargerThanBounds_ShrinksToFit()
+    {
+        var lens = Create(50, 15).GetLensRect(new EditorRect(0, 0, 100, 30));
+
+        Assert.Equal(new EditorRect(0, 0, 100, 30), lens);
+    }
+
+    [Fact]
     public void ShowAndHide_ToggleVisibility()
     {
         var magnifier = Create(1, 1);

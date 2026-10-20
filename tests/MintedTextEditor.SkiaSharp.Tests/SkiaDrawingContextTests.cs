@@ -59,6 +59,35 @@ public class SkiaDrawingContextTests : IDisposable
     }
 
     [Fact]
+    public void TruncateWithEllipsis_ResultFitsMeasuredAsAWhole()
+    {
+        const string text = "AVAWAVATAR Wolf office";
+        using var font = new SKFont(SKTypeface.Default, 32f);
+        using var paint = new SKPaint();
+        float fullWidth = _ctx.MeasureText(text, _paint).Width;
+
+        for (float width = 0; width <= fullWidth; width += 3f)
+        {
+            string truncated = _ctx.TruncateWithEllipsis(text, width, font, paint, _paint);
+            if (truncated != "...")
+                Assert.True(_ctx.MeasureText(truncated, _paint).Width <= width, $"\"{truncated}\" overflows {width}");
+        }
+    }
+
+    [Fact]
+    public void Vs15_KeepsTextPresentation()
+    {
+        // 😀︎ (U+1F600 U+FE0E) asks for the text glyph: it must not be forced to the emoji font.
+        if (!HasEmojiFont || DejaVu is not { } typeface || !typeface.ContainsGlyph(0x1F600)) return;
+
+        var paint = new EditorPaint { Font = new EditorFont("DejaVu Sans", 32f) };
+        using var dejaVuFont = new SKFont(typeface, 32f);
+        float textGlyph = dejaVuFont.MeasureText("\U0001F600");
+
+        Assert.Equal(textGlyph, _ctx.MeasureText("\U0001F600\uFE0E", paint).Width, 0.5f);
+    }
+
+    [Fact]
     public void MeasureText_LoneSurrogate_DoesNotThrow()
     {
         // Hit-testing measures prefixes that can end in half of a surrogate pair.

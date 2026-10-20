@@ -505,9 +505,16 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         int length = Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(text, index));
 
         prefersEmoji = false;
-        for (int i = index; !prefersEmoji && i < index + length;)
+        for (int i = index; i < index + length;)
         {
-            prefersEmoji = PrefersEmojiPresentation(NextCodePoint(text, i, out int charCount));
+            int codePoint = NextCodePoint(text, i, out int charCount);
+            // VS15 explicitly asks for text presentation (🖥︎): never force the emoji font.
+            if (codePoint == 0xFE0E)
+            {
+                prefersEmoji = false;
+                break;
+            }
+            prefersEmoji |= PrefersEmojiPresentation(codePoint);
             i += charCount;
         }
 
@@ -751,30 +758,23 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
     internal string TruncateWithEllipsis(string text, float maxWidth, SKFont font, SKPaint paint, EditorPaint editorPaint)
     {
         const string ellipsis = "...";
-        float ellipsisWidth = font.MeasureText(ellipsis, out _, paint);
-        float available = maxWidth - ellipsisWidth;
 
-        if (available <= 0) return ellipsis;
-
-        // Walk grapheme clusters so multi-code-point sequences (emoji + VS16, skin-tone
-        // modifiers, ZWJ sequences) are never split mid-cluster, and measure with font
-        // fallback so widths match what is drawn. Accumulate clusters greedily until the
-        // next one would overflow.
-        int cut = 0;
-        float consumed = 0f;
+        // Cut only at grapheme-cluster boundaries so multi-code-point sequences (emoji +
+        // VS16, skin-tone modifiers, ZWJ sequences) are never split, and measure each
+        // candidate exactly as it will be drawn: shaped widths are not additive (kerning,
+        // contextual forms), so the whole prefix plus the ellipsis is measured together.
+        string result = ellipsis;
         int i = 0;
         while (i < text.Length)
         {
-            int clusterLen = ReadGraphemeCluster(text, i, out _);
-            float w = MeasureSegmented(text.Substring(i, clusterLen), font, paint, editorPaint);
-            if (consumed + w > available)
+            i += ReadGraphemeCluster(text, i, out _);
+            string candidate = text[..i] + ellipsis;
+            if (MeasureSegmented(candidate, font, paint, editorPaint) > maxWidth)
                 break;
-            consumed += w;
-            i += clusterLen;
-            cut = i;
+            result = candidate;
         }
 
-        return cut > 0 ? text[..cut] + ellipsis : ellipsis;
+        return result;
     }
 
     // ── Disposal ─────────────────────────────────────────────────

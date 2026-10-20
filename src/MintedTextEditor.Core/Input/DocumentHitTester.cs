@@ -134,6 +134,8 @@ public static class DocumentHitTester
     /// <summary>
     /// Finds the character index within a run at the given X coordinate,
     /// using snap-to-nearest-character logic (midpoint of each character).
+    /// Steps by grapheme cluster, so the result is never inside an emoji ZWJ
+    /// sequence, flag, or base + combining mark.
     /// </summary>
     private static int FindCharacterIndex(float x, LayoutRun run, IDrawingContext context)
     {
@@ -142,14 +144,17 @@ public static class DocumentHitTester
 
         // Binary search would be more efficient but simple linear scan is fine
         // for typical run lengths and gives correct results
-        for (int i = 0; i < run.Text.Length; i++)
+        float prevWidth = 0f;
+        for (int i = 0; i < run.Text.Length;)
         {
-            var measured = context.MeasureText(run.Text[..(i + 1)], paint);
-            float charMidpoint = (i == 0 ? 0 : context.MeasureText(run.Text[..i], paint).Width);
-            charMidpoint = (charMidpoint + measured.Width) / 2f;
+            int next = i + Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(run.Text, i));
+            float width = context.MeasureText(run.Text[..next], paint).Width;
 
-            if (relativeX < charMidpoint)
+            if (relativeX < (prevWidth + width) / 2f)
                 return i;
+
+            prevWidth = width;
+            i = next;
         }
 
         return run.Text.Length;
