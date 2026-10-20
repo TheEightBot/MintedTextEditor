@@ -565,4 +565,66 @@ public class TextInputTests
 
         Assert.Equal("ab", doc.GetText());
     }
+
+    [Fact]
+    public void Backspace_WithCaretInsideSurrogatePair_RemovesWholeEmoji()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("a\U0001F600b"));
+        caret.MoveTo(new DocumentPosition(0, 0, 2));   // between the surrogates
+
+        ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
+
+        Assert.Equal("ab", doc.GetText());
+        Assert.Equal(new DocumentPosition(0, 0, 1), caret.Position);
+    }
+
+    [Fact]
+    public void Delete_WithCaretInsideSurrogatePair_RemovesWholeEmoji()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("a\U0001F600b"));
+        caret.MoveTo(new DocumentPosition(0, 0, 2));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Delete), doc, layout, _context);
+
+        Assert.Equal("ab", doc.GetText());
+    }
+
+    [Fact]
+    public void MoveLeft_ThenBackspace_FromEndOfEmoji_RemovesEmojiOnly()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("a\U0001F600"));
+        caret.MoveTo(new DocumentPosition(0, 0, 3));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Left), doc, layout, _context);
+        Assert.Equal(new DocumentPosition(0, 0, 1), caret.Position);   // stepped over the whole emoji
+
+        ctrl.HandleKeyDown(Key(EditorKey.Right), doc, layout, _context);
+        ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
+        Assert.Equal("a", doc.GetText());
+    }
+
+    [Fact]
+    public void MoveRight_ThenDelete_OverEmoji_LeavesNoLoneSurrogate()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("\U0001F600\U0001F601"));
+        caret.MoveTo(new DocumentPosition(0, 0, 0));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Right), doc, layout, _context);
+        Assert.Equal(new DocumentPosition(0, 0, 2), caret.Position);
+
+        ctrl.HandleKeyDown(Key(EditorKey.Delete), doc, layout, _context);
+        Assert.Equal("\U0001F600", doc.GetText());
+    }
+
+    [Fact]
+    public void Backspace_AtParagraphStart_PlacesCaretAtJoinPoint()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("ab"), Para("cd"));
+        caret.MoveTo(new DocumentPosition(1, 0, 0));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
+        ctrl.HandleTextInput("X", doc);
+
+        Assert.Equal("abXcd", doc.GetText());
+    }
 }

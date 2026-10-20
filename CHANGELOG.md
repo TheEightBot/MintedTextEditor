@@ -16,7 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Focus / caret (#6)**: the caret is hidden and stops blinking when focus moves to another control (e.g. an `Entry`), on all platforms. The blink timer runs only while the editor is focused, so an idle editor no longer repaints 10× per second.
 - **Android IMEs other than Gboard (#6)**: the input connection now reports the real text around the caret to the keyboard (correct auto-capitalisation and word boundaries), adopts `setComposingRegion` so Samsung/MIUI no longer duplicate words, handles `deleteSurroundingTextInCodePoints` (whole-emoji delete), `performEditorAction` and numpad Enter, and never deletes the selection on `deleteSurroundingText`.
 - **Android suggestions**: picking a Gboard suggestion (`replaceText`, API 34+) now replaces the word; previously it was silently dropped.
-- Backspace and Delete remove a whole grapheme cluster (emoji, skin-tone and ZWJ sequences, flags, combining marks) instead of leaving half of it behind.
+- Backspace, Delete and Left/Right arrow step over a whole grapheme cluster (emoji, skin-tone and ZWJ sequences, flags, combining marks) instead of splitting it.
+- Backspace at the start of a paragraph (and Delete at the end) left the caret at the end of the joined paragraph instead of at the join point.
 
 ### Changed
 - `EditorFocusChanged` now fires on real native focus changes (tap into the editor, focus moving to another control), exactly once per change. Previously it fired only from `Focus()`/`Unfocus()`. New read-only `IsEditorFocused`; `Unfocus()` now actually removes native focus. The editor starts unfocused (no caret until focused).

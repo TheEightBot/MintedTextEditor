@@ -92,15 +92,14 @@ public class ImeTextContextTests
     }
 
     [Fact]
-    public void DeleteImeTextBefore_ClampsAtParagraphStart_NoMerge()
+    public void DeleteImeTextBefore_PastParagraphStart_ClampsAtDocumentStart_AfterJoin()
     {
         var (doc, caret, ctrl) = Setup(Para("ab"), Para("cd"));
         caret.MoveTo(new DocumentPosition(1, 0, 1));
 
-        ctrl.DeleteImeTextBefore(5, doc);
+        ctrl.DeleteImeTextBefore(5, doc);   // "c", the break, "b", "a"
 
-        Assert.Equal(2, doc.Blocks.Count);
-        Assert.Equal("d", doc.Blocks[1].GetText());
+        Assert.Equal("d", doc.GetText());
     }
 
     [Fact]
@@ -152,11 +151,87 @@ public class ImeTextContextTests
         var tracker = new ImeCompositionTracker(sink);
 
         tracker.SetComposingRegion(4, 9, ctrl.GetImeTextContext(doc));
-        tracker.SetComposingText("hello");
-        tracker.SetComposingText("help");
-        tracker.CommitText("help ");
+        tracker.SetComposingText("hello", 1, ctrl.GetImeTextContext(doc));
+        tracker.SetComposingText("help", 1, ctrl.GetImeTextContext(doc));
+        tracker.CommitText("help ", 1, ctrl.GetImeTextContext(doc));
 
         Assert.Equal("say help ", doc.GetText());
+    }
+
+    [Fact]
+    public void TextAfterCursor_HugeCount_DoesNotOverflow()
+    {
+        var ctx = new ImeTextContext("hello", 1, 1);
+
+        Assert.Equal("ello", ctx.TextAfterCursor(int.MaxValue));
+        Assert.Equal("h", ctx.TextBeforeCursor(int.MaxValue));
+    }
+
+    [Fact]
+    public void DeleteImeTextAfter_CrossParagraphSelection_IsPreserved()
+    {
+        var (doc, caret, ctrl) = Setup(Para("abc"), Para("defg"));
+        ctrl.Selection.Set(new DocumentPosition(0, 0, 1), new DocumentPosition(1, 0, 2));
+        caret.MoveTo(new DocumentPosition(1, 0, 2));
+
+        ctrl.DeleteImeTextAfter(1, doc);
+
+        Assert.Equal("deg", doc.Blocks[1].GetText());
+        Assert.Equal(new DocumentPosition(0, 0, 1), ctrl.Selection.Anchor);
+        Assert.Equal(new DocumentPosition(1, 0, 2), ctrl.Selection.Active);
+    }
+
+    [Fact]
+    public void DeleteImeTextBefore_BackwardCrossParagraphSelection_KeepsDirection()
+    {
+        // Anchor in paragraph 2, active (caret) in paragraph 1.
+        var (doc, caret, ctrl) = Setup(Para("abc"), Para("defg"));
+        ctrl.Selection.Set(new DocumentPosition(1, 0, 2), new DocumentPosition(0, 0, 2));
+        caret.MoveTo(new DocumentPosition(0, 0, 2));
+
+        ctrl.DeleteImeTextBefore(1, doc);
+
+        Assert.Equal("ac", doc.Blocks[0].GetText());
+        Assert.Equal("defg", doc.Blocks[1].GetText());
+        Assert.Equal(new DocumentPosition(1, 0, 2), ctrl.Selection.Anchor);
+        Assert.Equal(new DocumentPosition(0, 0, 1), ctrl.Selection.Active);
+    }
+
+    [Fact]
+    public void DeleteImeTextBefore_AtParagraphStart_JoinsParagraphs()
+    {
+        var (doc, caret, ctrl) = Setup(Para("ab"), Para("cd"));
+        caret.MoveTo(new DocumentPosition(1, 0, 0));
+
+        ctrl.DeleteImeTextBefore(1, doc);
+
+        Assert.Single(doc.Blocks);
+        Assert.Equal("abcd", doc.GetText());
+        Assert.Equal(2, ctrl.GetImeTextContext(doc).SelectionStart);
+    }
+
+    [Fact]
+    public void DeleteImeTextBefore_PastParagraphStart_JoinsThenDeletes()
+    {
+        var (doc, caret, ctrl) = Setup(Para("ab"), Para("cd"));
+        caret.MoveTo(new DocumentPosition(1, 0, 1));
+
+        ctrl.DeleteImeTextBefore(3, doc);   // "c", the break, "b"
+
+        Assert.Equal("ad", doc.GetText());
+    }
+
+    [Fact]
+    public void DeleteImeTextAfter_AtParagraphEnd_JoinsParagraphs()
+    {
+        var (doc, caret, ctrl) = Setup(Para("ab"), Para("cd"));
+        caret.MoveTo(new DocumentPosition(0, 0, 2));
+
+        ctrl.DeleteImeTextAfter(1, doc);
+
+        Assert.Single(doc.Blocks);
+        Assert.Equal("abcd", doc.GetText());
+        Assert.Equal(2, ctrl.GetImeTextContext(doc).SelectionStart);
     }
 
     private sealed class ControllerSink(EditorInputController ctrl, EditorDocument doc) : IImeEditSink

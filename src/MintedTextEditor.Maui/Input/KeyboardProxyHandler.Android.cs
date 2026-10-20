@@ -245,8 +245,11 @@ internal sealed class KeyboardInputConnection : BaseInputConnection
 
     public override bool SetComposingText(Java.Lang.ICharSequence? text, int newCursorPosition)
     {
-        _tracker.SetComposingText(text?.ToString() ?? string.Empty);
-        ReportSelection();
+        var str = text?.ToString() ?? string.Empty;
+        _tracker.SetComposingText(str, newCursorPosition, _proxy.GetImeTextContext());
+        // Composing text with a newline splits the paragraph (the tracker ends the
+        // composition); re-sync the IME to the new paragraph's offsets.
+        AfterEdit(paragraphChanged: ContainsNewline(str));
         return true;
     }
 
@@ -267,24 +270,23 @@ internal sealed class KeyboardInputConnection : BaseInputConnection
     public override bool CommitText(Java.Lang.ICharSequence? text, int newCursorPosition)
     {
         var str = text?.ToString() ?? string.Empty;
-        _tracker.CommitText(str);
+        _tracker.CommitText(str, newCursorPosition, _proxy.GetImeTextContext());
         // A committed newline (MIUI Enter) splits the paragraph: new offset frame.
-        if (str.IndexOf('\n') >= 0 || str.IndexOf('\r') >= 0) RestartInput();
-        else ReportSelection();
+        AfterEdit(paragraphChanged: ContainsNewline(str));
         return true;
     }
 
     public override bool DeleteSurroundingText(int beforeLength, int afterLength)
     {
-        _tracker.DeleteSurrounding(beforeLength, afterLength);
-        ReportSelection();
+        // Running past the paragraph edge joins paragraphs (the editor handles it); the
+        // IME's paragraph-relative offsets are then stale, so restart.
+        AfterEdit(_tracker.DeleteSurrounding(beforeLength, afterLength, _proxy.GetImeTextContext()));
         return true;
     }
 
     public override bool DeleteSurroundingTextInCodePoints(int beforeLength, int afterLength)
     {
-        _tracker.DeleteSurroundingInCodePoints(beforeLength, afterLength, _proxy.GetImeTextContext());
-        ReportSelection();
+        AfterEdit(_tracker.DeleteSurroundingInCodePoints(beforeLength, afterLength, _proxy.GetImeTextContext()));
         return true;
     }
 
@@ -292,22 +294,24 @@ internal sealed class KeyboardInputConnection : BaseInputConnection
     // overrides a picked suggestion (Gboard on API 34+ uses replaceText) never reaches us.
     public override bool ReplaceText(int start, int end, Java.Lang.ICharSequence text, int newCursorPosition, TextAttribute? textAttribute)
     {
-        _tracker.Replace(start, end, text?.ToString() ?? string.Empty, _proxy.GetImeTextContext());
-        ReportSelection();
+        var str = text?.ToString() ?? string.Empty;
+        _tracker.Replace(start, end, str, newCursorPosition, _proxy.GetImeTextContext());
+        AfterEdit(paragraphChanged: ContainsNewline(str));
         return true;
     }
 
     public override bool CommitCompletion(CompletionInfo? text)
     {
-        _tracker.CommitText(text?.Text?.ToString() ?? string.Empty);
-        ReportSelection();
+        var str = text?.Text?.ToString() ?? string.Empty;
+        _tracker.CommitText(str, 1, _proxy.GetImeTextContext());
+        AfterEdit(paragraphChanged: ContainsNewline(str));
         return true;
     }
 
     public override bool SetSelection(int start, int end)
     {
-        _tracker.Reset();
-        _proxy.ImeSink?.SetSelection(start, end);
+        // setSelection does not end a composition on Android: keep the composing range.
+        _tracker.SetSelection(start, end);
         ReportSelection();
         return true;
     }
@@ -393,8 +397,9 @@ internal sealed class KeyboardInputConnection : BaseInputConnection
         if (!OperatingSystem.IsAndroidVersionAtLeast(31))
             return null;
         var ctx = _proxy.GetImeTextContext();
-        int start = Math.Max(0, ctx.SelectionStart - Math.Max(0, beforeLength));
-        int end = Math.Min(ctx.ParagraphText.Length, ctx.SelectionEnd + Math.Max(0, afterLength));
+        // Clamp the counts before adding: IMEs may pass very large values (int.MaxValue).
+        int start = ctx.SelectionStart - Math.Clamp(beforeLength, 0, ctx.SelectionStart);
+        int end = ctx.SelectionEnd + Math.Clamp(afterLength, 0, ctx.ParagraphText.Length - ctx.SelectionEnd);
         return new SurroundingText(
             new Java.Lang.String(ctx.ParagraphText[start..end]),
             ctx.SelectionStart - start,
@@ -436,6 +441,15 @@ internal sealed class KeyboardInputConnection : BaseInputConnection
     /// Used when the caret moves to a different paragraph, since offsets are paragraph-relative.
     /// </summary>
 
+    private void AfterEdit(bool paragraphChanged)
+    {
+        if (paragraphChanged) RestartInput();
+        else ReportSelection();
+    }
+
+    private static bool ContainsNewline(string text)
+        => text.IndexOf('\n') >= 0 || text.IndexOf('\r') >= 0;
+
     private void RestartInput()
     {
         _tracker.Reset();
@@ -451,10 +465,8 @@ internal sealed class KeyboardInputConnection : BaseInputConnection
         if (_view.Context?.GetSystemService(Context.InputMethodService) is not InputMethodManager imm)
             return;
         var ctx = _proxy.GetImeTextContext();
-        int composingLength = _tracker.ComposingText.Length;
-        int compStart = composingLength > 0 ? ctx.SelectionStart - composingLength : -1;
-        int compEnd = composingLength > 0 ? ctx.SelectionStart : -1;
-        imm.UpdateSelection(_view, ctx.SelectionStart, ctx.SelectionEnd, compStart, compEnd);
+        imm.UpdateSelection(_view, ctx.SelectionStart, ctx.SelectionEnd,
+            _tracker.ComposingStart, _tracker.ComposingEnd);
     }
 
     /// <summary>

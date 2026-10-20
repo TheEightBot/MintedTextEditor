@@ -251,8 +251,7 @@ public static class DocumentEditor
         var first = GetParagraph(document, blockIndex);
         var second = GetParagraph(document, blockIndex + 1);
 
-        int mergeInlineIndex = first.Inlines.Count;
-        var mergePos = new DocumentPosition(blockIndex, mergeInlineIndex, 0);
+        int mergeOffset = first.Length;
 
         foreach (var inline in second.Inlines)
             first.AddInline(inline);
@@ -261,6 +260,21 @@ public static class DocumentEditor
         document.Blocks.RemoveAt(blockIndex + 1);
 
         NormalizeInlines(first);
+
+        // Resolve the join point after normalization: adjacent runs with the same style are
+        // combined, so an inline index computed beforehand can point past the end.
+        var mergePos = new DocumentPosition(blockIndex, 0, 0);
+        int remaining = mergeOffset;
+        for (int i = 0; i < first.Inlines.Count; i++)
+        {
+            int len = first.Inlines[i].Length;
+            if (remaining <= len)
+            {
+                mergePos = new DocumentPosition(blockIndex, i, remaining);
+                break;
+            }
+            remaining -= len;
+        }
 
         document.NotifyChanged(new DocumentChangedEventArgs(
             DocumentChangeType.BlocksMerged,

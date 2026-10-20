@@ -59,20 +59,26 @@ public class ImeCompositionTrackerTests
         }
     }
 
+    private static void Compose(ImeCompositionTracker t, FakeSink sink, string text, int cursor = 1)
+        => t.SetComposingText(text, cursor, sink.Context);
+
+    private static void Commit(ImeCompositionTracker t, FakeSink sink, string text, int cursor = 1)
+        => t.CommitText(text, cursor, sink.Context);
+
     [Fact]
     public void SamsungStyleComposing_InsertsOnlyNewCharacters()
     {
         var sink = new FakeSink();
         var t = new ImeCompositionTracker(sink);
 
-        t.SetComposingText("h");
-        t.SetComposingText("he");
-        t.SetComposingText("hel");
-        t.CommitText("hel ");
+        Compose(t, sink, "h");
+        Compose(t, sink, "he");
+        Compose(t, sink, "hel");
+        Commit(t, sink, "hel ");
 
         Assert.Equal(new[] { "insert:h", "insert:e", "insert:l", "insert: " }, sink.Ops);
         Assert.Equal("hel ", sink.Text);
-        Assert.Equal(string.Empty, t.ComposingText);
+        Assert.False(t.HasComposition);
     }
 
     [Fact]
@@ -81,9 +87,9 @@ public class ImeCompositionTrackerTests
         var sink = new FakeSink();
         var t = new ImeCompositionTracker(sink);
 
-        t.SetComposingText("teh");
+        Compose(t, sink, "teh");
         sink.Ops.Clear();
-        t.CommitText("the ");
+        Commit(t, sink, "the ");
 
         Assert.Equal(new[] { "before:2", "insert:he " }, sink.Ops);
         Assert.Equal("the ", sink.Text);
@@ -95,12 +101,13 @@ public class ImeCompositionTrackerTests
         var sink = new FakeSink();
         var t = new ImeCompositionTracker(sink);
 
-        t.SetComposingText("help");
+        Compose(t, sink, "help");
         sink.Ops.Clear();
-        t.SetComposingText("he");
+        Compose(t, sink, "he");
 
         Assert.Equal(new[] { "before:2" }, sink.Ops);
         Assert.Equal("he", sink.Text);
+        Assert.Equal((0, 2), (t.ComposingStart, t.ComposingEnd));
     }
 
     [Fact]
@@ -111,24 +118,40 @@ public class ImeCompositionTrackerTests
         var t = new ImeCompositionTracker(sink);
 
         t.SetComposingRegion(4, 9, sink.Context);
-        t.SetComposingText("hello");
+        Compose(t, sink, "hello");
         Assert.Empty(sink.Ops);
 
-        t.SetComposingText("help");
+        Compose(t, sink, "help");
         Assert.Equal(new[] { "before:2", "insert:p" }, sink.Ops);
         Assert.Equal("say help", sink.Text);
     }
 
     [Fact]
-    public void SetComposingRegion_AwayFromCaret_MovesCaretToRegionEnd()
+    public void SetComposingRegion_LeavesSelectionUnchanged()
     {
-        var sink = new FakeSink("say hello world", selStart: 15);
+        var sink = new FakeSink("hello", selStart: 2);
         var t = new ImeCompositionTracker(sink);
 
+        t.SetComposingRegion(0, 5, sink.Context);
+
+        Assert.Empty(sink.Ops);
+        Assert.Equal(2, sink.SelStart);
+        Assert.Equal((0, 5), (t.ComposingStart, t.ComposingEnd));
+    }
+
+    [Fact]
+    public void ComposeAfterAdoptingRegion_WithCaretInsideWord_ReplacesRegion()
+    {
+        // Mid-word tap: caret at 2 inside the adopted word; the IME re-composes the word.
+        var sink = new FakeSink("say hello", selStart: 6);
+        var t = new ImeCompositionTracker(sink);
         t.SetComposingRegion(4, 9, sink.Context);
 
-        Assert.Equal(new[] { "select:9,9" }, sink.Ops);
-        Assert.Equal("hello", t.ComposingText);
+        Compose(t, sink, "heXllo");
+
+        Assert.Equal("say heXllo", sink.Text);
+        Assert.Equal(10, sink.SelStart);
+        Assert.Equal((4, 10), (t.ComposingStart, t.ComposingEnd));
     }
 
     [Fact]
@@ -143,14 +166,77 @@ public class ImeCompositionTrackerTests
     }
 
     [Fact]
+    public void SetSelection_KeepsComposition_Unchanged()
+    {
+        // Comment: setComposingText("ab"), setSelection(2,2), setComposingText("abc") → "abc".
+        var sink = new FakeSink();
+        var t = new ImeCompositionTracker(sink);
+        Compose(t, sink, "ab");
+        t.SetSelection(2, 2);
+        Compose(t, sink, "abc");
+
+        Assert.Equal("abc", sink.Text);
+    }
+
+    [Fact]
+    public void SetSelection_InsideComposition_NextComposeReplacesWholeRegion()
+    {
+        var sink = new FakeSink();
+        var t = new ImeCompositionTracker(sink);
+        Compose(t, sink, "abcd");
+        t.SetSelection(1, 1);
+        Compose(t, sink, "abXd");
+
+        Assert.Equal("abXd", sink.Text);
+        Assert.Equal(4, sink.SelStart);
+    }
+
+    [Fact]
+    public void ComposingTextWithNewline_EndsComposition()
+    {
+        // Comment: "a\n" then "ab\n" must not leave a multi-paragraph mirror behind.
+        var sink = new FakeSink();
+        var t = new ImeCompositionTracker(sink);
+
+        Compose(t, sink, "a\n");
+
+        Assert.False(t.HasComposition);
+        Assert.Equal(-1, t.ComposingStart);
+    }
+
+    [Fact]
     public void CommitNewline_IsPassedThroughAsText()
     {
         var sink = new FakeSink();
         var t = new ImeCompositionTracker(sink);
 
-        t.CommitText("\n");
+        Commit(t, sink, "\n");
 
         Assert.Equal(new[] { "insert:\n" }, sink.Ops);
+    }
+
+    [Fact]
+    public void EmptyCommit_DeletesComposingText()
+    {
+        var sink = new FakeSink("x");
+        var t = new ImeCompositionTracker(sink);
+        Compose(t, sink, "ab");
+
+        Commit(t, sink, "");
+
+        Assert.Equal("x", sink.Text);
+    }
+
+    [Fact]
+    public void CommitText_NewCursorPositionZero_PlacesCursorBeforeText()
+    {
+        var sink = new FakeSink("ab");
+        var t = new ImeCompositionTracker(sink);
+
+        Commit(t, sink, "xyz", cursor: 0);
+
+        Assert.Equal("abxyz", sink.Text);
+        Assert.Equal(2, sink.SelStart);
     }
 
     [Fact]
@@ -160,26 +246,58 @@ public class ImeCompositionTrackerTests
         var sink = new FakeSink("abcdef", selStart: 2, selEnd: 4);
         var t = new ImeCompositionTracker(sink);
 
-        t.DeleteSurrounding(1, 1);
+        bool crosses = t.DeleteSurrounding(1, 1, sink.Context);
 
+        Assert.False(crosses);
         Assert.Equal(new[] { "before:1", "after:1" }, sink.Ops);
-        Assert.Equal("acd", sink.Text[..3]);
         Assert.Equal("acdf", sink.Text);
     }
 
     [Fact]
-    public void DeleteSurrounding_InsideComposition_TrimsComposingMirror()
+    public void DeleteSurrounding_InsideComposition_TrimsComposingRange()
     {
         var sink = new FakeSink();
         var t = new ImeCompositionTracker(sink);
-        t.SetComposingText("word");
+        Compose(t, sink, "word");
 
-        t.DeleteSurrounding(1, 0);
+        t.DeleteSurrounding(1, 0, sink.Context);
         sink.Ops.Clear();
-        t.SetComposingText("wors");
+        Compose(t, sink, "wors");
 
         Assert.Equal(new[] { "insert:s" }, sink.Ops);
         Assert.Equal("wors", sink.Text);
+    }
+
+    [Fact]
+    public void DeleteSurrounding_BeforeComposition_ShiftsRange()
+    {
+        var sink = new FakeSink("ab cd", selStart: 3);
+        var t = new ImeCompositionTracker(sink);
+        t.SetComposingRegion(3, 5, sink.Context);
+
+        t.DeleteSurrounding(2, 0, sink.Context);   // deletes "b "
+
+        Assert.Equal("acd", sink.Text);
+        Assert.Equal((1, 3), (t.ComposingStart, t.ComposingEnd));
+    }
+
+    [Fact]
+    public void DeleteSurrounding_PastParagraphStart_ReportsCrossing()
+    {
+        var sink = new FakeSink("ab", selStart: 0);
+        var t = new ImeCompositionTracker(sink);
+
+        Assert.True(t.DeleteSurrounding(1, 0, sink.Context));
+        Assert.Equal(new[] { "before:1" }, sink.Ops);   // the editor joins the paragraphs
+    }
+
+    [Fact]
+    public void DeleteSurrounding_PastParagraphEnd_ReportsCrossing()
+    {
+        var sink = new FakeSink("ab");
+        var t = new ImeCompositionTracker(sink);
+
+        Assert.True(t.DeleteSurrounding(0, 1, sink.Context));
     }
 
     [Fact]
@@ -208,15 +326,25 @@ public class ImeCompositionTrackerTests
     }
 
     [Fact]
+    public void DeleteSurroundingInCodePoints_PastParagraphStart_CountsBreak()
+    {
+        var sink = new FakeSink("a", selStart: 0);
+        var t = new ImeCompositionTracker(sink);
+
+        Assert.True(t.DeleteSurroundingInCodePoints(1, 0, sink.Context));
+        Assert.Equal(new[] { "before:1" }, sink.Ops);
+    }
+
+    [Fact]
     public void FinishComposing_ThenCompose_IsPureInsert()
     {
         var sink = new FakeSink();
         var t = new ImeCompositionTracker(sink);
-        t.SetComposingText("ab");
+        Compose(t, sink, "ab");
         t.FinishComposing();
         sink.Ops.Clear();
 
-        t.SetComposingText("x");
+        Compose(t, sink, "x");
 
         Assert.Equal(new[] { "insert:x" }, sink.Ops);
         Assert.Equal("abx", sink.Text);
@@ -227,11 +355,11 @@ public class ImeCompositionTrackerTests
     {
         var sink = new FakeSink();
         var t = new ImeCompositionTracker(sink);
-        t.SetComposingText("hi");
+        Compose(t, sink, "hi");
         sink.Ops.Clear();
 
         t.Enter();
-        t.SetComposingText("x");
+        Compose(t, sink, "x");
 
         Assert.Equal(new[] { "enter", "insert:x" }, sink.Ops);
     }
@@ -241,10 +369,10 @@ public class ImeCompositionTrackerTests
     {
         var sink = new FakeSink();
         var t = new ImeCompositionTracker(sink);
-        t.SetComposingText("a\U0001F600");   // a😀
+        Compose(t, sink, "a\U0001F600");   // a😀
         sink.Ops.Clear();
 
-        t.SetComposingText("a\U0001F601");   // a😁 — shares the high surrogate
+        Compose(t, sink, "a\U0001F601");   // a😁 — shares the high surrogate
 
         Assert.Equal(new[] { "before:2", "insert:\U0001F601" }, sink.Ops);
     }
@@ -254,11 +382,11 @@ public class ImeCompositionTrackerTests
     {
         var sink = new FakeSink();
         var t = new ImeCompositionTracker(sink);
-        t.SetComposingText("ab");
+        Compose(t, sink, "ab");
         t.Reset();
         sink.Ops.Clear();
 
-        t.SetComposingText("ab");
+        Compose(t, sink, "ab");
 
         Assert.Equal(new[] { "insert:ab" }, sink.Ops);
     }
@@ -269,12 +397,37 @@ public class ImeCompositionTrackerTests
         var sink = new FakeSink("say tet");
         var t = new ImeCompositionTracker(sink);
 
-        t.Replace(4, 7, "Tet", sink.Context);
+        t.Replace(4, 7, "Tet", 1, sink.Context);
 
         Assert.Equal(new[] { "select:4,7", "insert:Tet" }, sink.Ops);
         Assert.Equal("say Tet", sink.Text);
         Assert.Equal(7, sink.SelStart);
-        Assert.Equal(string.Empty, t.ComposingText);
+        Assert.False(t.HasComposition);
+    }
+
+    [Fact]
+    public void Replace_AlwaysEstablishesRange_EvenWhenContextMatches()
+    {
+        // The editor's real selection may extend past this paragraph (context is clamped).
+        var sink = new FakeSink("def", selStart: 0, selEnd: 2);
+        var t = new ImeCompositionTracker(sink);
+
+        t.Replace(0, 2, "X", 1, sink.Context);
+
+        Assert.Equal(new[] { "select:0,2", "insert:X" }, sink.Ops);
+        Assert.Equal("Xf", sink.Text);
+    }
+
+    [Fact]
+    public void Replace_NewCursorPositionZero_PlacesCursorAtStart()
+    {
+        var sink = new FakeSink("abcdef");
+        var t = new ImeCompositionTracker(sink);
+
+        t.Replace(2, 4, "x", 0, sink.Context);
+
+        Assert.Equal("abxef", sink.Text);
+        Assert.Equal(2, sink.SelStart);
     }
 
     [Fact]
@@ -283,7 +436,7 @@ public class ImeCompositionTrackerTests
         var sink = new FakeSink("abcdef", selStart: 1);
         var t = new ImeCompositionTracker(sink);
 
-        t.Replace(2, 4, "", sink.Context);
+        t.Replace(2, 4, "", 1, sink.Context);
 
         Assert.Equal("abef", sink.Text);
         Assert.Equal(2, sink.SelStart);

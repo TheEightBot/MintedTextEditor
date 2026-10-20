@@ -13,14 +13,15 @@ public readonly record struct ImeTextContext(string ParagraphText, int Selection
     /// <summary>Gets up to <paramref name="length"/> units immediately before the selection.</summary>
     public string TextBeforeCursor(int length)
     {
-        int start = Math.Max(0, SelectionStart - Math.Max(0, length));
+        int start = SelectionStart - Math.Clamp(length, 0, SelectionStart);
         return ParagraphText[start..SelectionStart];
     }
 
     /// <summary>Gets up to <paramref name="length"/> units immediately after the selection.</summary>
     public string TextAfterCursor(int length)
     {
-        int end = Math.Min(ParagraphText.Length, SelectionEnd + Math.Max(0, length));
+        // Clamp the count first: IMEs may pass int.MaxValue, which would overflow the sum.
+        int end = SelectionEnd + Math.Clamp(length, 0, ParagraphText.Length - SelectionEnd);
         return ParagraphText[SelectionEnd..end];
     }
 
