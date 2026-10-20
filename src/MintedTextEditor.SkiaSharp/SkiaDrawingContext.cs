@@ -180,6 +180,19 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         _canvas.Translate(dx, dy);
     }
 
+    /// <inheritdoc />
+    public void Scale(float sx, float sy)
+    {
+        _canvas.Scale(sx, sy);
+    }
+
+    /// <inheritdoc />
+    public void ClipRoundRect(EditorRect rect, float cornerRadius)
+    {
+        using var roundRect = new SKRoundRect(ToSKRect(rect), cornerRadius);
+        _canvas.ClipRoundRect(roundRect, antialias: true);
+    }
+
     // ── Images ───────────────────────────────────────────────────
 
     public void DrawImage(object image, EditorRect destRect)

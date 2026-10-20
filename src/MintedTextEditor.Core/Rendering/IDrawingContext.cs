@@ -38,6 +38,19 @@ public interface IDrawingContext
     void Restore();
     void Translate(float dx, float dy);
 
+    /// <summary>
+    /// Scales subsequent drawing by (<paramref name="sx"/>, <paramref name="sy"/>). Used by the
+    /// text magnifier. The default implementation does nothing (content is drawn unscaled);
+    /// platform rendering layers should override it.
+    /// </summary>
+    void Scale(float sx, float sy) { }
+
+    /// <summary>
+    /// Intersects the clip with a rounded rectangle. The default implementation clips to the
+    /// plain rectangle; platform rendering layers should override it.
+    /// </summary>
+    void ClipRoundRect(EditorRect rect, float cornerRadius) => ClipRect(rect);
+
     // ── Images ───────────────────────────────────────────────────
 
     void DrawImage(object image, EditorRect destRect);

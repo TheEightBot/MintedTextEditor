@@ -75,6 +75,14 @@ public class MintedEditorView : ContentView
     private float _tableRightStartWidth;
 
     private bool _isResizingTableRow;
+
+    // Long-press caret drag with the text magnifier (loupe).
+    private readonly LongPressDetector _longPress = new();
+    private readonly System.Diagnostics.Stopwatch _gestureClock = System.Diagnostics.Stopwatch.StartNew();
+    private IDispatcherTimer? _longPressTimer;
+    private bool _isCaretDragging;
+    private readonly Magnifier _magnifier = new();
+    private readonly MagnifierRenderer _magnifierRenderer = new();
     private int _resizingRowIndex = -1;
     private float _tableResizeStartY;
     private float _tableTopStartHeight;
@@ -263,6 +271,45 @@ public class MintedEditorView : ContentView
     {
         get => (bool)GetValue(ShowToolbarProperty);
         set => SetValue(ShowToolbarProperty, value);
+    }
+
+    /// <summary>
+    /// Shows a magnifier (loupe) above the finger while the caret is dragged after a long
+    /// press. Touch input only. Default: <c>true</c>.
+    /// </summary>
+    public static readonly BindableProperty IsMagnifierEnabledProperty =
+        BindableProperty.Create(
+            nameof(IsMagnifierEnabled),
+            typeof(bool),
+            typeof(MintedEditorView),
+            true);
+
+    /// <inheritdoc cref="IsMagnifierEnabledProperty"/>
+    public bool IsMagnifierEnabled
+    {
+        get => (bool)GetValue(IsMagnifierEnabledProperty);
+        set => SetValue(IsMagnifierEnabledProperty, value);
+    }
+
+    /// <summary>
+    /// Appearance of the magnifier. Defaults to an approximation of the platform's native
+    /// magnifier (<see cref="MagnifierOptions.Android"/> on Android,
+    /// <see cref="MagnifierOptions.Apple"/> elsewhere).
+    /// </summary>
+    public static readonly BindableProperty MagnifierOptionsProperty =
+        BindableProperty.Create(
+            nameof(MagnifierOptions),
+            typeof(MagnifierOptions),
+            typeof(MintedEditorView),
+            defaultValueCreator: static _ => DeviceInfo.Platform == DevicePlatform.Android
+                ? MagnifierOptions.Android
+                : MagnifierOptions.Apple);
+
+    /// <inheritdoc cref="MagnifierOptionsProperty"/>
+    public MagnifierOptions MagnifierOptions
+    {
+        get => (MagnifierOptions)GetValue(MagnifierOptionsProperty);
+        set => SetValue(MagnifierOptionsProperty, value);
     }
 
     /// <summary>
@@ -1142,23 +1189,10 @@ public class MintedEditorView : ContentView
             _selectionRenderer.Render(currentSelection, currentLayout, _document, ctx);
         _renderer.ImageResolver = ResolveDocumentImage;
 
-        _renderer.Render(_lastLayout, viewport, dc);
-
-        // Caret only — selection is now rendered inside the document renderer.
-        dc.Save();
-        dc.ClipRect(viewport);
-        dc.Translate(viewport.X, viewport.Y - _scrollOffset);
-
-        if (_selectedImage is not null)
-            RenderImageSelectionHandles(dc);
-
         if (!IsReadOnly)
-        {
             _caret.UpdateBlink();
-            _caretRenderer.Render(_caret, _lastLayout, _document, dc);
-        }
 
-        dc.Restore();
+        RenderDocumentLayer(dc, viewport);
 
         // Placeholder — shown only when the document is an empty single paragraph
         if (_document.Blocks.Count == 1
@@ -1180,6 +1214,32 @@ public class MintedEditorView : ContentView
         // Render overflow panel on top of document (it can extend below the toolbar)
         if (ShowToolbar && _toolbarRenderer.IsOverflowPanelOpen)
             _toolbarRenderer.RenderOverflowPanel(dc, logicalW, logicalH);
+
+        // Magnifier last, above everything: the document drawn again, zoomed, in a lens.
+        _magnifierRenderer.Render(dc, _magnifier, new EditorRect(0, 0, logicalW, logicalH),
+            theme.Background, ctx => RenderDocumentLayer(ctx, viewport));
+    }
+
+    /// <summary>
+    /// Draws the document (selection, text, images) with image handles and the caret.
+    /// Called once per frame, and again inside the magnifier lens.
+    /// </summary>
+    private void RenderDocumentLayer(IDrawingContext dc, EditorRect viewport)
+    {
+        _renderer.Render(_lastLayout, viewport, dc);
+
+        // Caret only — selection is now rendered inside the document renderer.
+        dc.Save();
+        dc.ClipRect(viewport);
+        dc.Translate(viewport.X, viewport.Y - _scrollOffset);
+
+        if (_selectedImage is not null)
+            RenderImageSelectionHandles(dc);
+
+        if (!IsReadOnly)
+            _caretRenderer.Render(_caret, _lastLayout, _document, dc);
+
+        dc.Restore();
     }
 
     // ── Touch ────────────────────────────────────────────────────────────────────
@@ -1294,10 +1354,22 @@ public class MintedEditorView : ContentView
                 NotifyImeSelectionChanged();
                 InvalidateCanvas();
                 RaiseSelectionChanged();
+
+                // Holding still starts a caret drag (with the magnifier), as on iOS/Android.
+                if (e.DeviceType == SKTouchDeviceType.Touch)
+                    StartLongPress(rawX, rawY);
                 break;
             }
             case SKTouchAction.Moved when e.InContact:
             {
+                if (_isCaretDragging)
+                {
+                    UpdateCaretDrag(rawX, rawY);
+                    break;
+                }
+
+                _longPress.Move(rawX, rawY);
+
                 if (_isResizingImage)
                 {
                     UpdateImageResize(x, y);
@@ -1341,6 +1413,13 @@ public class MintedEditorView : ContentView
             }
             case SKTouchAction.Released:
             {
+                _longPress.Cancel();
+                if (_isCaretDragging)
+                {
+                    EndCaretDrag();
+                    break;
+                }
+
                 if (_isResizingImage)
                 {
                     _isResizingImage = false;
@@ -1391,9 +1470,90 @@ public class MintedEditorView : ContentView
                 }
                 break;
             }
+            case SKTouchAction.Cancelled:
+            {
+                _longPress.Cancel();
+                if (_isCaretDragging)
+                    EndCaretDrag();
+                break;
+            }
         }
 
         e.Handled = true;
+    }
+
+    // ── Long-press caret drag & magnifier ────────────────────────────────────────
+
+    private void StartLongPress(float rawX, float rawY)
+    {
+        _longPress.Begin(rawX, rawY, _gestureClock.Elapsed);
+
+        if (_longPressTimer is null)
+        {
+            _longPressTimer = Dispatcher.CreateTimer();
+            _longPressTimer.IsRepeating = false;
+            _longPressTimer.Tick += (_, _) => OnLongPressTimerTick();
+        }
+
+        _longPressTimer.Stop();
+        _longPressTimer.Interval = _longPress.Duration;
+        _longPressTimer.Start();
+    }
+
+    private void OnLongPressTimerTick()
+    {
+        if (!_longPress.IsTracking)
+            return;
+
+        if (!_longPress.TryFire(_gestureClock.Elapsed))
+        {
+            // The timer fired a little early; check again shortly.
+            _longPressTimer!.Interval = TimeSpan.FromMilliseconds(16);
+            _longPressTimer.Start();
+            return;
+        }
+
+        _isCaretDragging = true;
+        _inertialScroller.Stop();
+        _selectedImage = null;
+        UpdateCaretDrag(_longPress.X, _longPress.Y);
+    }
+
+    /// <summary>
+    /// Moves the caret to the touch point (view coordinates) and keeps the magnifier on the
+    /// caret's line.
+    /// </summary>
+    private void UpdateCaretDrag(float rawX, float rawY)
+    {
+        float toolbarH = ShowToolbar ? _toolbarRenderer.ToolbarHeight : 0f;
+        var ctx = GetMeasureContext();
+        var hit = DocumentHitTester.HitTest(rawX, rawY - toolbarH + _scrollOffset, _lastLayout, _document, ctx);
+        var position = NormalizeTapPosition(hit.Position, hit.IsAfterLastBlock);
+
+        _caret.Position = position;
+        _caret.ResetBlink();
+        _inputController.Selection.CollapseTo(position);
+
+        if (IsMagnifierEnabled)
+        {
+            // Magnify the caret's line, like the native loupes, rather than the finger's exact
+            // height, so the lens shows whole lines while the finger wanders up and down.
+            var caretRect = _caretRenderer.GetCaretRect(position, _lastLayout, _document, ctx);
+            _magnifier.Options = MagnifierOptions;
+            _magnifier.Show(rawX, caretRect.Y + caretRect.Height / 2f + toolbarH - _scrollOffset);
+        }
+
+        InvalidateCanvas();
+        RaiseSelectionChanged();
+    }
+
+    private void EndCaretDrag()
+    {
+        _isCaretDragging = false;
+        _magnifier.Hide();
+        _inertialScroller.Stop();
+        NotifyImeSelectionChanged();
+        InvalidateCanvas();
     }
 
     // ── Blink Timer ──────────────────────────────────────────────────────────────

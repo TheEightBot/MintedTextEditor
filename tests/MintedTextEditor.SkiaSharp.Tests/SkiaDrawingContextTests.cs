@@ -1,4 +1,5 @@
 using System.Globalization;
+using MintedTextEditor.Core.Editing;
 using MintedTextEditor.Core.Rendering;
 using SkiaSharp;
 
@@ -159,6 +160,32 @@ public class SkiaDrawingContextTests : IDisposable
         _ctx.DrawImage(bitmap, new EditorRect(0, 0, 4, 4));
 
         Assert.Equal(SKColors.Green, ReadPixel(1, 1));
+    }
+
+    // ── Magnifier ────────────────────────────────────────────────
+
+    [Fact]
+    public void Magnifier_DrawsContentZoomedAndClippedToLens()
+    {
+        var magnifier = new Magnifier
+        {
+            Options = new MagnifierOptions
+            {
+                Width = 80, Height = 40, CornerRadius = 20, VerticalOffset = 0, Zoom = 2f,
+                BorderColor = EditorColor.Transparent, ShadowColor = EditorColor.Transparent,
+            },
+        };
+        magnifier.Show(200, 50);
+
+        // Content: a 10×10 black square centred on the focus point.
+        new MagnifierRenderer().Render(_ctx, magnifier, new EditorRect(0, 0, 400, 100), EditorColor.White,
+            ctx => ctx.FillRect(new EditorRect(195, 45, 10, 10), new EditorPaint { Color = EditorColor.Black }));
+
+        // Zoomed 2× the square covers (190..210, 40..60) around the lens centre (200, 50).
+        Assert.Equal(new SKRectI(190, 0, 210, 100), InkBounds());
+        Assert.Equal(SKColors.Black, ReadPixel(200, 50));
+        Assert.Equal(SKColors.Black, ReadPixel(191, 41));
+        Assert.Equal(SKColors.White, ReadPixel(188, 50));
     }
 
     // ── Helpers ──────────────────────────────────────────────────

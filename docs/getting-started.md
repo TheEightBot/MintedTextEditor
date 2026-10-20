@@ -103,6 +103,22 @@ editor.SelectionChanged += (sender, e) =>
 };
 ```
 
+## Caret Drag and Magnifier
+
+On touch screens, press and hold to pick up the caret, then drag to move it. While dragging, a magnifier (loupe) shows the line under your finger. By default it looks like the platform's native magnifier, and you can change its look or turn it off:
+
+```csharp
+using MintedTextEditor.Core.Editing;
+
+editor.IsMagnifierEnabled = true;          // default
+editor.MagnifierOptions = new MagnifierOptions
+{
+    Width = 80, Height = 80, CornerRadius = 40,  // a round loupe
+    Zoom = 1.5f,
+};
+// Or start from a preset: MagnifierOptions.Apple / MagnifierOptions.Android
+```
+
 ## Next Steps
 
 - [Document Model](document-model.md) — understand how content is structured
