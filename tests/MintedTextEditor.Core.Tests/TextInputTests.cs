@@ -518,4 +518,51 @@ public class TextInputTests
         Assert.True(handled);
         Assert.Equal("Hello[TAB]", doc.GetText());
     }
+
+    // ── Grapheme-safe deletion ─────────────────────────────────────────
+
+    [Theory]
+    [InlineData("a\U0001F600", "a")]                         // emoji (surrogate pair)
+    [InlineData("a\U0001F44D\U0001F3FD", "a")]              // emoji + skin-tone modifier
+    [InlineData("a\U0001F468\u200D\U0001F469\u200D\U0001F467", "a")] // ZWJ family
+    [InlineData("a\U0001F1FA\U0001F1F8", "a")]              // flag (regional indicators)
+    [InlineData("ae\u0301", "a")]                            // e + combining acute
+    [InlineData("a\u2764\uFE0F", "a")]                      // heart + VS16
+    [InlineData("ab", "a")]
+    public void Backspace_RemovesWholeGraphemeCluster(string text, string expected)
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para(text));
+        caret.MoveTo(new DocumentPosition(0, 0, text.Length));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
+
+        Assert.Equal(expected, doc.GetText());
+        Assert.Equal(new DocumentPosition(0, 0, expected.Length), caret.Position);
+    }
+
+    [Theory]
+    [InlineData("\U0001F600b", "b")]
+    [InlineData("\U0001F44D\U0001F3FDb", "b")]
+    [InlineData("e\u0301b", "b")]
+    [InlineData("ab", "b")]
+    public void Delete_RemovesWholeGraphemeCluster(string text, string expected)
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para(text));
+        caret.MoveTo(new DocumentPosition(0, 0, 0));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Delete), doc, layout, _context);
+
+        Assert.Equal(expected, doc.GetText());
+    }
+
+    [Fact]
+    public void Backspace_EmojiAcrossRunBoundary_RemovesOnlyEmoji()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("ab", "\U0001F600"));
+        caret.MoveTo(new DocumentPosition(0, 1, 2));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
+
+        Assert.Equal("ab", doc.GetText());
+    }
 }

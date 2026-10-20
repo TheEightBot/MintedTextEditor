@@ -1,3 +1,4 @@
+using System.Globalization;
 using MintedTextEditor.Core.Document;
 using MintedTextEditor.Core.Editing;
 using MintedTextEditor.Core.Formatting;
@@ -450,8 +451,9 @@ public class EditorInputController
             return;
         }
 
-        // Delete one character before the caret
-        var startPos = AbsoluteOffsetToPosition(document, caretPos, absOffset - 1);
+        // Delete the whole grapheme cluster before the caret (emoji, combining marks, …)
+        int prevBoundary = PreviousGraphemeBoundary(GetParagraph(document, caretPos).GetText(), absOffset);
+        var startPos = AbsoluteOffsetToPosition(document, caretPos, prevBoundary);
         var newPos = PushOrExecute(new DeleteRangeAction(document, new TextRange(startPos, caretPos)));
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
@@ -491,8 +493,9 @@ public class EditorInputController
             return;
         }
 
-        // Delete one character after the caret
-        var endPos = AbsoluteOffsetToPosition(document, caretPos, absOffset + 1);
+        // Delete the whole grapheme cluster after the caret
+        int nextBoundary = NextGraphemeBoundary(GetParagraph(document, caretPos).GetText(), absOffset);
+        var endPos = AbsoluteOffsetToPosition(document, caretPos, nextBoundary);
         var newPos = PushOrExecute(new DeleteRangeAction(document, new TextRange(caretPos, endPos)));
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
@@ -1328,6 +1331,32 @@ public class EditorInputController
         }
 
         return context.With(0, 0);
+    }
+
+    /// <summary>
+    /// Offset of the grapheme-cluster boundary before <paramref name="offset"/>, so Backspace
+    /// never leaves half an emoji (lone surrogate, orphaned modifier or ZWJ sequence).
+    /// </summary>
+    internal static int PreviousGraphemeBoundary(string text, int offset)
+    {
+        offset = Math.Clamp(offset, 0, text.Length);
+        if (offset == 0) return 0;
+        int pos = 0, last = 0;
+        while (pos < offset)
+        {
+            last = pos;
+            pos += Math.Max(1, StringInfo.GetNextTextElementLength(text, pos));
+        }
+        // A caret inside a cluster deletes back to that cluster's start.
+        return last;
+    }
+
+    /// <summary>Offset of the grapheme-cluster boundary after <paramref name="offset"/>.</summary>
+    internal static int NextGraphemeBoundary(string text, int offset)
+    {
+        offset = Math.Clamp(offset, 0, text.Length);
+        if (offset >= text.Length) return text.Length;
+        return Math.Min(text.Length, offset + Math.Max(1, StringInfo.GetNextTextElementLength(text, offset)));
     }
 
     private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
