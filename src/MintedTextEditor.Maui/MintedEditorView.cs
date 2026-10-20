@@ -81,6 +81,7 @@ public class MintedEditorView : ContentView
     private readonly System.Diagnostics.Stopwatch _gestureClock = System.Diagnostics.Stopwatch.StartNew();
     private IDispatcherTimer? _longPressTimer;
     private bool _isCaretDragging;
+    private long _gestureTouchId = -1; // the finger that owns the long press / caret drag
     private readonly Magnifier _magnifier = new();
     private readonly MagnifierRenderer _magnifierRenderer = new();
     private int _resizingRowIndex = -1;
@@ -1330,6 +1331,10 @@ public class MintedEditorView : ContentView
         {
             case SKTouchAction.Pressed:
             {
+                // Another finger going down mid-drag must not move the caret the drag owns.
+                if (_isCaretDragging)
+                    break;
+
                 StopInertiaTimer();
 
                 if (TryBeginImageResize(x, y) || TryBeginTableColumnResize(x, y) || TryBeginTableRowResize(x, y))
@@ -1369,18 +1374,20 @@ public class MintedEditorView : ContentView
 
                 // Holding still starts a caret drag (with the magnifier), as on iOS/Android.
                 if (e.DeviceType == SKTouchDeviceType.Touch)
-                    StartLongPress(rawX, rawY);
+                    StartLongPress(e.Id, rawX, rawY);
                 break;
             }
             case SKTouchAction.Moved when e.InContact:
             {
                 if (_isCaretDragging)
                 {
-                    UpdateCaretDrag(rawX, rawY);
+                    if (e.Id == _gestureTouchId)
+                        UpdateCaretDrag(rawX, rawY);
                     break;
                 }
 
-                _longPress.Move(rawX, rawY);
+                if (e.Id == _gestureTouchId)
+                    _longPress.Move(rawX, rawY);
 
                 if (_isResizingImage)
                 {
@@ -1425,10 +1432,13 @@ public class MintedEditorView : ContentView
             }
             case SKTouchAction.Released:
             {
-                _longPress.Cancel();
+                if (e.Id == _gestureTouchId)
+                    _longPress.Cancel();
                 if (_isCaretDragging)
                 {
-                    EndCaretDrag();
+                    // Only the finger that owns the drag ends it.
+                    if (e.Id == _gestureTouchId)
+                        EndCaretDrag();
                     break;
                 }
 
@@ -1484,7 +1494,8 @@ public class MintedEditorView : ContentView
             }
             case SKTouchAction.Cancelled:
             {
-                CancelCaretGesture();
+                if (e.Id == _gestureTouchId)
+                    CancelCaretGesture();
                 break;
             }
         }
@@ -1494,8 +1505,9 @@ public class MintedEditorView : ContentView
 
     // ── Long-press caret drag & magnifier ────────────────────────────────────────
 
-    private void StartLongPress(float rawX, float rawY)
+    private void StartLongPress(long touchId, float rawX, float rawY)
     {
+        _gestureTouchId = touchId;
         _longPress.Begin(rawX, rawY, _gestureClock.Elapsed);
 
         if (_longPressTimer is null)
@@ -1559,8 +1571,11 @@ public class MintedEditorView : ContentView
             // caret in view when it snaps to the end of a short line.
             var caretRect = _caretRenderer.GetCaretRect(position, _lastLayout, _document, ctx);
             _magnifier.Options = MagnifierOptions;
-            _magnifier.Show(caretRect.X + caretRect.Width / 2f,
-                caretRect.Y + caretRect.Height / 2f + toolbarH - _scrollOffset);
+            // Keep the focus on the visible document: a partly scrolled-off line's centre can
+            // lie above it, where nothing is drawn for the lens to show.
+            float focusY = Math.Clamp(caretRect.Y + caretRect.Height / 2f - _scrollOffset,
+                0f, Math.Max(0f, docViewHeight)) + toolbarH;
+            _magnifier.Show(caretRect.X + caretRect.Width / 2f, focusY);
         }
 
         InvalidateCanvas();

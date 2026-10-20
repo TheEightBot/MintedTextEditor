@@ -14,11 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 - **Caret drag and magnifier (#2)**: on touch screens, press and hold to pick up the caret and drag it. A magnifier (loupe) above the finger shows the caret's line, zoomed. It looks like the native magnifier by default (`MagnifierOptions.Apple` / `MagnifierOptions.Android`), and you can change it with `MintedEditorView.MagnifierOptions` (size, corner radius, zoom, offset, border, shadow) or turn it off with `IsMagnifierEnabled`.
-- `IDrawingContext.Scale` and `IDrawingContext.ClipRoundRect` (default implementations provided, so existing implementations keep compiling).
+- `IDrawingContext.Scale`, `IDrawingContext.ClipRoundRect` and `IDrawingContext.MeasureCaretOffset` (default implementations provided, so existing implementations keep compiling). The Skia context measures caret offsets within the whole shaped run, so the caret and hit-testing match kerned text.
 
 ### Fixed
 - **Emoji ZWJ sequences (#9)**: 👨‍👩‍👧, 👩‍💻 and other joined emoji draw as one glyph instead of separate people; flags draw as one flag.
-- **Grapheme clusters (#9)**: the Skia renderer keeps whole ZWJ sequences together, so truncating text with an ellipsis can no longer cut an emoji in half.
+- **Grapheme clusters (#9)**: whole ZWJ sequences stay together when truncating with an ellipsis, wrapping long unbroken text and hit-testing a tap, so an emoji is never cut in half.
 - **Emoji presentation (#9)**: `❤️` and other VS16 sequences use the color emoji font even when the text font has a monochrome glyph, and emoji such as 😀 no longer fall back to a monochrome font (e.g. DejaVu Sans on Linux).
 - **Bitmap updates (#9)**: changes to a mutable `SKBitmap` after it was first drawn now show. Only immutable bitmaps are cached; icons and images the editor loads are marked immutable so they stay cached.
 

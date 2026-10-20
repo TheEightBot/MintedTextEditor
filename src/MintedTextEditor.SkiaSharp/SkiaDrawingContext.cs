@@ -151,6 +151,44 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         return new EditorSize(width, height);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Measured within the whole shaped text, the same way it is drawn, so the caret and
+    /// hit-testing include the kerning and contextual forms between neighbours.
+    /// </remarks>
+    public float MeasureCaretOffset(string text, int index, EditorPaint paint)
+    {
+        if (string.IsNullOrEmpty(text) || index <= 0) return 0f;
+        if (index >= text.Length) return MeasureText(text, paint).Width;
+
+        var skFont = GetOrCreateFont(paint);
+        var skPaint = GetOrCreatePaint(paint, SKPaintStyle.Fill);
+
+        if (PrimaryFontCoversAll(text, skFont))
+            return CaretOffsetInRun(text, index, skFont, skPaint, ShapeAllText);
+
+        float x = 0f;
+        foreach (var (start, runText, font) in SegmentByTypeface(text, skFont, paint))
+        {
+            if (index <= start)
+                return x;
+
+            bool shape = ShapeAllText || !ReferenceEquals(font, skFont);
+            if (index < start + runText.Length)
+                return x + CaretOffsetInRun(runText, index - start, font, skPaint, shape);
+
+            x += MeasureRun(runText, font, skPaint, shape);
+        }
+
+        return x;
+    }
+
+    private float CaretOffsetInRun(string text, int index, SKFont font, SKPaint paint, bool shape)
+    {
+        var shaped = shape ? Shape(text, font) : null;
+        return shaped?.CaretOffset(index) ?? font.MeasureText(StripZeroWidthFormatting(text[..index]), paint);
+    }
+
     public EditorFontMetrics GetFontMetrics(EditorPaint paint)
     {
         var skFont = GetOrCreateFont(paint);
@@ -378,7 +416,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         }
 
         float penX = x;
-        foreach (var (runText, font) in SegmentByTypeface(text, primaryFont, editorPaint))
+        foreach (var (_, runText, font) in SegmentByTypeface(text, primaryFont, editorPaint))
         {
             // The run's paint is reused for every segment. Color-emoji typefaces carry their
             // own color tables and ignore the paint's color, while monochrome fallback glyphs
@@ -397,7 +435,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
             return MeasureRun(text, primaryFont, paint, ShapeAllText);
 
         float width = 0f;
-        foreach (var (runText, font) in SegmentByTypeface(text, primaryFont, editorPaint))
+        foreach (var (_, runText, font) in SegmentByTypeface(text, primaryFont, editorPaint))
             width += MeasureRun(runText, font, paint, ShapeAllText || !ReferenceEquals(font, primaryFont));
 
         return width;
@@ -586,10 +624,10 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
     /// emoji clusters (see <see cref="ReadGraphemeCluster"/>), the primary typeface when it
     /// covers the whole cluster, then a system fallback for the cluster's base code point.
     /// </summary>
-    private List<(string Text, SKFont Font)> SegmentByTypeface(
+    private List<(int Start, string Text, SKFont Font)> SegmentByTypeface(
         string text, SKFont primaryFont, EditorPaint editorPaint)
     {
-        var segments = new List<(string, SKFont)>();
+        var segments = new List<(int, string, SKFont)>();
         float size = primaryFont.Size;
 
         SKFont? currentFont = null;
@@ -605,7 +643,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
             if (char.IsSurrogate(text[i]) && (i + 1 >= text.Length || !char.IsSurrogatePair(text[i], text[i + 1])))
             {
                 if (currentFont is not null && i > segmentStart)
-                    segments.Add((text[segmentStart..i], currentFont));
+                    segments.Add((segmentStart, text[segmentStart..i], currentFont));
                 currentFont = null;
                 i += clusterLen;
                 segmentStart = i;
@@ -623,7 +661,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
             else if (!ReferenceEquals(resolvedFont, currentFont))
             {
                 // Font changed — flush the accumulated segment
-                segments.Add((text[segmentStart..i], currentFont));
+                segments.Add((segmentStart, text[segmentStart..i], currentFont));
                 currentFont = resolvedFont;
                 segmentStart = i;
             }
@@ -633,7 +671,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
         // Flush the final segment
         if (currentFont is not null && text.Length > segmentStart)
-            segments.Add((text[segmentStart..], currentFont));
+            segments.Add((segmentStart, text[segmentStart..], currentFont));
 
         return segments;
     }

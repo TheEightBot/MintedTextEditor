@@ -99,8 +99,7 @@ public class CaretRenderer
                     else if (offsetInRun > 0)
                     {
                         var paint = CreatePaintFromStyle(run.Style);
-                        var measured = context.MeasureText(run.Text[..offsetInRun], paint);
-                        caretX = run.X + measured.Width;
+                        caretX = run.X + context.MeasureCaretOffset(run.Text, offsetInRun, paint);
                     }
                     else
                     {
@@ -202,7 +201,7 @@ public class CaretRenderer
                 else if (offsetInRun > 0)
                 {
                     var paint = CreatePaintFromStyle(run.Style);
-                    caretX = cellOriginX + run.X + context.MeasureText(run.Text[..offsetInRun], paint).Width;
+                    caretX = cellOriginX + run.X + context.MeasureCaretOffset(run.Text, offsetInRun, paint);
                 }
                 else
                     caretX = cellOriginX + run.X;

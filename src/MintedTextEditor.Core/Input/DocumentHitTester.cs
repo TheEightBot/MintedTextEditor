@@ -148,7 +148,7 @@ public static class DocumentHitTester
         for (int i = 0; i < run.Text.Length;)
         {
             int next = i + Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(run.Text, i));
-            float width = context.MeasureText(run.Text[..next], paint).Width;
+            float width = context.MeasureCaretOffset(run.Text, next, paint);
 
             if (relativeX < (prevWidth + width) / 2f)
                 return i;

@@ -31,6 +31,16 @@ public interface IDrawingContext
     EditorSize MeasureText(string text, EditorPaint paint);
     EditorFontMetrics GetFontMetrics(EditorPaint paint);
 
+    /// <summary>
+    /// Returns the x offset of the caret before UTF-16 index <paramref name="index"/> in
+    /// <paramref name="text"/>, measured from the start of the text as it is drawn whole.
+    /// The default measures the prefix on its own. A context that shapes text should
+    /// return the position within the shaped whole, so kerning and ligatures place the
+    /// caret, and hit-testing thresholds, where the text is actually drawn.
+    /// </summary>
+    float MeasureCaretOffset(string text, int index, EditorPaint paint)
+        => index <= 0 ? 0f : MeasureText(text[..Math.Min(index, text.Length)], paint).Width;
+
     // ── Clipping & transforms ────────────────────────────────────
 
     void ClipRect(EditorRect rect);

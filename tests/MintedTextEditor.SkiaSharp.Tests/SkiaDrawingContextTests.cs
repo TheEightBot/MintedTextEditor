@@ -186,6 +186,35 @@ public class SkiaDrawingContextTests : IDisposable
 
     private static SKTypeface? DejaVu => SKFontManager.Default.MatchFamily("DejaVu Sans") is { FamilyName: "DejaVu Sans" } t ? t : null;
 
+    [Theory]
+    [InlineData("AV")]
+    [InlineData("To")]
+    [InlineData("Wa")]
+    public void MeasureCaretOffset_IncludesKerningOfTheWholeRun(string pair)
+    {
+        // The caret between the two letters sits where the second letter is drawn: the
+        // kerned pair minus the second letter's advance, not the width of the first alone.
+        float full = _ctx.MeasureText(pair, _paint).Width;
+        float second = _ctx.MeasureText(pair[1..], _paint).Width;
+
+        Assert.Equal(full - second, _ctx.MeasureCaretOffset(pair, 1, _paint), 0.01f);
+    }
+
+    [Fact]
+    public void MeasureCaretOffset_IsMonotonicAndEndsAtFullWidth()
+    {
+        const string text = "AVATAR 👩\u200D💻 Wolf ❤\uFE0F office";
+        float previous = 0f;
+        for (int i = 0; i <= text.Length; i++)
+        {
+            float x = _ctx.MeasureCaretOffset(text, i, _paint);
+            Assert.True(x >= previous - 0.01f, $"offset {i} went backwards: {x} < {previous}");
+            previous = x;
+        }
+
+        Assert.Equal(_ctx.MeasureText(text, _paint).Width, previous, 0.01f);
+    }
+
     // ── VS16 emoji presentation ─────────────────────────────────
 
     [Fact]

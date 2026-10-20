@@ -9,8 +9,45 @@ namespace MintedTextEditor.SkiaSharp;
 /// <summary>
 /// The glyphs and pen positions produced by shaping a string, ready to draw with the
 /// <see cref="SKFont"/> it was shaped for. Positions are relative to the run origin.
+/// Glyphs are in logical order; <see cref="Clusters"/> gives the UTF-16 index each glyph
+/// starts at and <see cref="GlyphX"/> the pen x before it.
 /// </summary>
-internal sealed record ShapedRun(ushort[] Glyphs, SKPoint[] Positions, float Width);
+internal sealed record ShapedRun(ushort[] Glyphs, SKPoint[] Positions, float Width, int[] Clusters, float[] GlyphX, int TextLength)
+{
+    /// <summary>
+    /// The x offset of the caret before UTF-16 index <paramref name="index"/>, taken from
+    /// this (whole) shaped run so kerning between neighbours is included. An index inside a
+    /// multi-character cluster (a ligature) is placed proportionally across it.
+    /// </summary>
+    public float CaretOffset(int index)
+    {
+        if (index <= 0) return 0f;
+        if (index >= TextLength) return Width;
+
+        // Start of the cluster holding index, and the start of the next cluster after it.
+        int startCluster = 0;
+        float startX = 0f;
+        for (int g = 0; g < Clusters.Length; g++)
+        {
+            if (Clusters[g] > index)
+            {
+                float endX = GlyphX[g];
+                return startX + (endX - startX) * (index - startCluster) / (Clusters[g] - startCluster);
+            }
+
+            if (Clusters[g] != startCluster || g == 0)
+            {
+                startCluster = Clusters[g];
+                startX = GlyphX[g];
+            }
+
+            if (startCluster == index)
+                return startX;
+        }
+
+        return startX + (Width - startX) * (index - startCluster) / Math.Max(1, TextLength - startCluster);
+    }
+}
 
 /// <summary>
 /// HarfBuzz text shaper for one typeface. Shaping applies the font's substitution and
@@ -142,6 +179,8 @@ internal sealed class HarfBuzzTextShaper
         float scale = size / ShapingScale;
         var glyphs = new List<ushort>(text.Length);
         var points = new List<SKPoint>(text.Length);
+        var clusters = new List<int>(text.Length);
+        var glyphX = new List<float>(text.Length);
         float penX = 0f;
 
         // HarfBuzz shapes one script per buffer, so shape each script run separately
@@ -165,12 +204,14 @@ internal sealed class HarfBuzzTextShaper
             for (int i = 0; i < infos.Length; i++)
             {
                 glyphs.Add((ushort)infos[i].Codepoint);
+                clusters.Add((int)infos[i].Cluster);
+                glyphX.Add(penX);
                 points.Add(new SKPoint(penX + positions[i].XOffset * scale, -positions[i].YOffset * scale));
                 penX += positions[i].XAdvance * scale;
             }
         }
 
-        return new ShapedRun(glyphs.ToArray(), points.ToArray(), penX);
+        return new ShapedRun(glyphs.ToArray(), points.ToArray(), penX, clusters.ToArray(), glyphX.ToArray(), text.Length);
     }
 
     /// <summary>
