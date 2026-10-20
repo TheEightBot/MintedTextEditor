@@ -98,6 +98,31 @@ public sealed class ImeCompositionTracker
         DeleteSurrounding(before, after);
     }
 
+    /// <summary>
+    /// Replaces paragraph text [<paramref name="start"/>, <paramref name="end"/>) with
+    /// <paramref name="text"/> and places the caret after it (Android <c>replaceText</c>,
+    /// which Gboard uses when a suggestion is picked). Ends any composition.
+    /// </summary>
+    public void Replace(int start, int end, string text, ImeTextContext context)
+    {
+        int len = context.ParagraphText.Length;
+        int s = Math.Clamp(Math.Min(start, end), 0, len);
+        int e = Math.Clamp(Math.Max(start, end), 0, len);
+        _composingText = string.Empty;
+
+        if (string.IsNullOrEmpty(text))
+        {
+            if (e == s) return;
+            _sink.SetSelection(e, e);
+            _sink.DeleteBefore(e - s);
+            return;
+        }
+
+        if (context.SelectionStart != s || context.SelectionEnd != e)
+            _sink.SetSelection(s, e);
+        _sink.InsertText(text);
+    }
+
     /// <summary>Ends any composition and splits the paragraph (IME editor action / Enter).</summary>
     public void Enter()
     {

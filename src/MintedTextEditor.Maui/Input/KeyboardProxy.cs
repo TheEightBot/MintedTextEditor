@@ -47,6 +47,21 @@ internal sealed class KeyboardProxy : View
 
     internal void RaiseNativeFocusChanged(bool isFocused) => NativeFocusChanged?.Invoke(this, isFocused);
 
+    /// <summary>
+    /// Exact-range edit target for IME composition (set by the editor). Platforms with a
+    /// composing input model (Android) route composition through this instead of
+    /// synthesizing Backspace keys, so edits never over-delete.
+    /// </summary>
+    internal IImeEditSink? ImeSink { get; set; }
+
+    /// <summary>
+    /// Supplies the caret paragraph's text and selection so the IME can answer
+    /// "text around the cursor" queries truthfully (set by the editor).
+    /// </summary>
+    internal Func<ImeTextContext>? ImeContextProvider { get; set; }
+
+    internal ImeTextContext GetImeTextContext() => ImeContextProvider?.Invoke() ?? ImeTextContext.Empty;
+
     internal void RaiseTextInput(string text) => TextInput?.Invoke(this, text);
     internal void RaiseKeyDown(EditorKeyEventArgs args) => KeyDown?.Invoke(this, args);
 

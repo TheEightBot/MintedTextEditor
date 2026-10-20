@@ -262,4 +262,30 @@ public class ImeCompositionTrackerTests
 
         Assert.Equal(new[] { "insert:ab" }, sink.Ops);
     }
+
+    [Fact]
+    public void Replace_SuggestionPick_ReplacesWordAndEndsComposition()
+    {
+        var sink = new FakeSink("say tet");
+        var t = new ImeCompositionTracker(sink);
+
+        t.Replace(4, 7, "Tet", sink.Context);
+
+        Assert.Equal(new[] { "select:4,7", "insert:Tet" }, sink.Ops);
+        Assert.Equal("say Tet", sink.Text);
+        Assert.Equal(7, sink.SelStart);
+        Assert.Equal(string.Empty, t.ComposingText);
+    }
+
+    [Fact]
+    public void Replace_WithEmptyText_DeletesRange()
+    {
+        var sink = new FakeSink("abcdef", selStart: 1);
+        var t = new ImeCompositionTracker(sink);
+
+        t.Replace(2, 4, "", sink.Context);
+
+        Assert.Equal("abef", sink.Text);
+        Assert.Equal(2, sink.SelStart);
+    }
 }

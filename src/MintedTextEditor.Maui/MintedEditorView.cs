@@ -718,6 +718,8 @@ public class MintedEditorView : ContentView
         _keyboardProxy.TextInput += OnKeyboardTextInput;
         _keyboardProxy.KeyDown += OnKeyboardKeyDown;
         _keyboardProxy.NativeFocusChanged += OnNativeFocusChanged;
+        _keyboardProxy.ImeSink = new EditorImeSink(this);
+        _keyboardProxy.ImeContextProvider = () => _inputController.GetImeTextContext(_document);
         // The editor starts unfocused: no caret and no blink timer until the
         // platform capture view actually receives keyboard focus.
         _caret.IsFocused = false;
@@ -1863,6 +1865,37 @@ public class MintedEditorView : ContentView
                 NotifyImeSelectionChanged();
             InvalidateCanvas();
             RaiseSelectionChanged();
+        }
+    }
+
+    /// <summary>
+    /// Applies IME composition edits to the document as exact UTF-16 ranges in the caret's
+    /// paragraph, then refreshes the view the same way typed input does.
+    /// </summary>
+    private sealed class EditorImeSink(MintedEditorView editor) : IImeEditSink
+    {
+        public void InsertText(string text) =>
+            Apply(() => editor._inputController.HandleTextInput(text, editor._document));
+
+        public void DeleteBefore(int count) =>
+            Apply(() => editor._inputController.DeleteImeTextBefore(count, editor._document));
+
+        public void DeleteAfter(int count) =>
+            Apply(() => editor._inputController.DeleteImeTextAfter(count, editor._document));
+
+        public void SetSelection(int start, int end) =>
+            Apply(() => editor._inputController.SetImeSelection(start, end, editor._document));
+
+        public void Enter() =>
+            Apply(() => editor._inputController.HandleTextInput("\n", editor._document));
+
+        private void Apply(Action edit)
+        {
+            if (editor.IsReadOnly) return;
+            edit();
+            editor.ScrollCaretIntoView();
+            editor.InvalidateCanvas();
+            editor.RaiseSelectionChanged();
         }
     }
 
