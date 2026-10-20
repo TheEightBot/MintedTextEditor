@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **Android input (#5)**: soft keyboard now appears on tap/focus; hardware-keyboard printable keys and Ctrl shortcuts are handled; IME composing text (`setComposingText`) is applied as you type; the Return key (committed as `"\n"`) splits the paragraph instead of inserting a literal newline.
+- Formatting toggles (e.g. superscript) no longer drift the selection, lose text, or leave the Android IME composing against stale state.
+- Character formatting no longer leaks past the selection to the end of the paragraph.
+- Emoji render via Skia font fallback; variation-selector sequences (e.g. 🛠️) no longer draw a trailing box.
+
+### Changed
+- SkiaSharp / SkiaSharp.Views.Maui.Controls 3.119.2 → 4.153.1 and Svg.Skia 3.2.1 → 5.2.3 for current MAUI 10 support.
+- Sample app builds on the current MAUI SDK (10.0.110): icon/splash SVGs no longer use `<text>`, which crashes Resizetizer 10.0.110.
+
 ---
 
 ## [1.0.0] — 2026-03-25
