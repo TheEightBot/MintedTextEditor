@@ -181,21 +181,36 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         // Use a high-quality sampling paint so bitmaps are never blurry when the
         // source and destination sizes differ (e.g. HiDPI SVG icons drawn at small
         // logical sizes, or user-inserted images scaled to fit their column width).
-        using var paint = new SKPaint
-        {
-            IsAntialias = true,
-            FilterQuality = SKFilterQuality.High,
-        };
+        using var paint = new SKPaint { IsAntialias = true };
+        DrawImageCore(image, destRect, paint);
+    }
 
+    // SkiaSharp 3+/4 removed SKPaint.FilterQuality; sampling is now passed explicitly.
+    // Mipmapped linear sampling matches the old "High" quality for downscaled bitmaps.
+    private static readonly SKSamplingOptions HighQualitySampling =
+        new(SKFilterMode.Linear, SKMipmapMode.Linear);
+
+    private void DrawImageCore(object image, EditorRect destRect, SKPaint paint)
+    {
+        var dest = ToSKRect(destRect);
         if (image is SKImage skImage)
         {
-            _canvas.DrawImage(skImage, ToSKRect(destRect), paint);
+            _canvas.DrawImage(skImage, dest, HighQualitySampling, paint);
         }
         else if (image is SKBitmap skBitmap)
         {
-            _canvas.DrawBitmap(skBitmap, ToSKRect(destRect), paint);
+            // DrawBitmap has no SKSamplingOptions overload, so draw via an SKImage.
+            // Cache the wrapper per bitmap: toolbar icons are redrawn every frame and
+            // SKImage.FromBitmap copies pixels of mutable bitmaps. The entry is collected
+            // with the bitmap (SKImage releases its native handle via its own finalizer).
+            var img = BitmapImageCache.GetValue(skBitmap, static b => SKImage.FromBitmap(b));
+            if (img is not null)
+                _canvas.DrawImage(img, dest, HighQualitySampling, paint);
         }
     }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<SKBitmap, SKImage>
+        BitmapImageCache = new();
 
     /// <inheritdoc />
     /// <remarks>
@@ -212,14 +227,10 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         using var paint = new SKPaint
         {
             IsAntialias = true,
-            FilterQuality = SKFilterQuality.High,
             ColorFilter = colorFilter,
         };
 
-        if (image is SKImage skImage)
-            _canvas.DrawImage(skImage, ToSKRect(destRect), paint);
-        else if (image is SKBitmap skBitmap)
-            _canvas.DrawBitmap(skBitmap, ToSKRect(destRect), paint);
+        DrawImageCore(image, destRect, paint);
     }
 
     // ── Caching ──────────────────────────────────────────────────
@@ -509,7 +520,6 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         string text, SKFont primaryFont, EditorPaint editorPaint)
     {
         var segments = new List<(string, SKFont)>();
-        var primaryTypeface = primaryFont.Typeface;
         float size = primaryFont.Size;
 
         SKFont? currentFont = null;
@@ -534,7 +544,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
                 // Fall back to primary if no emoji font is installed (e.g. CI host).
                 resolvedFont = GetFallbackFont(editorPaint, baseCodePoint, size) ?? primaryFont;
             }
-            else if (primaryTypeface.GetGlyph(baseCodePoint) != 0)
+            else if (primaryFont.ContainsGlyph(baseCodePoint))
             {
                 resolvedFont = primaryFont;
             }
