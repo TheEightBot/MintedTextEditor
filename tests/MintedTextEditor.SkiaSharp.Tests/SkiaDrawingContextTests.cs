@@ -16,8 +16,25 @@ public class SkiaDrawingContextTests : IDisposable
     private const string Technologist = "👩‍💻";
     private const string RedHeart = "❤️";
 
-    private static readonly bool HasEmojiFont =
-        SKFontManager.Default.MatchCharacter(null, SKFontStyle.Normal, new[] { "und-Zsye" }, 0x1F600) is not null;
+    private static readonly bool HasEmojiFont = HasColorEmojiFont();
+
+    // MatchCharacter guarantees coverage, not color: without a color emoji font installed it
+    // can return a monochrome font such as DejaVu Sans. Look for a color glyph table.
+    private static bool HasColorEmojiFont()
+    {
+        using var typeface = SKFontManager.Default.MatchCharacter(null, SKFontStyle.Normal, new[] { "und-Zsye" }, 0x1F600);
+        if (typeface is null)
+            return false;
+
+        foreach (var table in new[] { "CBDT", "sbix", "COLR", "SVG " })
+        {
+            uint tag = (uint)(table[0] << 24 | table[1] << 16 | table[2] << 8 | table[3]);
+            if (typeface.GetTableSize(tag) > 0)
+                return true;
+        }
+
+        return false;
+    }
 
     private readonly SKSurface _surface = SKSurface.Create(new SKImageInfo(400, 100));
     private readonly SkiaDrawingContext _ctx;

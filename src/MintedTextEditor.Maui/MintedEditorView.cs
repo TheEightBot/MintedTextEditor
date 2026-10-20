@@ -1540,7 +1540,12 @@ public class MintedEditorView : ContentView
     {
         float toolbarH = ShowToolbar ? _toolbarRenderer.ToolbarHeight : 0f;
         var ctx = GetMeasureContext();
-        var hit = DocumentHitTester.HitTest(rawX, rawY - toolbarH + _scrollOffset, _lastLayout, _document, ctx);
+        // Keep the target on the visible part of the document (the finger may slide over the
+        // toolbar or past the bottom edge); off-screen lines are not drawn, so the lens
+        // would have nothing to show.
+        float docViewHeight = (Height > 0 ? (float)Height : 400f) - toolbarH;
+        float viewY = Math.Clamp(rawY - toolbarH, 0f, Math.Max(0f, docViewHeight - 1f));
+        var hit = DocumentHitTester.HitTest(rawX, viewY + _scrollOffset, _lastLayout, _document, ctx);
         var position = NormalizeTapPosition(hit.Position, hit.IsAfterLastBlock);
 
         _caret.Position = position;
@@ -1549,11 +1554,13 @@ public class MintedEditorView : ContentView
 
         if (IsMagnifierEnabled)
         {
-            // Magnify the caret's line, like the native loupes, rather than the finger's exact
-            // height, so the lens shows whole lines while the finger wanders up and down.
+            // Magnify around the caret, like the native loupes, rather than the finger: the
+            // lens shows whole lines while the finger wanders up and down, and keeps the
+            // caret in view when it snaps to the end of a short line.
             var caretRect = _caretRenderer.GetCaretRect(position, _lastLayout, _document, ctx);
             _magnifier.Options = MagnifierOptions;
-            _magnifier.Show(rawX, caretRect.Y + caretRect.Height / 2f + toolbarH - _scrollOffset);
+            _magnifier.Show(caretRect.X + caretRect.Width / 2f,
+                caretRect.Y + caretRect.Height / 2f + toolbarH - _scrollOffset);
         }
 
         InvalidateCanvas();
