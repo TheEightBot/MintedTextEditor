@@ -512,6 +512,89 @@ public class EditorInputController
         _caret.MoveTo(newPos);
     }
 
+    // ── IME support ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Describes the caret's paragraph for an input method editor: its plain text and the
+    /// selection within it. A selection that leaves the paragraph is clamped to its bounds.
+    /// </summary>
+    public ImeTextContext GetImeTextContext(Document.Document document)
+    {
+        var caretPos = _caret.Position;
+        string text = GetParagraph(document, caretPos).GetText();
+
+        if (_selection.IsEmpty)
+        {
+            int caret = Math.Clamp(GetAbsoluteOffset(document, caretPos), 0, text.Length);
+            return new ImeTextContext(text, caret, caret);
+        }
+
+        var range = _selection.Range;
+        int start = IsSameParagraph(range.Start, caretPos)
+            ? GetAbsoluteOffset(document, range.Start) : 0;
+        int end = IsSameParagraph(range.End, caretPos)
+            ? GetAbsoluteOffset(document, range.End) : text.Length;
+        start = Math.Clamp(start, 0, text.Length);
+        end = Math.Clamp(end, start, text.Length);
+        return new ImeTextContext(text, start, end);
+    }
+
+    /// <summary>
+    /// Deletes exactly <paramref name="count"/> UTF-16 units before the selection start (or
+    /// caret), within the caret's paragraph. The selection is preserved. Used by IME
+    /// composition edits, which must not expand to grapheme clusters like Backspace does.
+    /// </summary>
+    public void DeleteImeTextBefore(int count, Document.Document document)
+    {
+        if (count <= 0) return;
+        var ctx = GetImeTextContext(document);
+        int n = Math.Min(count, ctx.SelectionStart);
+        if (n == 0) return;
+
+        var para = _caret.Position;
+        var from = AbsoluteOffsetToPosition(document, para, ctx.SelectionStart - n);
+        var to = AbsoluteOffsetToPosition(document, para, ctx.SelectionStart);
+        PushOrExecute(new DeleteRangeAction(document, new TextRange(from, to)));
+        RestoreImeSelection(document, para, ctx.SelectionStart - n, ctx.SelectionEnd - n);
+    }
+
+    /// <summary>
+    /// Deletes exactly <paramref name="count"/> UTF-16 units after the selection end (or
+    /// caret), within the caret's paragraph. The selection is preserved.
+    /// </summary>
+    public void DeleteImeTextAfter(int count, Document.Document document)
+    {
+        if (count <= 0) return;
+        var ctx = GetImeTextContext(document);
+        int n = Math.Min(count, ctx.ParagraphText.Length - ctx.SelectionEnd);
+        if (n == 0) return;
+
+        var para = _caret.Position;
+        var from = AbsoluteOffsetToPosition(document, para, ctx.SelectionEnd);
+        var to = AbsoluteOffsetToPosition(document, para, ctx.SelectionEnd + n);
+        PushOrExecute(new DeleteRangeAction(document, new TextRange(from, to)));
+        RestoreImeSelection(document, para, ctx.SelectionStart, ctx.SelectionEnd);
+    }
+
+    /// <summary>Sets the selection to paragraph-relative offsets in the caret's paragraph (clamped).</summary>
+    public void SetImeSelection(int start, int end, Document.Document document)
+    {
+        var para = _caret.Position;
+        int len = GetParagraph(document, para).Length;
+        RestoreImeSelection(document, para, Math.Clamp(start, 0, len), Math.Clamp(end, 0, len));
+    }
+
+    private void RestoreImeSelection(Document.Document document, DocumentPosition paragraph, int start, int end)
+    {
+        var anchor = AbsoluteOffsetToPosition(document, paragraph, start);
+        var active = AbsoluteOffsetToPosition(document, paragraph, end);
+        _selection.Set(anchor, active);
+        _caret.MoveTo(active);
+    }
+
+    private static bool IsSameParagraph(DocumentPosition a, DocumentPosition b)
+        => a.BlockIndex == b.BlockIndex && a.CellRow == b.CellRow && a.CellCol == b.CellCol;
+
     // ── Selection helpers ─────────────────────────────────────────────
 
     /// <summary>Selects all content in the document.</summary>
