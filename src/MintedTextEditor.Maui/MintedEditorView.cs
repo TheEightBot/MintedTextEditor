@@ -155,6 +155,9 @@ public class MintedEditorView : ContentView
             {
                 var v = (MintedEditorView)b;
                 v._caret.BlinkEnabled = !(bool)nv;
+                // Touch is ignored while read-only, so a release could never end the gesture.
+                if ((bool)nv)
+                    v.CancelCaretGesture();
                 v.InvalidateCanvas();
             });
 
@@ -282,7 +285,16 @@ public class MintedEditorView : ContentView
             nameof(IsMagnifierEnabled),
             typeof(bool),
             typeof(MintedEditorView),
-            true);
+            true,
+            propertyChanged: static (b, _, nv) =>
+            {
+                var v = (MintedEditorView)b;
+                if (!(bool)nv && v._magnifier.IsVisible)
+                {
+                    v._magnifier.Hide();
+                    v.InvalidateCanvas();
+                }
+            });
 
     /// <inheritdoc cref="IsMagnifierEnabledProperty"/>
     public bool IsMagnifierEnabled
@@ -1472,9 +1484,7 @@ public class MintedEditorView : ContentView
             }
             case SKTouchAction.Cancelled:
             {
-                _longPress.Cancel();
-                if (_isCaretDragging)
-                    EndCaretDrag();
+                CancelCaretGesture();
                 break;
             }
         }
@@ -1502,6 +1512,9 @@ public class MintedEditorView : ContentView
 
     private void OnLongPressTimerTick()
     {
+        if (IsReadOnly)
+            _longPress.Cancel();
+
         if (!_longPress.IsTracking)
             return;
 
@@ -1545,6 +1558,14 @@ public class MintedEditorView : ContentView
 
         InvalidateCanvas();
         RaiseSelectionChanged();
+    }
+
+    /// <summary>Abandons a pending long press or an active caret drag.</summary>
+    private void CancelCaretGesture()
+    {
+        _longPress.Cancel();
+        if (_isCaretDragging)
+            EndCaretDrag();
     }
 
     private void EndCaretDrag()

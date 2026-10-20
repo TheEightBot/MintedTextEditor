@@ -133,26 +133,79 @@ internal sealed class HarfBuzzTextShaper
 
     private ShapedRun ShapeUncached(string text, float size)
     {
-        using var buffer = new HBBuffer();
-        buffer.AddUtf16(text);
-        buffer.GuessSegmentProperties();
-        _font.Shape(buffer);
-
-        var infos = buffer.GetGlyphInfoSpan();
-        var positions = buffer.GetGlyphPositionSpan();
         float scale = size / ShapingScale;
-
-        var glyphs = new ushort[infos.Length];
-        var points = new SKPoint[infos.Length];
+        var glyphs = new List<ushort>(text.Length);
+        var points = new List<SKPoint>(text.Length);
         float penX = 0f;
-        for (int i = 0; i < infos.Length; i++)
+
+        // HarfBuzz shapes one script per buffer, so shape each script run separately
+        // (e.g. "abcسلام" is a Latin run then an Arabic run) to give every script its own
+        // shaping rules. The whole string is passed as context so joining across a run
+        // boundary still works.
+        foreach (var (start, length, script) in ScriptRuns(text))
         {
-            glyphs[i] = (ushort)infos[i].Codepoint;
-            points[i] = new SKPoint(penX + positions[i].XOffset * scale, -positions[i].YOffset * scale);
-            penX += positions[i].XAdvance * scale;
+            using var buffer = new HBBuffer();
+            buffer.AddUtf16(text, start, length);
+            buffer.Script = script;
+            // The editor lays out, places the caret and hit-tests in logical order, so keep
+            // glyphs in logical order too: HarfBuzz would otherwise reverse right-to-left
+            // runs and the caret would no longer match the text it is drawn over.
+            buffer.Direction = Direction.LeftToRight;
+            buffer.GuessSegmentProperties();
+            _font.Shape(buffer);
+
+            var infos = buffer.GetGlyphInfoSpan();
+            var positions = buffer.GetGlyphPositionSpan();
+            for (int i = 0; i < infos.Length; i++)
+            {
+                glyphs.Add((ushort)infos[i].Codepoint);
+                points.Add(new SKPoint(penX + positions[i].XOffset * scale, -positions[i].YOffset * scale));
+                penX += positions[i].XAdvance * scale;
+            }
         }
 
-        return new ShapedRun(glyphs, points, penX);
+        return new ShapedRun(glyphs.ToArray(), points.ToArray(), penX);
+    }
+
+    /// <summary>
+    /// Splits <paramref name="text"/> into runs of one script. Characters shared by all scripts
+    /// (spaces, digits, punctuation, emoji, combining marks) join the run they follow, or the
+    /// first real script when they lead the string.
+    /// </summary>
+    private static List<(int Start, int Length, Script Script)> ScriptRuns(string text)
+    {
+        var runs = new List<(int, int, Script)>();
+        var unicode = UnicodeFunctions.Default;
+        int runStart = 0;
+        Script runScript = Script.Common;
+
+        for (int i = 0; i < text.Length;)
+        {
+            int charCount = char.IsSurrogatePair(text, i) ? 2 : 1;
+            int codePoint = charCount == 2 ? char.ConvertToUtf32(text[i], text[i + 1]) : text[i];
+            var script = unicode.GetScript(codePoint);
+
+            if (script != Script.Common && script != Script.Inherited && script != Script.Unknown)
+            {
+                if (runScript == Script.Common)
+                {
+                    runScript = script; // leading shared characters join the first script
+                }
+                else if (script != runScript)
+                {
+                    runs.Add((runStart, i - runStart, runScript));
+                    runStart = i;
+                    runScript = script;
+                }
+            }
+
+            i += charCount;
+        }
+
+        if (text.Length > runStart)
+            runs.Add((runStart, text.Length - runStart, runScript));
+
+        return runs;
     }
 
     private readonly record struct ShaperKey(string Family, int Weight, int Width, SKFontStyleSlant Slant, int GlyphCount);

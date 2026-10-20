@@ -110,6 +110,36 @@ public class SkiaDrawingContextTests : IDisposable
         Assert.True(ink.Right <= width + 4, $"ink right {ink.Right} beyond measured {width}");
     }
 
+    [Fact]
+    public void Shape_RightToLeftRun_KeepsLogicalGlyphOrder()
+    {
+        // Caret placement and hit-testing measure prefixes left to right, so glyphs must stay
+        // in logical order (first character leftmost) rather than being reversed.
+        if (DejaVu is not { } typeface || !typeface.ContainsGlyph(0x05D0)) return;
+
+        var shaped = HarfBuzzTextShaper.Get(typeface)!.Shape("אב", 32f);
+
+        Assert.Equal(typeface.GetGlyph(0x05D0), shaped.Glyphs[0]);
+        Assert.Equal(typeface.GetGlyph(0x05D1), shaped.Glyphs[1]);
+        Assert.True(shaped.Positions[0].X < shaped.Positions[1].X);
+    }
+
+    [Fact]
+    public void Shape_MixedScripts_ShapesEachScriptWithItsOwnRules()
+    {
+        // In "abcسلام" the Arabic must get its joined forms, exactly as when shaped alone.
+        if (DejaVu is not { } typeface || !typeface.ContainsGlyph(0x0633)) return;
+        var shaper = HarfBuzzTextShaper.Get(typeface)!;
+
+        var arabicAlone = shaper.Shape("سلام", 32f).Glyphs;
+        var mixed = shaper.Shape("abcسلام", 32f).Glyphs;
+
+        Assert.Equal(arabicAlone, mixed[^arabicAlone.Length..]);
+        Assert.NotEqual(typeface.GetGlyph(0x0633), arabicAlone[0]); // initial form, not isolated
+    }
+
+    private static SKTypeface? DejaVu => SKFontManager.Default.MatchFamily("DejaVu Sans") is { FamilyName: "DejaVu Sans" } t ? t : null;
+
     // ── VS16 emoji presentation ─────────────────────────────────
 
     [Fact]
