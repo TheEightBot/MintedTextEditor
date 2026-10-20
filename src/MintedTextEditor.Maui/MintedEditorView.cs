@@ -1269,6 +1269,20 @@ public class MintedEditorView : ContentView
         float rawY     = e.Location.Y / scale;
         float toolbarH = ShowToolbar ? _toolbarRenderer.ToolbarHeight : 0f;
 
+        // A finger that goes down during a caret drag is ignored for its whole contact,
+        // wherever it lands (document or toolbar) and even after the drag ends, so it can
+        // never run a command, move the caret, select or tap a link.
+        if (_isCaretDragging && e.ActionType == SKTouchAction.Pressed && e.Id != _gestureTouchId)
+            _ignoredTouchIds.Add(e.Id);
+
+        if (_ignoredTouchIds.Contains(e.Id))
+        {
+            if (e.ActionType is SKTouchAction.Released or SKTouchAction.Cancelled)
+                _ignoredTouchIds.Remove(e.Id);
+            e.Handled = true;
+            return;
+        }
+
         // Route taps in the toolbar band to the toolbar
         if (ShowToolbar && e.ActionType == SKTouchAction.Pressed)
         {
@@ -1330,25 +1344,10 @@ public class MintedEditorView : ContentView
         float y = rawY - toolbarH + _scrollOffset;
         float docViewHeight = (Height > 0 ? (float)Height : 400f) - toolbarH;
 
-        if (_ignoredTouchIds.Contains(e.Id))
-        {
-            if (e.ActionType is SKTouchAction.Released or SKTouchAction.Cancelled)
-                _ignoredTouchIds.Remove(e.Id);
-            e.Handled = true;
-            return;
-        }
-
         switch (e.ActionType)
         {
             case SKTouchAction.Pressed:
             {
-                // Another finger going down mid-drag must not move the caret the drag owns.
-                if (_isCaretDragging)
-                {
-                    _ignoredTouchIds.Add(e.Id);
-                    break;
-                }
-
                 StopInertiaTimer();
 
                 if (TryBeginImageResize(x, y) || TryBeginTableColumnResize(x, y) || TryBeginTableRowResize(x, y))
