@@ -174,8 +174,7 @@ public class EditorInputController
             case EditorKey.B when ctrl:
                 if (FormattingEngine != null)
                 {
-                    var bRange = _selection.Range;
-                    FormattingEngine.ToggleBold(document, bRange);
+                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleBold(document, r));
                     return true;
                 }
                 return false;
@@ -183,8 +182,7 @@ public class EditorInputController
             case EditorKey.I when ctrl:
                 if (FormattingEngine != null)
                 {
-                    var iRange = _selection.Range;
-                    FormattingEngine.ToggleItalic(document, iRange);
+                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleItalic(document, r));
                     return true;
                 }
                 return false;
@@ -192,8 +190,7 @@ public class EditorInputController
             case EditorKey.U when ctrl:
                 if (FormattingEngine != null)
                 {
-                    var uRange = _selection.Range;
-                    FormattingEngine.ToggleUnderline(document, uRange);
+                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleUnderline(document, r));
                     return true;
                 }
                 return false;
@@ -237,10 +234,34 @@ public class EditorInputController
     /// Handles a text input event (printable characters from the platform keyboard).
     /// Replaces the active selection with the typed text.
     /// </summary>
+    /// <remarks>
+    /// Newline sequences ("\r\n", "\n", "\r") are treated as paragraph splits rather
+    /// than literal characters: the text is broken into segments and each newline
+    /// performs the same block split as pressing Enter. This is what makes the soft
+    /// keyboard's Return key work on Android, where the IME commits "\n" as text
+    /// instead of sending a key event. (iOS already converts "\n"/"\r" into an Enter
+    /// key in InsertText, and the Windows handler routes Enter through KeyDown while
+    /// keeping its TextBox empty, so neither delivers a newline to this method.)
+    /// </remarks>
     public void HandleTextInput(string text, Document.Document document)
     {
         if (string.IsNullOrEmpty(text)) return;
 
+        if (ContainsNewline(text))
+        {
+            HandleTextInputWithNewlines(text, document);
+            return;
+        }
+
+        InsertLiteralText(text, document);
+    }
+
+    /// <summary>
+    /// Inserts <paramref name="text"/> verbatim at the caret (replacing any active
+    /// selection) and advances the caret past it. The text must not contain newlines.
+    /// </summary>
+    private void InsertLiteralText(string text, Document.Document document)
+    {
         DocumentPosition insertPos = _caret.Position;
         if (!_selection.IsEmpty)
         {
@@ -255,6 +276,50 @@ public class EditorInputController
         var newPos = PushOrExecute(new InsertTextAction(document, insertPos, text, style));
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
+    }
+
+    /// <summary>
+    /// Splits <paramref name="text"/> on newline sequences, inserting each segment as
+    /// literal text and performing a paragraph split (the same as Enter) between segments.
+    /// </summary>
+    private void HandleTextInputWithNewlines(string text, Document.Document document)
+    {
+        var segments = SplitOnNewlines(text);
+        for (int i = 0; i < segments.Count; i++)
+        {
+            if (segments[i].Length > 0)
+                InsertLiteralText(segments[i], document);
+            if (i < segments.Count - 1)
+                HandleEnter(document);
+        }
+    }
+
+    private static bool ContainsNewline(string text)
+        => text.IndexOf('\n') >= 0 || text.IndexOf('\r') >= 0;
+
+    /// <summary>
+    /// Splits text into the segments that lie between newline sequences, treating
+    /// "\r\n", "\n", and "\r" each as a single separator. The result always has one
+    /// more element than the number of separators, so consecutive newlines and a
+    /// trailing newline yield empty segments (each producing its own block split).
+    /// </summary>
+    private static List<string> SplitOnNewlines(string text)
+    {
+        var segments = new List<string>();
+        int start = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c != '\n' && c != '\r') continue;
+
+            segments.Add(text.Substring(start, i - start));
+            // Treat "\r\n" as a single separator.
+            if (c == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
+                i++;
+            start = i + 1;
+        }
+        segments.Add(text.Substring(start));
+        return segments;
     }
 
     private static TextStyle MergeStyles(TextStyle primary, TextStyle overlay)
@@ -815,6 +880,22 @@ public class EditorInputController
             MoveDown(document, layout, context, extend);
             if (_caret.Position == before) break; // already at bottom
         }
+    }
+
+    // ── Character Formatting helper ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Applies a character-formatting operation while preserving the selection across
+    /// run splits and merges.  Uses <see cref="DocumentEditor.ApplyCharacterFormatting"/>
+    /// so the selection is rebuilt from absolute character offsets after
+    /// <see cref="DocumentEditor.NormalizeInlines"/> is called on all affected paragraphs.
+    /// </summary>
+    private void ApplyFormattingWithSelectionRestore(Document.Document document, Action<TextRange> applyOp)
+    {
+        var (newAnchor, newActive) = DocumentEditor.ApplyCharacterFormatting(
+            document, _selection.Anchor, _selection.Active, applyOp);
+        _selection.Set(newAnchor, newActive);
+        _caret.MoveTo(newActive);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────

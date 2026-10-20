@@ -579,20 +579,49 @@ public class MintedEditorView : ContentView
         if (!command.CanExecute(ctx))
             return;
 
-        command.Execute(ctx);
-
-        // Re-normalize the selection after the command may have split or merged inlines,
-        // which can leave the stored (inlineIndex, offset) pair pointing past the end of
-        // a run or into a run that no longer exists.
-        var anchor = DocumentEditor.NormalizePosition(_document, _inputController.Selection.Anchor);
-        var active = DocumentEditor.NormalizePosition(_document, _inputController.Selection.Active);
-        _inputController.Selection.Set(anchor, active);
+        if (command is ICharacterFormattingCommand)
+        {
+            // Character-formatting commands toggle inline styles and may split or merge
+            // TextRun objects.  Use the robust capture/normalize/rebuild path so the
+            // selection endpoints never drift across repeated toggle cycles.
+            var (newAnchor, newActive) = DocumentEditor.ApplyCharacterFormatting(
+                _document,
+                _inputController.Selection.Anchor,
+                _inputController.Selection.Active,
+                range =>
+                {
+                    // Temporarily set the selection to the range before calling Execute so
+                    // the command sees the correct (pre-operation) range via ctx.Selection.Range.
+                    _inputController.Selection.Set(range.Start, range.End);
+                    command.Execute(ctx);
+                });
+            _inputController.Selection.Set(newAnchor, newActive);
+        }
+        else
+        {
+            // Non-formatting commands (SelectAll, InsertTable, etc.): execute normally and
+            // use NormalizePosition for structural safety only — these commands may
+            // intentionally relocate the selection, so do not override their result.
+            command.Execute(ctx);
+            var anchor = DocumentEditor.NormalizePosition(_document, _inputController.Selection.Anchor);
+            var active = DocumentEditor.NormalizePosition(_document, _inputController.Selection.Active);
+            _inputController.Selection.Set(anchor, active);
+        }
 
         _caret.MoveTo(_inputController.Selection.Active);
         RaiseSelectionChanged();
+        NotifyImeSelectionChanged();
         InvalidateCanvas();
         _keyboardProxy.Focus();
     }
+
+    /// <summary>
+    /// Signals the platform IME that the editor's selection/content has changed so it
+    /// stops operating on a stale model.  On Android this triggers UpdateSelection /
+    /// RestartInput; no-op on other platforms (no subscriber).
+    /// </summary>
+    private void NotifyImeSelectionChanged() =>
+        _keyboardProxy.NotifySelectionChanged();
 
     private void HandleToolbarItemTap(Core.Toolbar.ToolbarItem item)
     {
@@ -1241,6 +1270,12 @@ public class MintedEditorView : ContentView
                 _caret.ResetBlink();
                 _inputController.Selection.CollapseTo(hitPosition);
                 _keyboardProxy.Focus();
+                // Bring up the soft keyboard on tap. ShowKeyboard() re-shows it even when
+                // the proxy already holds focus (e.g. dismissed via the back button).
+                _keyboardProxy.ShowKeyboard();
+                // Notify the IME of the new selection position so it stops composing
+                // against a stale cursor offset.
+                NotifyImeSelectionChanged();
                 InvalidateCanvas();
                 RaiseSelectionChanged();
                 break;
@@ -1399,6 +1434,7 @@ public class MintedEditorView : ContentView
     public new bool Focus()
     {
         _keyboardProxy.Focus();
+        _keyboardProxy.ShowKeyboard();
         var result = base.Focus();
         EditorFocusChanged?.Invoke(this, new FocusChangedEventArgs(true));
         return result;
@@ -1406,6 +1442,7 @@ public class MintedEditorView : ContentView
 
     public new void Unfocus()
     {
+        _keyboardProxy.HideKeyboard();
         base.Unfocus();
         EditorFocusChanged?.Invoke(this, new FocusChangedEventArgs(false));
     }
@@ -1782,6 +1819,11 @@ public class MintedEditorView : ContentView
         if (handled)
         {
             ScrollCaretIntoView();
+            // Notify the IME when a Ctrl+B/I/U formatting shortcut (or any handled key
+            // that may restructure runs) is applied so Android doesn't compose against
+            // a stale model.
+            if (e.HasControlOrMeta)
+                NotifyImeSelectionChanged();
             InvalidateCanvas();
             RaiseSelectionChanged();
         }
