@@ -51,6 +51,7 @@ public class MintedEditorView : ContentView
 
     private DocumentLayout _lastLayout = new();
     private IDispatcherTimer? _blinkTimer;
+    private bool _isEditorFocused;
     private IDispatcherTimer? _inertiaTimer;
     private float _scrollOffset;
     private readonly InertialScroller _inertialScroller = new();
@@ -716,6 +717,10 @@ public class MintedEditorView : ContentView
         };
         _keyboardProxy.TextInput += OnKeyboardTextInput;
         _keyboardProxy.KeyDown += OnKeyboardKeyDown;
+        _keyboardProxy.NativeFocusChanged += OnNativeFocusChanged;
+        // The editor starts unfocused: no caret and no blink timer until the
+        // platform capture view actually receives keyboard focus.
+        _caret.IsFocused = false;
         _inputController.ClipboardProvider = new MauiClipboardProvider();
 
         _toolbarRenderer = new ToolbarRenderer(ToolbarDefinition.CreateDefault());
@@ -919,7 +924,10 @@ public class MintedEditorView : ContentView
         base.OnHandlerChanged();
         if (Handler is not null)
         {
-            StartBlinkTimer();
+            // The blink timer is driven by focus (OnNativeFocusChanged), not by the
+            // handler lifetime — an idle editor should not repaint 10x per second.
+            if (_isEditorFocused)
+                StartBlinkTimer();
             _ = LoadToolbarIconsAsync();
         }
         else
@@ -1384,6 +1392,7 @@ public class MintedEditorView : ContentView
 
     private void StartBlinkTimer()
     {
+        if (_blinkTimer is not null) return;
         _blinkTimer = Dispatcher.CreateTimer();
         _blinkTimer.Interval = TimeSpan.FromMilliseconds(100);
         _blinkTimer.Tick += (_, _) =>
@@ -1431,20 +1440,48 @@ public class MintedEditorView : ContentView
 
     // ── Focus ────────────────────────────────────────────────────────────────────
 
+    /// <summary>Gets whether the editor currently holds native keyboard focus.</summary>
+    public bool IsEditorFocused => _isEditorFocused;
+
+    /// <summary>
+    /// Gives the editor keyboard focus and shows the soft keyboard.
+    /// <see cref="EditorFocusChanged"/> is raised when the platform confirms focus.
+    /// </summary>
     public new bool Focus()
     {
-        _keyboardProxy.Focus();
+        bool result = _keyboardProxy.Focus();
         _keyboardProxy.ShowKeyboard();
-        var result = base.Focus();
-        EditorFocusChanged?.Invoke(this, new FocusChangedEventArgs(true));
         return result;
     }
 
+    /// <summary>
+    /// Removes keyboard focus from the editor and hides the soft keyboard.
+    /// <see cref="EditorFocusChanged"/> is raised when the platform confirms focus loss.
+    /// </summary>
     public new void Unfocus()
     {
         _keyboardProxy.HideKeyboard();
+        _keyboardProxy.Unfocus();
         base.Unfocus();
-        EditorFocusChanged?.Invoke(this, new FocusChangedEventArgs(false));
+    }
+
+    /// <summary>
+    /// Single source of truth for editor focus: the platform capture view reports native
+    /// focus gain/loss here — including focus moving to a sibling native control (#6).
+    /// </summary>
+    private void OnNativeFocusChanged(object? sender, bool isFocused)
+    {
+        if (_isEditorFocused == isFocused) return;
+        _isEditorFocused = isFocused;
+
+        _caret.IsFocused = isFocused;
+        if (isFocused)
+            StartBlinkTimer();
+        else
+            StopBlinkTimer();
+
+        InvalidateCanvas();
+        EditorFocusChanged?.Invoke(this, new FocusChangedEventArgs(isFocused));
     }
 
     // ── Document changes ──────────────────────────────────────────────────────────

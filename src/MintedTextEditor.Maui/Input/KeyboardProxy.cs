@@ -6,7 +6,7 @@ namespace MintedTextEditor.Maui.Input;
 /// An invisible, platform-backed view that captures hardware keyboard input
 /// and routes it to the editor's <see cref="EditorInputController"/>.
 /// Add this as a transparent overlay on top of the canvas, then call
-/// <see cref="View.Focus"/> to direct keyboard events here.
+/// <c>VisualElement.Focus()</c> to direct keyboard events here.
 /// </summary>
 internal sealed class KeyboardProxy : View
 {
@@ -37,11 +37,21 @@ internal sealed class KeyboardProxy : View
     /// </summary>
     internal event EventHandler? SelectionChangedNotified;
 
+    /// <summary>
+    /// Raised when the platform capture view gains (<see langword="true"/>) or loses
+    /// (<see langword="false"/>) native keyboard focus — including focus moving to a
+    /// sibling native control, which MAUI's own Focused/Unfocused events don't reliably
+    /// report for this internal view. Drives the editor's caret and focus state.
+    /// </summary>
+    internal event EventHandler<bool>? NativeFocusChanged;
+
+    internal void RaiseNativeFocusChanged(bool isFocused) => NativeFocusChanged?.Invoke(this, isFocused);
+
     internal void RaiseTextInput(string text) => TextInput?.Invoke(this, text);
     internal void RaiseKeyDown(EditorKeyEventArgs args) => KeyDown?.Invoke(this, args);
 
     /// <summary>
-    /// Requests that the platform soft keyboard be shown. Unlike <see cref="View.Focus"/>,
+    /// Requests that the platform soft keyboard be shown. Unlike <c>VisualElement.Focus()</c>,
     /// this also re-shows the keyboard when the proxy already holds focus (e.g. the user
     /// dismissed the keyboard with the back button and then tapped the editor again).
     /// No-op on platforms whose handler does not subscribe.

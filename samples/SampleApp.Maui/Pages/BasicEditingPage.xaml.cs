@@ -1,3 +1,5 @@
+using MintedTextEditor.Core.Events;
+
 namespace SampleApp.Maui.Pages;
 
 public partial class BasicEditingPage : ContentPage
@@ -10,4 +12,7 @@ public partial class BasicEditingPage : ContentPage
             "<p>Tap anywhere to move the caret. Use the system keyboard to type.</p>" +
             "<p>Undo / redo are available via <em>Ctrl+Z</em> / <em>Ctrl+Y</em> on desktop.</p>");
     }
+
+    private void OnEditorFocusChanged(object? sender, FocusChangedEventArgs e) =>
+        FocusLabel.Text = $"Editor focused: {e.IsFocused}";
 }

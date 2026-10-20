@@ -26,6 +26,28 @@ public class Caret
 
     private long _lastBlinkToggle;
     private bool _blinkEnabled = true;
+    private bool _isFocused = true;
+
+    /// <summary>
+    /// Whether the owning editor currently holds keyboard focus. An unfocused caret is
+    /// never drawn and does not blink. Regaining focus makes the caret visible immediately.
+    /// Defaults to <see langword="true"/> so hosts that don't track focus keep working.
+    /// </summary>
+    public bool IsFocused
+    {
+        get => _isFocused;
+        set
+        {
+            if (_isFocused == value) return;
+            _isFocused = value;
+            if (value) ResetBlink();
+        }
+    }
+
+    /// <summary>
+    /// Whether the caret should be painted this frame: focused and in the visible blink phase.
+    /// </summary>
+    public bool IsDrawn => _isFocused && IsVisible;
 
     /// <summary>
     /// Resets the blink timer, making the caret immediately visible.
@@ -42,7 +64,7 @@ public class Caret
     /// </summary>
     public void UpdateBlink()
     {
-        if (!_blinkEnabled) return;
+        if (!_blinkEnabled || !_isFocused) return;
 
         long now = Environment.TickCount64;
         if (now - _lastBlinkToggle >= BlinkIntervalMs)

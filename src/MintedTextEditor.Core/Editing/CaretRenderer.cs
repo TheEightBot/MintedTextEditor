@@ -20,7 +20,7 @@ public class CaretRenderer
     /// </summary>
     public void Render(Caret caret, DocumentLayout layout, Document.Document document, IDrawingContext context)
     {
-        if (!caret.IsVisible) return;
+        if (!caret.IsDrawn) return;
 
         var rect = GetCaretRect(caret.Position, layout, document, context);
         if (rect.Width <= 0 || rect.Height <= 0) return;

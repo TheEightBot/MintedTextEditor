@@ -110,9 +110,16 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
     {
         base.OnFocusChanged(gainFocus, direction, previouslyFocusedRect);
         if (gainFocus)
+        {
             ShowKeyboard();
+        }
         else
+        {
+            // Any in-flight composition belongs to the old focus session.
+            _inputConnection.ResetComposingState();
             HideKeyboard();
+        }
+        _proxy.RaiseNativeFocusChanged(gainFocus);
     }
 
     public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
