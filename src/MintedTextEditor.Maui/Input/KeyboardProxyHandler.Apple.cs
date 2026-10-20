@@ -35,6 +35,22 @@ internal sealed class KeyboardCaptureUIView : UIView, IUIKeyInput
     public override bool CanBecomeFirstResponder => true;
     public override UIKeyCommand[] KeyCommands => _keyCommands;
 
+    // Report first-responder changes so the editor can show/hide its caret. Resign is
+    // also called by UIKit when another control (e.g. a sibling Entry) takes focus.
+    public override bool BecomeFirstResponder()
+    {
+        bool became = base.BecomeFirstResponder();
+        if (became) _proxy.RaiseNativeFocusChanged(true);
+        return became;
+    }
+
+    public override bool ResignFirstResponder()
+    {
+        bool resigned = base.ResignFirstResponder();
+        if (resigned) _proxy.RaiseNativeFocusChanged(false);
+        return resigned;
+    }
+
     // ── UIKeyInput protocol ──────────────────────────────────────────────────────
 
     /// Whether the receiver has any text.  We always report false so the system

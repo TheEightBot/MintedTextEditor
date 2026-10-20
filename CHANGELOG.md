@@ -8,13 +8,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+---
+
+## [0.2.0] — 2026-10-20
+
 ### Fixed
 - **Android input (#5)**: soft keyboard now appears on tap/focus; hardware-keyboard printable keys and Ctrl shortcuts are handled; IME composing text (`setComposingText`) is applied as you type; the Return key (committed as `"\n"`) splits the paragraph instead of inserting a literal newline.
 - Formatting toggles (e.g. superscript) no longer drift the selection, lose text, or leave the Android IME composing against stale state.
 - Character formatting no longer leaks past the selection to the end of the paragraph.
 - Emoji render via Skia font fallback; variation-selector sequences (e.g. 🛠️) no longer draw a trailing box.
+- **Focus / caret (#6)**: the caret is hidden and stops blinking when focus moves to another control (e.g. an `Entry`), on all platforms. The blink timer runs only while the editor is focused, so an idle editor no longer repaints 10× per second.
+- **Android IMEs other than Gboard (#6)**: the input connection now reports the real text around the caret to the keyboard (correct auto-capitalisation and word boundaries), adopts `setComposingRegion` so Samsung/MIUI no longer duplicate words, handles `deleteSurroundingTextInCodePoints` (whole-emoji delete), `performEditorAction` and numpad Enter, and never deletes the selection on `deleteSurroundingText`.
+- **Android suggestions**: picking a Gboard suggestion (`replaceText`, API 34+) now replaces the word; previously it was silently dropped.
+- Backspace, Delete and Left/Right arrow step over a whole grapheme cluster (emoji, skin-tone and ZWJ sequences, flags, combining marks) instead of splitting it.
+- Backspace at the start of a paragraph (and Delete at the end) left the caret at the end of the joined paragraph instead of at the join point.
+- Bold and italic text rendered as regular since the SkiaSharp 4 update: the default family ("Default") was resolved without applying the requested style. Styles are now matched within the platform default family, with synthetic bold/italic when a family lacks the face.
+- Crash when measuring or hit-testing text that splits an emoji (lone surrogate) in the Skia renderer; such text now also measures correctly instead of as zero width.
+- Crash on Android hardware keyboards with dead keys (accents on international layouts); accents now combine with the next key.
+- Formatting a selection that starts and ends partway through runs formatted only part of it.
+- A formatting toggle with no selection no longer restructures runs (which could leave stale layout and jump the caret).
+- Undo/Redo after formatting changes no longer uses stale positions (undo deleted nothing; redo duplicated text).
 
 ### Changed
+- `EditorFocusChanged` now fires on real native focus changes (tap into the editor, focus moving to another control), exactly once per change. Previously it fired only from `Focus()`/`Unfocus()`. New read-only `IsEditorFocused`; `Unfocus()` now actually removes native focus. The editor starts unfocused (no caret until focused).
 - SkiaSharp / SkiaSharp.Views.Maui.Controls 3.119.2 → 4.153.1 and Svg.Skia 3.2.1 → 5.2.3 for current MAUI 10 support.
 - Sample app builds on the current MAUI SDK (10.0.110): icon/splash SVGs no longer use `<text>`, which crashes Resizetizer 10.0.110.
 

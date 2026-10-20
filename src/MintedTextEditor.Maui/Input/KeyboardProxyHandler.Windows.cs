@@ -31,6 +31,8 @@ internal sealed class KeyboardCaptureWindowsView : Microsoft.UI.Xaml.Controls.Te
 
         KeyDown += OnKeyDown;
         TextChanged += OnTextChanged;
+        GotFocus  += (_, _) => _proxy.RaiseNativeFocusChanged(true);
+        LostFocus += (_, _) => _proxy.RaiseNativeFocusChanged(false);
     }
 
     private void OnKeyDown(object sender,

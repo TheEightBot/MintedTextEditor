@@ -251,8 +251,7 @@ public static class DocumentEditor
         var first = GetParagraph(document, blockIndex);
         var second = GetParagraph(document, blockIndex + 1);
 
-        int mergeInlineIndex = first.Inlines.Count;
-        var mergePos = new DocumentPosition(blockIndex, mergeInlineIndex, 0);
+        int mergeOffset = first.Length;
 
         foreach (var inline in second.Inlines)
             first.AddInline(inline);
@@ -261,6 +260,21 @@ public static class DocumentEditor
         document.Blocks.RemoveAt(blockIndex + 1);
 
         NormalizeInlines(first);
+
+        // Resolve the join point after normalization: adjacent runs with the same style are
+        // combined, so an inline index computed beforehand can point past the end.
+        var mergePos = new DocumentPosition(blockIndex, 0, 0);
+        int remaining = mergeOffset;
+        for (int i = 0; i < first.Inlines.Count; i++)
+        {
+            int len = first.Inlines[i].Length;
+            if (remaining <= len)
+            {
+                mergePos = new DocumentPosition(blockIndex, i, remaining);
+                break;
+            }
+            remaining -= len;
+        }
 
         document.NotifyChanged(new DocumentChangedEventArgs(
             DocumentChangeType.BlocksMerged,
@@ -284,7 +298,10 @@ public static class DocumentEditor
             var paragraph = document.Blocks[bi] as Paragraph;
             if (paragraph == null) continue;
 
-            for (int ii = 0; ii < paragraph.Inlines.Count; ii++)
+            // Traverse backwards: splitting a run inserts new runs after it, which would
+            // shift the indices of not-yet-processed runs (including the end run) in a
+            // forward loop and leave part of the selection unformatted.
+            for (int ii = paragraph.Inlines.Count - 1; ii >= 0; ii--)
             {
                 if (paragraph.Inlines[ii] is not TextRun run) continue;
 
@@ -293,9 +310,7 @@ public static class DocumentEditor
 
                 if (isFirst && isLast)
                 {
-                    // Range within a single run: split if needed.
-                    // Break immediately — ApplyStyleToRunSegment may insert new runs into
-                    // the Inlines list; those runs must not be re-processed by this loop.
+                    // Range within a single run: split if needed. Nothing before it is in range.
                     ApplyStyleToRunSegment(paragraph, ii, start.Offset, end.Offset, transform);
                     break;
                 }
@@ -705,6 +720,11 @@ public static class DocumentEditor
         // 2. Apply the formatting operation.
         var range = new TextRange(anchor, active);
         applyOp(range);
+
+        // A collapsed toggle only changes the pending style: it must not restructure runs
+        // (no change notification is raised, so layout would keep stale run references).
+        if (range.IsEmpty)
+            return (anchor, active);
 
         // 3. Normalize inlines in every paragraph touched by the range (re-merge same-style
         //    adjacent runs, drop empties) so the inline structure is clean before we remap.

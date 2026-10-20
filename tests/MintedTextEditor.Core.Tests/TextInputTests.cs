@@ -518,4 +518,113 @@ public class TextInputTests
         Assert.True(handled);
         Assert.Equal("Hello[TAB]", doc.GetText());
     }
+
+    // ── Grapheme-safe deletion ─────────────────────────────────────────
+
+    [Theory]
+    [InlineData("a\U0001F600", "a")]                         // emoji (surrogate pair)
+    [InlineData("a\U0001F44D\U0001F3FD", "a")]              // emoji + skin-tone modifier
+    [InlineData("a\U0001F468\u200D\U0001F469\u200D\U0001F467", "a")] // ZWJ family
+    [InlineData("a\U0001F1FA\U0001F1F8", "a")]              // flag (regional indicators)
+    [InlineData("ae\u0301", "a")]                            // e + combining acute
+    [InlineData("a\u2764\uFE0F", "a")]                      // heart + VS16
+    [InlineData("ab", "a")]
+    public void Backspace_RemovesWholeGraphemeCluster(string text, string expected)
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para(text));
+        caret.MoveTo(new DocumentPosition(0, 0, text.Length));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
+
+        Assert.Equal(expected, doc.GetText());
+        Assert.Equal(new DocumentPosition(0, 0, expected.Length), caret.Position);
+    }
+
+    [Theory]
+    [InlineData("\U0001F600b", "b")]
+    [InlineData("\U0001F44D\U0001F3FDb", "b")]
+    [InlineData("e\u0301b", "b")]
+    [InlineData("ab", "b")]
+    public void Delete_RemovesWholeGraphemeCluster(string text, string expected)
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para(text));
+        caret.MoveTo(new DocumentPosition(0, 0, 0));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Delete), doc, layout, _context);
+
+        Assert.Equal(expected, doc.GetText());
+    }
+
+    [Fact]
+    public void Backspace_EmojiAcrossRunBoundary_RemovesOnlyEmoji()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("ab", "\U0001F600"));
+        caret.MoveTo(new DocumentPosition(0, 1, 2));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
+
+        Assert.Equal("ab", doc.GetText());
+    }
+
+    [Fact]
+    public void Backspace_WithCaretInsideSurrogatePair_RemovesWholeEmoji()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("a\U0001F600b"));
+        caret.MoveTo(new DocumentPosition(0, 0, 2));   // between the surrogates
+
+        ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
+
+        Assert.Equal("ab", doc.GetText());
+        Assert.Equal(new DocumentPosition(0, 0, 1), caret.Position);
+    }
+
+    [Fact]
+    public void Delete_WithCaretInsideSurrogatePair_RemovesWholeEmoji()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("a\U0001F600b"));
+        caret.MoveTo(new DocumentPosition(0, 0, 2));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Delete), doc, layout, _context);
+
+        Assert.Equal("ab", doc.GetText());
+    }
+
+    [Fact]
+    public void MoveLeft_ThenBackspace_FromEndOfEmoji_RemovesEmojiOnly()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("a\U0001F600"));
+        caret.MoveTo(new DocumentPosition(0, 0, 3));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Left), doc, layout, _context);
+        Assert.Equal(new DocumentPosition(0, 0, 1), caret.Position);   // stepped over the whole emoji
+
+        ctrl.HandleKeyDown(Key(EditorKey.Right), doc, layout, _context);
+        ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
+        Assert.Equal("a", doc.GetText());
+    }
+
+    [Fact]
+    public void MoveRight_ThenDelete_OverEmoji_LeavesNoLoneSurrogate()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("\U0001F600\U0001F601"));
+        caret.MoveTo(new DocumentPosition(0, 0, 0));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Right), doc, layout, _context);
+        Assert.Equal(new DocumentPosition(0, 0, 2), caret.Position);
+
+        ctrl.HandleKeyDown(Key(EditorKey.Delete), doc, layout, _context);
+        Assert.Equal("\U0001F600", doc.GetText());
+    }
+
+    [Fact]
+    public void Backspace_AtParagraphStart_PlacesCaretAtJoinPoint()
+    {
+        var (doc, layout, caret, ctrl) = Setup(Para("ab"), Para("cd"));
+        caret.MoveTo(new DocumentPosition(1, 0, 0));
+
+        ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
+        ctrl.HandleTextInput("X", doc);
+
+        Assert.Equal("abXcd", doc.GetText());
+    }
 }

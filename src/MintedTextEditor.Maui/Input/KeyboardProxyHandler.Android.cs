@@ -1,6 +1,7 @@
 // Android implementation of the KeyboardProxy handler.
 // Compiled only for android (see the Compile conditions in the .csproj).
 
+using System.Text;
 using Microsoft.Maui.Handlers;
 using MintedTextEditor.Core.Input;
 using Android.Content;
@@ -19,6 +20,9 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
 {
     private readonly KeyboardProxy _proxy;
     private readonly KeyboardInputConnection _inputConnection;
+
+    /// <summary>Dead-key (accent) state shared by the view and its InputConnection.</summary>
+    internal DeadKeyComposer DeadKeys { get; } = new(KeyCharacterMap.GetDeadChar);
 
     public KeyboardCaptureAndroidView(Context context, KeyboardProxy proxy) : base(context)
     {
@@ -41,7 +45,17 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
             // NoFullscreen → keep the IME from replacing our canvas with a fullscreen
             // extract editor in landscape (which would never reflect typed text).
             outAttrs.ImeOptions = ImeFlags.NoEnterAction | ImeFlags.NoFullscreen;
+
+            // Tell the IME where the caret is and what text surrounds it, in the same
+            // paragraph-relative coordinates the InputConnection reports. Without this the
+            // IME assumes an empty field (wrong auto-caps, mis-targeted composing regions).
+            var ctx = _proxy.GetImeTextContext();
+            outAttrs.InitialSelStart = ctx.SelectionStart;
+            outAttrs.InitialSelEnd = ctx.SelectionEnd;
+            if (OperatingSystem.IsAndroidVersionAtLeast(30))
+                outAttrs.SetInitialSurroundingText(new Java.Lang.String(ctx.ParagraphText));
         }
+        _inputConnection.ResetComposingState();
         return _inputConnection;
     }
 
@@ -110,9 +124,17 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
     {
         base.OnFocusChanged(gainFocus, direction, previouslyFocusedRect);
         if (gainFocus)
+        {
             ShowKeyboard();
+        }
         else
+        {
+            // Any in-flight composition or dead key belongs to the old focus session.
+            _inputConnection.ResetComposingState();
+            DeadKeys.Reset();
             HideKeyboard();
+        }
+        _proxy.RaiseNativeFocusChanged(gainFocus);
     }
 
     public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
@@ -125,7 +147,10 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
         var editorKey = MapKeyCode(keyCode);
         if (editorKey != EditorKey.None)
         {
+            DeadKeys.Reset();
             _proxy.RaiseKeyDown(new EditorKeyEventArgs(editorKey, '\0', mods));
+            // A hardware key moved the caret or edited text: any IME composition is stale.
+            NotifyImeSelectionChanged();
             return true;
         }
 
@@ -147,10 +172,12 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
         //    soft keyboard's InputConnection could produce text — so on devices with
         //    a (hardware/host) keyboard, typed characters were silently dropped while
         //    Backspace still worked through path (1).
-        int unicode = e.UnicodeChar;
-        if (unicode != 0)
+        //    Dead keys (accents on international layouts) carry a flag bit and must be
+        //    combined with the next key rather than converted directly.
+        var text = DeadKeys.Process(e.UnicodeChar);
+        if (text is not null)
         {
-            _proxy.RaiseTextInput(char.ConvertFromUtf32(unicode));
+            if (text.Length > 0) _proxy.RaiseTextInput(text);
             return true;
         }
 
@@ -170,6 +197,7 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
         Keycode.Del        => EditorKey.Backspace,
         Keycode.ForwardDel => EditorKey.Delete,
         Keycode.Enter      => EditorKey.Enter,
+        Keycode.NumpadEnter => EditorKey.Enter,
         Keycode.Tab        => EditorKey.Tab,
         Keycode.Escape     => EditorKey.Escape,
         _ => EditorKey.None,
@@ -202,66 +230,119 @@ internal sealed class KeyboardCaptureAndroidView : Android.Views.View
 }
 
 /// <summary>
-/// InputConnection that routes IME input to the proxy. It supports both committed
-/// text (<see cref="CommitText"/>) and, crucially, in-progress composing text
-/// (<see cref="SetComposingText"/>) which is how most modern soft keyboards (e.g.
-/// Gboard) deliver characters as you type. The currently-composed string is tracked
-/// so it can be replaced incrementally without churning the whole word on each
-/// keystroke.
+/// InputConnection that routes IME input to the editor. Composition logic lives in the
+/// platform-neutral <see cref="ImeCompositionTracker"/>; this class adapts Android's
+/// <c>InputConnection</c> contract to it and answers the IME's "text around the cursor"
+/// queries from the editor's real paragraph text (paragraph-relative offsets). That is
+/// what Samsung Keyboard and MIUI rely on for auto-capitalisation, re-composing an
+/// existing word (<c>setComposingRegion</c>) and word/emoji deletion.
 /// </summary>
 internal sealed class KeyboardInputConnection : BaseInputConnection
 {
+    private readonly Android.Views.View _view;
     private readonly KeyboardProxy _proxy;
-
-    // The text currently held in the IME's composing region and already mirrored
-    // into the editor. Empty when no composition is in progress.
-    private string _composingText = string.Empty;
+    private readonly ImeCompositionTracker _tracker;
 
     public KeyboardInputConnection(Android.Views.View targetView, KeyboardProxy proxy)
         : base(targetView, false)
     {
+        _view = targetView;
         _proxy = proxy;
+        _tracker = new ImeCompositionTracker(new ProxyImeSink(proxy));
     }
+
+    // ── Composition ──────────────────────────────────────────────────────────
 
     public override bool SetComposingText(Java.Lang.ICharSequence? text, int newCursorPosition)
     {
-        ReplaceComposingRegion(text?.ToString() ?? string.Empty);
+        var str = text?.ToString() ?? string.Empty;
+        _tracker.SetComposingText(str, newCursorPosition, _proxy.GetImeTextContext());
+        // Composing text with a newline splits the paragraph (the tracker ends the
+        // composition); re-sync the IME to the new paragraph's offsets.
+        AfterEdit(paragraphChanged: ContainsNewline(str));
+        return true;
+    }
+
+    public override bool SetComposingRegion(int start, int end)
+    {
+        _tracker.SetComposingRegion(start, end, _proxy.GetImeTextContext());
+        ReportSelection();
         return true;
     }
 
     public override bool FinishComposingText()
     {
-        // Keep whatever is already in the editor; just stop tracking it.
-        _composingText = string.Empty;
+        _tracker.FinishComposing();
+        ReportSelection();
         return true;
     }
 
     public override bool CommitText(Java.Lang.ICharSequence? text, int newCursorPosition)
     {
         var str = text?.ToString() ?? string.Empty;
-
-        // An empty commit finalizes the current composition without changing text.
-        if (str.Length == 0)
-        {
-            _composingText = string.Empty;
-            return true;
-        }
-
-        // Replace any active composing region with the committed text, then finalize.
-        ReplaceComposingRegion(str);
-        _composingText = string.Empty;
+        _tracker.CommitText(str, newCursorPosition, _proxy.GetImeTextContext());
+        // A committed newline (MIUI Enter) splits the paragraph: new offset frame.
+        AfterEdit(paragraphChanged: ContainsNewline(str));
         return true;
     }
 
     public override bool DeleteSurroundingText(int beforeLength, int afterLength)
     {
-        // A surrounding delete operates outside our tracked composition.
-        _composingText = string.Empty;
-        for (int i = 0; i < beforeLength; i++)
-            _proxy.RaiseKeyDown(new EditorKeyEventArgs(EditorKey.Backspace));
-        for (int i = 0; i < afterLength; i++)
-            _proxy.RaiseKeyDown(new EditorKeyEventArgs(EditorKey.Delete));
+        // Running past the paragraph edge joins paragraphs (the editor handles it); the
+        // IME's paragraph-relative offsets are then stale, so restart.
+        AfterEdit(_tracker.DeleteSurrounding(beforeLength, afterLength, _proxy.GetImeTextContext()));
         return true;
+    }
+
+    public override bool DeleteSurroundingTextInCodePoints(int beforeLength, int afterLength)
+    {
+        AfterEdit(_tracker.DeleteSurroundingInCodePoints(beforeLength, afterLength, _proxy.GetImeTextContext()));
+        return true;
+    }
+
+    // BaseInputConnection implements these against its own private Editable, so without
+    // overrides a picked suggestion (Gboard on API 34+ uses replaceText) never reaches us.
+    public override bool ReplaceText(int start, int end, Java.Lang.ICharSequence text, int newCursorPosition, TextAttribute? textAttribute)
+    {
+        var str = text?.ToString() ?? string.Empty;
+        _tracker.Replace(start, end, str, newCursorPosition, _proxy.GetImeTextContext());
+        AfterEdit(paragraphChanged: ContainsNewline(str));
+        return true;
+    }
+
+    public override bool CommitCompletion(CompletionInfo? text)
+    {
+        var str = text?.Text?.ToString() ?? string.Empty;
+        _tracker.CommitText(str, 1, _proxy.GetImeTextContext());
+        AfterEdit(paragraphChanged: ContainsNewline(str));
+        return true;
+    }
+
+    public override bool SetSelection(int start, int end)
+    {
+        // setSelection does not end a composition on Android: keep the composing range.
+        _tracker.SetSelection(start, end);
+        ReportSelection();
+        return true;
+    }
+
+    public override bool PerformEditorAction([Android.Runtime.GeneratedEnum] ImeAction actionCode)
+    {
+        // Despite IME_FLAG_NO_ENTER_ACTION some OEM keyboards (MIUI) deliver Enter as an
+        // editor action. Treat the "submit"-style actions as a paragraph break.
+        switch (actionCode)
+        {
+            case ImeAction.Unspecified:
+            case ImeAction.None:
+            case ImeAction.Done:
+            case ImeAction.Go:
+            case ImeAction.Send:
+                _tracker.Enter();
+                RestartInput();
+                return true;
+            default:
+                return base.PerformEditorAction(actionCode);
+        }
     }
 
     public override bool SendKeyEvent(KeyEvent? e)
@@ -270,27 +351,94 @@ internal sealed class KeyboardInputConnection : BaseInputConnection
         {
             var editorKey = e.KeyCode switch
             {
-                Keycode.Del        => EditorKey.Backspace,
-                Keycode.ForwardDel => EditorKey.Delete,
-                Keycode.Enter      => EditorKey.Enter,
+                Keycode.Del         => EditorKey.Backspace,
+                Keycode.ForwardDel  => EditorKey.Delete,
+                Keycode.Enter       => EditorKey.Enter,
+                Keycode.NumpadEnter => EditorKey.Enter,
                 _ => EditorKey.None,
             };
             if (editorKey != EditorKey.None)
             {
-                _composingText = string.Empty;
+                var before = _proxy.GetImeTextContext();
+                bool atStart = before.SelectionStart == 0 && before.SelectionEnd == 0;
+                bool atEnd = before.SelectionStart == before.ParagraphText.Length
+                             && before.SelectionEnd == before.SelectionStart;
+                // Enter, or Backspace/Delete that merges paragraphs, changes the paragraph
+                // the IME's offsets refer to; restart the input session in that case.
+                bool frameChanges = editorKey == EditorKey.Enter
+                    || (editorKey == EditorKey.Backspace && atStart)
+                    || (editorKey == EditorKey.Delete && atEnd);
+
+                _tracker.Reset();
                 _proxy.RaiseKeyDown(new EditorKeyEventArgs(editorKey));
+                if (frameChanges) RestartInput();
+                else ReportSelection();
                 return true;
             }
 
             // Printable character delivered as a key event (some IMEs / hardware keys).
-            int unicode = e.UnicodeChar;
-            if (unicode != 0)
+            var deadKeys = (_view as KeyboardCaptureAndroidView)?.DeadKeys;
+            var text = deadKeys is not null
+                ? deadKeys.Process(e.UnicodeChar)
+                : (Rune.IsValid(e.UnicodeChar) && e.UnicodeChar != 0 ? char.ConvertFromUtf32(e.UnicodeChar) : null);
+            if (text is not null)
             {
-                _proxy.RaiseTextInput(char.ConvertFromUtf32(unicode));
+                if (text.Length > 0) _proxy.RaiseTextInput(text);
+                ReportSelection();
                 return true;
             }
         }
         return base.SendKeyEvent(e);
+    }
+
+    // ── Queries: answered from the editor, not BaseInputConnection's empty Editable ──
+
+    public override Java.Lang.ICharSequence? GetTextBeforeCursorFormatted(int n, [Android.Runtime.GeneratedEnum] GetTextFlags flags)
+        => new Java.Lang.String(_proxy.GetImeTextContext().TextBeforeCursor(n));
+
+    public override Java.Lang.ICharSequence? GetTextAfterCursorFormatted(int n, [Android.Runtime.GeneratedEnum] GetTextFlags flags)
+        => new Java.Lang.String(_proxy.GetImeTextContext().TextAfterCursor(n));
+
+    public override Java.Lang.ICharSequence? GetSelectedTextFormatted([Android.Runtime.GeneratedEnum] GetTextFlags flags)
+    {
+        var selected = _proxy.GetImeTextContext().SelectedText;
+        return selected.Length == 0 ? null : new Java.Lang.String(selected);
+    }
+
+    public override SurroundingText? GetSurroundingText(int beforeLength, int afterLength, int flags)
+    {
+        if (!OperatingSystem.IsAndroidVersionAtLeast(31))
+            return null;
+        var ctx = _proxy.GetImeTextContext();
+        // Clamp the counts before adding: IMEs may pass very large values (int.MaxValue).
+        int start = ctx.SelectionStart - Math.Clamp(beforeLength, 0, ctx.SelectionStart);
+        int end = ctx.SelectionEnd + Math.Clamp(afterLength, 0, ctx.ParagraphText.Length - ctx.SelectionEnd);
+        return new SurroundingText(
+            new Java.Lang.String(ctx.ParagraphText[start..end]),
+            ctx.SelectionStart - start,
+            ctx.SelectionEnd - start,
+            start);
+    }
+
+    public override ExtractedText? GetExtractedText(ExtractedTextRequest? request, [Android.Runtime.GeneratedEnum] GetTextFlags flags)
+    {
+        var ctx = _proxy.GetImeTextContext();
+        return new ExtractedText
+        {
+            Text = new Java.Lang.String(ctx.ParagraphText),
+            StartOffset = 0,
+            PartialStartOffset = -1,
+            PartialEndOffset = -1,
+            SelectionStart = ctx.SelectionStart,
+            SelectionEnd = ctx.SelectionEnd,
+        };
+    }
+
+    public override Android.Text.CapitalizationMode GetCursorCapsMode(
+        [Android.Runtime.GeneratedEnum] Android.Text.CapitalizationMode reqModes)
+    {
+        var ctx = _proxy.GetImeTextContext();
+        return Android.Text.TextUtils.GetCapsMode(ctx.ParagraphText, ctx.SelectionStart, reqModes);
     }
 
     /// <summary>
@@ -299,47 +447,74 @@ internal sealed class KeyboardInputConnection : BaseInputConnection
     /// a toolbar formatting toggle) so the next IME event starts from a clean slate
     /// rather than trying to diff against the pre-change composition.
     /// </summary>
-    public void ResetComposingState()
+    public void ResetComposingState() => _tracker.Reset();
+
+    /// <summary>
+    /// Re-initializes the IME session (it re-reads EditorInfo and surrounding text).
+    /// Used when the caret moves to a different paragraph, since offsets are paragraph-relative.
+    /// </summary>
+
+    private void AfterEdit(bool paragraphChanged)
     {
-        _composingText = string.Empty;
+        if (paragraphChanged) RestartInput();
+        else ReportSelection();
+    }
+
+    private static bool ContainsNewline(string text)
+        => text.IndexOf('\n') >= 0 || text.IndexOf('\r') >= 0;
+
+    private void RestartInput()
+    {
+        _tracker.Reset();
+        (_view as KeyboardCaptureAndroidView)?.NotifyImeSelectionChanged();
     }
 
     /// <summary>
-    /// Updates the editor so the composing region reflects <paramref name="newText"/>.
-    /// Diffs against the previously composed text so the common cases (appending or
-    /// deleting trailing characters) touch only the changed suffix instead of
-    /// re-inserting the entire word on every keystroke.
+    /// Keeps the IME's cursor model in sync after each edit (cheaper than RestartInput),
+    /// so Samsung/MIUI don't compose or delete against stale offsets.
     /// </summary>
-    private void ReplaceComposingRegion(string newText)
+    private void ReportSelection()
     {
-        string old = _composingText;
-        if (string.Equals(newText, old, StringComparison.Ordinal))
-        {
-            _composingText = newText;
+        if (_view.Context?.GetSystemService(Context.InputMethodService) is not InputMethodManager imm)
             return;
+        var ctx = _proxy.GetImeTextContext();
+        imm.UpdateSelection(_view, ctx.SelectionStart, ctx.SelectionEnd,
+            _tracker.ComposingStart, _tracker.ComposingEnd);
+    }
+
+    /// <summary>
+    /// Forwards tracker edits to the editor's exact-range sink. Falls back to synthesized
+    /// keys if no editor is attached (keeps the proxy usable on its own).
+    /// </summary>
+    private sealed class ProxyImeSink(KeyboardProxy proxy) : IImeEditSink
+    {
+        public void InsertText(string text)
+        {
+            if (proxy.ImeSink is { } sink) sink.InsertText(text);
+            else proxy.RaiseTextInput(text);
         }
 
-        if (newText.StartsWith(old, StringComparison.Ordinal))
+        public void DeleteBefore(int count)
         {
-            // Pure append (typing forward) — insert only the new suffix.
-            _proxy.RaiseTextInput(newText.Substring(old.Length));
-        }
-        else if (old.StartsWith(newText, StringComparison.Ordinal))
-        {
-            // Pure removal (backspacing within the composition) — delete the difference.
-            for (int i = 0; i < old.Length - newText.Length; i++)
-                _proxy.RaiseKeyDown(new EditorKeyEventArgs(EditorKey.Backspace));
-        }
-        else
-        {
-            // General case (e.g. autocorrect) — replace the whole composing region.
-            for (int i = 0; i < old.Length; i++)
-                _proxy.RaiseKeyDown(new EditorKeyEventArgs(EditorKey.Backspace));
-            if (newText.Length > 0)
-                _proxy.RaiseTextInput(newText);
+            if (proxy.ImeSink is { } sink) { sink.DeleteBefore(count); return; }
+            for (int i = 0; i < count; i++)
+                proxy.RaiseKeyDown(new EditorKeyEventArgs(EditorKey.Backspace));
         }
 
-        _composingText = newText;
+        public void DeleteAfter(int count)
+        {
+            if (proxy.ImeSink is { } sink) { sink.DeleteAfter(count); return; }
+            for (int i = 0; i < count; i++)
+                proxy.RaiseKeyDown(new EditorKeyEventArgs(EditorKey.Delete));
+        }
+
+        public void SetSelection(int start, int end) => proxy.ImeSink?.SetSelection(start, end);
+
+        public void Enter()
+        {
+            if (proxy.ImeSink is { } sink) sink.Enter();
+            else proxy.RaiseKeyDown(new EditorKeyEventArgs(EditorKey.Enter));
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using MintedTextEditor.Core.Document;
 using MintedTextEditor.Core.Editing;
 using MintedTextEditor.Core.Formatting;
@@ -450,9 +451,14 @@ public class EditorInputController
             return;
         }
 
-        // Delete one character before the caret
-        var startPos = AbsoluteOffsetToPosition(document, caretPos, absOffset - 1);
-        var newPos = PushOrExecute(new DeleteRangeAction(document, new TextRange(startPos, caretPos)));
+        // Delete the whole grapheme cluster before the caret (emoji, combining marks, …).
+        // Both ends snap to cluster boundaries in case the caret sits inside a cluster.
+        string text = GetParagraph(document, caretPos).GetText();
+        int delStart = PreviousGraphemeBoundary(text, absOffset);
+        int delEnd = IsGraphemeBoundary(text, absOffset) ? absOffset : NextGraphemeBoundary(text, absOffset);
+        var startPos = AbsoluteOffsetToPosition(document, caretPos, delStart);
+        var endPos = AbsoluteOffsetToPosition(document, caretPos, delEnd);
+        var newPos = PushOrExecute(new DeleteRangeAction(document, new TextRange(startPos, endPos)));
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
     }
@@ -491,9 +497,13 @@ public class EditorInputController
             return;
         }
 
-        // Delete one character after the caret
-        var endPos = AbsoluteOffsetToPosition(document, caretPos, absOffset + 1);
-        var newPos = PushOrExecute(new DeleteRangeAction(document, new TextRange(caretPos, endPos)));
+        // Delete the whole grapheme cluster after the caret; both ends snap to boundaries.
+        string text = GetParagraph(document, caretPos).GetText();
+        int delStart = IsGraphemeBoundary(text, absOffset) ? absOffset : PreviousGraphemeBoundary(text, absOffset);
+        int delEnd = NextGraphemeBoundary(text, absOffset);
+        var startPos = AbsoluteOffsetToPosition(document, caretPos, delStart);
+        var endPos = AbsoluteOffsetToPosition(document, caretPos, delEnd);
+        var newPos = PushOrExecute(new DeleteRangeAction(document, new TextRange(startPos, endPos)));
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
     }
@@ -511,6 +521,172 @@ public class EditorInputController
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
     }
+
+    // ── IME support ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Describes the caret's paragraph for an input method editor: its plain text and the
+    /// selection within it. A selection that leaves the paragraph is clamped to its bounds.
+    /// </summary>
+    public ImeTextContext GetImeTextContext(Document.Document document)
+    {
+        var caretPos = _caret.Position;
+        string text = GetParagraph(document, caretPos).GetText();
+
+        if (_selection.IsEmpty)
+        {
+            int caret = Math.Clamp(GetAbsoluteOffset(document, caretPos), 0, text.Length);
+            return new ImeTextContext(text, caret, caret);
+        }
+
+        var range = _selection.Range;
+        int start = IsSameParagraph(range.Start, caretPos)
+            ? GetAbsoluteOffset(document, range.Start) : 0;
+        int end = IsSameParagraph(range.End, caretPos)
+            ? GetAbsoluteOffset(document, range.End) : text.Length;
+        start = Math.Clamp(start, 0, text.Length);
+        end = Math.Clamp(end, start, text.Length);
+        return new ImeTextContext(text, start, end);
+    }
+
+    /// <summary>
+    /// Deletes exactly <paramref name="count"/> UTF-16 units before the selection start (or
+    /// caret). Used by IME edits, which must not expand to grapheme clusters like Backspace.
+    /// With a selection, the delete stays within the start's paragraph and the selection
+    /// (including its direction and any part in other paragraphs) is preserved. With a caret,
+    /// a count that runs past the paragraph start joins the previous paragraph, the break
+    /// counting as one unit, matching Android's flat-text model.
+    /// </summary>
+    public void DeleteImeTextBefore(int count, Document.Document document)
+    {
+        if (count <= 0) return;
+
+        if (!_selection.IsEmpty)
+        {
+            var range = _selection.Range;
+            int startAbs = GetAbsoluteOffset(document, range.Start);
+            int n = Math.Min(count, startAbs);
+            if (n == 0) return;
+            DeleteParagraphRangePreservingSelection(document, range.Start, startAbs - n, n);
+            return;
+        }
+
+        while (count > 0)
+        {
+            var pos = _caret.Position;
+            int abs = GetAbsoluteOffset(document, pos);
+            int n = Math.Min(count, abs);
+            if (n > 0)
+            {
+                var from = AbsoluteOffsetToPosition(document, pos, abs - n);
+                var newPos = PushOrExecute(new DeleteRangeAction(document, new TextRange(from, pos)));
+                _selection.CollapseTo(newPos);
+                _caret.MoveTo(newPos);
+                count -= n;
+                continue;
+            }
+
+            // At paragraph start: join with the previous paragraph (not inside table cells).
+            if (pos.IsInTableCell || pos.BlockIndex == 0) return;
+            var mergePos = PushOrExecute(new MergeBlocksAction(document, pos.BlockIndex - 1));
+            _selection.CollapseTo(mergePos);
+            _caret.MoveTo(mergePos);
+            count--;
+        }
+    }
+
+    /// <summary>
+    /// Deletes exactly <paramref name="count"/> UTF-16 units after the selection end (or
+    /// caret). The selection is preserved; with a caret, running past the paragraph end
+    /// joins the next paragraph (the break counts as one unit).
+    /// </summary>
+    public void DeleteImeTextAfter(int count, Document.Document document)
+    {
+        if (count <= 0) return;
+
+        if (!_selection.IsEmpty)
+        {
+            var range = _selection.Range;
+            int endAbs = GetAbsoluteOffset(document, range.End);
+            int n = Math.Min(count, GetParagraph(document, range.End).Length - endAbs);
+            if (n == 0) return;
+            DeleteParagraphRangePreservingSelection(document, range.End, endAbs, n);
+            return;
+        }
+
+        while (count > 0)
+        {
+            var pos = _caret.Position;
+            int abs = GetAbsoluteOffset(document, pos);
+            int n = Math.Min(count, GetParagraph(document, pos).Length - abs);
+            if (n > 0)
+            {
+                var to = AbsoluteOffsetToPosition(document, pos, abs + n);
+                PushOrExecute(new DeleteRangeAction(document, new TextRange(pos, to)));
+                var stay = AbsoluteOffsetToPosition(document, pos, abs);
+                _selection.CollapseTo(stay);
+                _caret.MoveTo(stay);
+                count -= n;
+                continue;
+            }
+
+            // At paragraph end: join with the next paragraph (not inside table cells).
+            if (pos.IsInTableCell || pos.BlockIndex + 1 >= document.Blocks.Count) return;
+            PushOrExecute(new MergeBlocksAction(document, pos.BlockIndex));
+            var stayPos = AbsoluteOffsetToPosition(document, pos.BlockIndex, abs);
+            _selection.CollapseTo(stayPos);
+            _caret.MoveTo(stayPos);
+            count--;
+        }
+    }
+
+    /// <summary>
+    /// Deletes [<paramref name="from"/>, <paramref name="from"/>+<paramref name="length"/>) in
+    /// <paramref name="paragraph"/>'s paragraph, then remaps the selection's anchor and active
+    /// endpoints (keeping its direction and any endpoint in another paragraph).
+    /// </summary>
+    private void DeleteParagraphRangePreservingSelection(Document.Document document, DocumentPosition paragraph, int from, int length)
+    {
+        var anchor = _selection.Anchor;
+        var active = _selection.Active;
+        int anchorAbs = GetAbsoluteOffset(document, anchor);
+        int activeAbs = GetAbsoluteOffset(document, active);
+
+        var start = AbsoluteOffsetToPosition(document, paragraph, from);
+        var end = AbsoluteOffsetToPosition(document, paragraph, from + length);
+        PushOrExecute(new DeleteRangeAction(document, new TextRange(start, end)));
+
+        DocumentPosition Remap(DocumentPosition p, int abs)
+        {
+            if (!IsSameParagraph(p, paragraph)) return p;
+            int mapped = abs <= from ? abs : abs >= from + length ? abs - length : from;
+            return AbsoluteOffsetToPosition(document, p, mapped);
+        }
+
+        var newAnchor = Remap(anchor, anchorAbs);
+        var newActive = Remap(active, activeAbs);
+        _selection.Set(newAnchor, newActive);
+        _caret.MoveTo(newActive);
+    }
+
+    /// <summary>Sets the selection to paragraph-relative offsets in the caret's paragraph (clamped).</summary>
+    public void SetImeSelection(int start, int end, Document.Document document)
+    {
+        var para = _caret.Position;
+        int len = GetParagraph(document, para).Length;
+        RestoreImeSelection(document, para, Math.Clamp(start, 0, len), Math.Clamp(end, 0, len));
+    }
+
+    private void RestoreImeSelection(Document.Document document, DocumentPosition paragraph, int start, int end)
+    {
+        var anchor = AbsoluteOffsetToPosition(document, paragraph, start);
+        var active = AbsoluteOffsetToPosition(document, paragraph, end);
+        _selection.Set(anchor, active);
+        _caret.MoveTo(active);
+    }
+
+    private static bool IsSameParagraph(DocumentPosition a, DocumentPosition b)
+        => a.BlockIndex == b.BlockIndex && a.CellRow == b.CellRow && a.CellCol == b.CellCol;
 
     // ── Selection helpers ─────────────────────────────────────────────
 
@@ -593,8 +769,12 @@ public class EditorInputController
 
         if (pos.Offset > 0)
         {
-            // Move within current inline
-            ApplyCaret(pos.With(pos.InlineIndex, pos.Offset - 1), extend);
+            // Move back one grapheme cluster (never into the middle of an emoji)
+            int abs = GetAbsoluteOffset(document, pos);
+            int step = abs - PreviousGraphemeBoundary(GetParagraph(document, pos).GetText(), abs);
+            ApplyCaret(step <= pos.Offset
+                ? pos.With(pos.InlineIndex, pos.Offset - step)
+                : AbsoluteOffsetToPosition(document, pos, abs - step), extend);
         }
         else if (pos.InlineIndex > 0)
         {
@@ -626,7 +806,11 @@ public class EditorInputController
             var inline = paragraph.Inlines[pos.InlineIndex];
             if (pos.Offset < inline.Length)
             {
-                ApplyCaret(pos.With(pos.InlineIndex, pos.Offset + 1), extend);
+                // Move forward one grapheme cluster (never into the middle of an emoji)
+                int step = NextGraphemeBoundary(paragraph.GetText(), absOffset) - absOffset;
+                ApplyCaret(pos.Offset + step <= inline.Length
+                    ? pos.With(pos.InlineIndex, pos.Offset + step)
+                    : AbsoluteOffsetToPosition(document, pos, absOffset + step), extend);
                 return;
             }
         }
@@ -1245,6 +1429,42 @@ public class EditorInputController
         }
 
         return context.With(0, 0);
+    }
+
+    /// <summary>
+    /// Largest grapheme-cluster boundary strictly before <paramref name="offset"/> (0 at the
+    /// start). Clusters cover emoji with modifiers/ZWJ, flags and combining marks.
+    /// </summary>
+    internal static int PreviousGraphemeBoundary(string text, int offset)
+    {
+        offset = Math.Clamp(offset, 0, text.Length);
+        int pos = 0, last = 0;
+        while (pos < offset)
+        {
+            last = pos;
+            pos += Math.Max(1, StringInfo.GetNextTextElementLength(text, pos));
+        }
+        return last;
+    }
+
+    /// <summary>Smallest grapheme-cluster boundary strictly after <paramref name="offset"/> (length at the end).</summary>
+    internal static int NextGraphemeBoundary(string text, int offset)
+    {
+        offset = Math.Clamp(offset, 0, text.Length);
+        int pos = 0;
+        while (pos <= offset && pos < text.Length)
+            pos += Math.Max(1, StringInfo.GetNextTextElementLength(text, pos));
+        return Math.Min(pos, text.Length);
+    }
+
+    /// <summary>Whether <paramref name="offset"/> lies on a grapheme-cluster boundary.</summary>
+    internal static bool IsGraphemeBoundary(string text, int offset)
+    {
+        if (offset <= 0 || offset >= text.Length) return true;
+        int pos = 0;
+        while (pos < offset)
+            pos += Math.Max(1, StringInfo.GetNextTextElementLength(text, pos));
+        return pos == offset;
     }
 
     private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';

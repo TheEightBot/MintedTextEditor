@@ -266,6 +266,9 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
             {
                 Edging = SKFontEdging.SubpixelAntialias,
                 Subpixel = true,
+                // Synthesize the style when the family has no real bold/italic face.
+                Embolden = font.IsBold && typeface.FontWeight < (int)SKFontStyleWeight.SemiBold,
+                SkewX = font.IsItalic && typeface.FontSlant == SKFontStyleSlant.Upright ? -0.2f : 0f,
             };
             _fontCache[key] = skFont;
         }
@@ -283,7 +286,14 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
             var width = SKFontStyleWidth.Normal;
             var slant = font.IsItalic ? SKFontStyleSlant.Italic : SKFontStyleSlant.Upright;
 
-            typeface = SKTypeface.FromFamilyName(font.Family, weight, width, slant)
+            // SkiaSharp 4: FromFamilyName with an unknown name ("Default") or null returns
+            // the default face without applying the requested style, so bold/italic were
+            // silently lost. Resolve the platform default family name first, then match the
+            // style within that family.
+            string family = ResolveFamilyName(font.Family);
+            using var style = new SKFontStyle(weight, width, slant);
+            typeface = SKFontManager.Default.MatchFamily(family, style)
+                       ?? SKTypeface.FromFamilyName(family, weight, width, slant)
                        ?? SKTypeface.Default;
             _typefaceCache[key] = typeface;
         }
@@ -397,7 +407,9 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         // Combining enclosing keycap (e.g. 1️⃣ = '1' + VS16 + U+20E3)
         if (codePoint == 0x20E3) return true;
         // General Unicode combining marks (Mn = Non-spacing, Me = Enclosing, Mc = Spacing combining)
-        var cat = char.GetUnicodeCategory(char.ConvertFromUtf32(codePoint), 0);
+        // CharUnicodeInfo takes the scalar directly; unlike char.ConvertFromUtf32 it does not
+        // throw for a lone surrogate (reachable when hit-testing measures half an emoji).
+        var cat = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(codePoint);
         return cat is System.Globalization.UnicodeCategory.NonSpacingMark
                    or System.Globalization.UnicodeCategory.EnclosingMark
                    or System.Globalization.UnicodeCategory.SpacingCombiningMark;
@@ -531,6 +543,15 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
             // Read a full grapheme cluster (base + any combining/modifier/selector code points)
             int clusterLen = ReadGraphemeCluster(text, i, out bool hasEmojiPresentation);
             string clusterRaw = text.Substring(i, clusterLen);
+
+            // An unpaired surrogate (a substring that splits an emoji, e.g. during hit-testing)
+            // has no glyph, and Skia rejects the whole run if it is included: skip it.
+            if (char.IsSurrogate(clusterRaw[0]) && (clusterRaw.Length < 2 || !char.IsSurrogatePair(clusterRaw[0], clusterRaw[1])))
+            {
+                i += clusterLen;
+                continue;
+            }
+
             string clusterDraw = StripZeroWidthFormatting(clusterRaw);
 
             // Resolve which font to use for this cluster.
@@ -626,7 +647,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
             // null bcp47 lets Skia pick the best system font for the code point — this
             // returns Apple Color Emoji on macOS/iOS and Noto Color Emoji on Android.
-            typeface = SKFontManager.Default.MatchCharacter(font.Family, style, null, codePoint);
+            typeface = SKFontManager.Default.MatchCharacter(ResolveFamilyName(font.Family), style, null, codePoint);
             _fallbackTypefaceCache[key] = typeface;
         }
 
@@ -634,6 +655,12 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
     }
 
     // ── Helpers ──────────────────────────────────────────────────
+
+    /// <summary>Maps the editor's "Default" (or empty) family to the platform default family name.</summary>
+    private static string ResolveFamilyName(string? family)
+        => string.IsNullOrWhiteSpace(family) || string.Equals(family, "Default", StringComparison.OrdinalIgnoreCase)
+            ? SKTypeface.Default.FamilyName
+            : family;
 
     private static SKRect ToSKRect(EditorRect rect)
         => new(rect.Left, rect.Top, rect.Right, rect.Bottom);
