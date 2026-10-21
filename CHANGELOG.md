@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A CI check that fails a pull request changing `src/` without an entry under `[Unreleased]` in this file (add the `skip-changelog` label when no entry is needed).
 
 ### Changed
-- README and docs updated for the 0.2–0.3 features (caret magnifier, focus events, Markdown, text shaping, emoji handling) and checked against the current API.
+- README, CONTRIBUTING and every page under `docs/` checked against the current API and corrected: many code samples used type and member names that don't exist (e.g. `RichTextEditor`, `ImportHtml`, `EditorTheme.Dark`, `ToolbarItemKind`) and are now rewritten to compile. Added the 0.2–0.3 features (caret magnifier, focus events, Markdown, text shaping, emoji handling), and stated plainly what is not supported yet (screen readers, some theme and table properties).
 - This changelog now covers every release, including 0.1.1, and the initial release is correctly listed as 0.1.0.
 
 ### Fixed
@@ -96,13 +96,13 @@ Initial release.
 - **Undo/redo**: unlimited history, operation merging for consecutive character input
 - **Clipboard**: cut, copy, paste with plain text and rich (internal format) support
 - **Find/Replace**: case-sensitive and case-insensitive search, replace one/all
-- **Spell-check integration point**: `ISpellCheckProvider` interface, red squiggle rendering
+- **Spell-check integration point**: `ISpellCheckProvider` interface (not yet used by the control)
 - **Embedded icon packs**: Lucide, Heroicons, and Material Symbols icon sets embedded as assembly resources in `MintedTextEditor.Core` — no app-bundle asset setup required. Icons are rasterized at the correct display resolution via Svg.Skia.
 - **Theme-aware icon tinting**: icons are stored as black-ink SVGs and recolored at draw time using `SKColorFilter` (SrcIn blend mode) to match the current theme foreground color; dark-mode toolbars are fully supported.
 - **Custom toolbar**: `ToolbarDefinition`, `ToolbarGroup` and `ToolbarItem` types, built-in and custom items, `ToolbarLayoutMode`
-- **Theming**: built-in Light, Dark, and High Contrast themes; full custom `EditorTheme`
+- **Theming**: built-in Light, Dark, and High Contrast themes (`EditorTheme`); custom themes via `EditorStyle`
 - **Command system**: `IEditorCommand`, `EditorCommandRegistry`, keyboard binding customization
-- **Accessibility**: screen reader support (TalkBack, VoiceOver, Narrator), keyboard-only navigation, high contrast, RTL, localization via `EditorStrings`
+- **Accessibility and localization**: keyboard-only navigation, a high-contrast theme, right-to-left paragraph direction, and `EditorStrings` for localized text (not yet read by the toolbar or menus)
 - **Platforms**: Android (API 21+), iOS (15.0+), macOS/Mac Catalyst (15.0+), Windows (10 version 1809+, when built on Windows)
 - **Rendering**: fully custom-drawn via SkiaSharp — no native `TextView`/`UITextView`/`WebView` wrapping
 - **NuGet packages**: `MintedTextEditor.Core`, `MintedTextEditor.SkiaSharp`, `MintedTextEditor.Maui`
