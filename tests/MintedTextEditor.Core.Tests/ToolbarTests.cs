@@ -52,7 +52,7 @@ public class ToolbarTests
     {
         var toolbar = ToolbarDefinition.CreateDefault();
         var dd = toolbar.AllItems.OfType<ToolbarDropdown>()
-                        .FirstOrDefault(d => d.Label == "Font Family");
+                        .FirstOrDefault(d => d.Label == "Font family");
         Assert.NotNull(dd);
     }
 
@@ -482,5 +482,117 @@ public class ToolbarTests
 
         Assert.Null(renderer.HoveredItem);
         Assert.DoesNotContain(ctx.FillRoundRectCalls, c => c.Paint.Color == renderer.HoverColor);
+    }
+
+    [Fact]
+    public void DropdownList_WidensToFitLongestOption()
+    {
+        const string longOption = "Insertar columna a la derecha de la celda";
+        var dd = new ToolbarDropdown { Label = "Table", Items = { "Short", longOption } };
+        var renderer = new ToolbarRenderer(ToolbarDefinition.CreateFromItems(new List<ToolbarItem> { dd }));
+
+        var dc = new MockDrawingContext();
+        var bounds = new EditorRect(0, 0, 800, 600);
+        renderer.Render(dc, bounds);
+        renderer.ToggleOverlay(dd);
+        dc.DrawTextInRectCalls.Clear();
+        renderer.RenderOverlay(dc, bounds.Width, bounds.Height);
+
+        var drawn = dc.DrawTextInRectCalls.Single(c => c.Text == longOption);
+        Assert.True(drawn.Rect.Width >= dc.MeasureText(longOption, new EditorPaint()).Width,
+            $"Option rect {drawn.Rect.Width}px is narrower than its text");
+    }
+
+    // ── MaxRowsOverride ──────────────────────────────────────────────────────
+
+    private static readonly EditorRect NarrowToolbarBounds = new(0, 0, 100, 400);
+
+    private static ToolbarRenderer RenderNarrow(ToolbarDefinition def, int? maxRowsOverride)
+    {
+        var renderer = new ToolbarRenderer(def) { MaxRowsOverride = maxRowsOverride };
+        renderer.Render(new MockDrawingContext(), NarrowToolbarBounds);
+        return renderer;
+    }
+
+    [Fact]
+    public void MaxRowsOverride_DefaultsToNull_AndUsesDefinitionMaxRows()
+    {
+        var def = ToolbarDefinition.CreateDefault();
+        def.MaxRows = 1;
+        var renderer = new ToolbarRenderer(def);
+
+        Assert.Null(renderer.MaxRowsOverride);
+        Assert.Equal(1, renderer.EffectiveMaxRows);
+    }
+
+    [Fact]
+    public void MaxRowsOverride_LimitsRows_WhenDefinitionIsUnlimited()
+    {
+        var def = ToolbarDefinition.CreateDefault(); // MaxRows = 0
+
+        Assert.False(RenderNarrow(def, null).HasOverflow);
+        Assert.True(RenderNarrow(def, 1).HasOverflow);
+    }
+
+    [Fact]
+    public void MaxRowsOverride_Zero_RemovesDefinitionLimit()
+    {
+        var def = ToolbarDefinition.CreateDefault();
+        def.MaxRows = 1;
+
+        Assert.True(RenderNarrow(def, null).HasOverflow);
+        Assert.False(RenderNarrow(def, 0).HasOverflow);
+    }
+
+    [Fact]
+    public void MaxRowsOverride_DoesNotMutateDefinition()
+    {
+        var def = ToolbarDefinition.CreateDefault();
+        def.MaxRows = 3;
+
+        var renderer = RenderNarrow(def, 1);
+
+        Assert.Equal(3, def.MaxRows);
+        Assert.Equal(1, renderer.EffectiveMaxRows);
+    }
+
+    [Fact]
+    public void MaxRowsOverride_Negative_IsUnlimited()
+    {
+        var renderer = new ToolbarRenderer(ToolbarDefinition.CreateDefault()) { MaxRowsOverride = -2 };
+        Assert.Equal(0, renderer.EffectiveMaxRows);
+    }
+
+    [Fact]
+    public void RowLimit_StoredOnDefinition_IsLostWhenToolbarIsRebuilt()
+    {
+        // Reproduces the old MintedEditorView behaviour: ToolbarMaxRows was written to the
+        // current renderer's Definition, so a rebuilt toolbar came back unlimited.
+        var first = new ToolbarRenderer(ToolbarDefinition.CreateDefault());
+        first.Definition.MaxRows = 1;
+        first.Render(new MockDrawingContext(), NarrowToolbarBounds);
+        Assert.True(first.HasOverflow);
+
+        var rebuilt = new ToolbarRenderer(ToolbarDefinition.CreateDefault());
+        rebuilt.Render(new MockDrawingContext(), NarrowToolbarBounds);
+        Assert.False(rebuilt.HasOverflow);
+    }
+
+    [Fact]
+    public void RowLimit_CarriedAsOverride_SurvivesToolbarRebuild()
+    {
+        // The host's limit lives outside the definition, so it is re-applied to each new renderer
+        // regardless of what the new definition (or flat item list) specifies.
+        const int hostMaxRows = 1;
+
+        var fromDefault = RenderNarrow(ToolbarDefinition.CreateDefault(), hostMaxRows);
+        var fromCustom  = RenderNarrow(
+            new ToolbarDefinition { Groups = ToolbarDefinition.CreateDefault().Groups, MaxRows = 0 }, hostMaxRows);
+        var fromItems   = RenderNarrow(
+            ToolbarDefinition.CreateFromItems(ToolbarDefinition.CreateDefault().AllItems.ToList()), hostMaxRows);
+
+        Assert.True(fromDefault.HasOverflow);
+        Assert.True(fromCustom.HasOverflow);
+        Assert.True(fromItems.HasOverflow);
     }
 }

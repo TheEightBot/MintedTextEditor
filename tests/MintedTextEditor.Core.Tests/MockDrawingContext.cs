@@ -45,7 +45,10 @@ internal class MockDrawingContext : IDrawingContext
     public void DrawTextInRect(string text, EditorRect rect, EditorPaint paint,
         TextAlignment hAlign = TextAlignment.Left,
         VerticalAlignment vAlign = VerticalAlignment.Center,
-        bool clip = true) { }
+        bool clip = true) => DrawTextInRectCalls.Add((text, rect));
+
+    /// <summary>Text and bounds passed to <see cref="DrawTextInRect"/>, in order.</summary>
+    public List<(string Text, EditorRect Rect)> DrawTextInRectCalls { get; } = new();
 
     public void FillRect(EditorRect rect, EditorPaint paint)
     {

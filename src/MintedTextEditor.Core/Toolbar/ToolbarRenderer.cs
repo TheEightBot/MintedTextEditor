@@ -29,6 +29,20 @@ public sealed class ToolbarRenderer
     public ToolbarIconPack   IconPack { get; set; } = ToolbarIconPack.Lucide;
 
     /// <summary>
+    /// Row limit that replaces <see cref="ToolbarDefinition.MaxRows"/> when non-null; 0 means unlimited.
+    /// Lets a host apply its own limit without mutating the (possibly shared) definition, and
+    /// carry that limit over when it creates a new renderer for a different definition.
+    /// Defaults to <see langword="null"/>, which uses the definition's value.
+    /// </summary>
+    public int?              MaxRowsOverride { get; set; }
+
+    /// <summary>
+    /// The row limit used for layout: <see cref="MaxRowsOverride"/> when set, otherwise
+    /// <see cref="ToolbarDefinition.MaxRows"/>. Negative values count as 0 (unlimited).
+    /// </summary>
+    public int EffectiveMaxRows => Math.Max(0, MaxRowsOverride ?? Definition.MaxRows);
+
+    /// <summary>
     /// Total height the toolbar occupies (button area + top/bottom padding).
     /// Use this to offset the document viewport below the toolbar.
     /// </summary>
@@ -105,7 +119,7 @@ public sealed class ToolbarRenderer
     // ── Overflow ──────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Items that did not fit within <see cref="ToolbarDefinition.MaxRows"/> rows.
+    /// Items that did not fit within <see cref="EffectiveMaxRows"/> rows.
     /// Populated after each <see cref="Render"/> call.
     /// </summary>
     public IReadOnlyList<ToolbarItem> OverflowItems => _overflowItems;
@@ -232,24 +246,28 @@ public sealed class ToolbarRenderer
 
         const int maxVisible = 10;
         int itemCount = Math.Min(dd.Items.Count, maxVisible);
-        float panelW = Math.Max(anchor.Width, 120f);
-        float panelH = itemCount * _overlayItemH + 4f;
-
-        // Position below the dropdown button, clamped inside canvas
-        float panelX = anchor.X;
-        float panelY = anchor.Y + anchor.Height + 2f;
-        if (panelX + panelW > totalWidth)  panelX = totalWidth - panelW;
-        if (panelY + panelH > totalHeight) panelY = anchor.Y - panelH - 2f;
-
-        _overlayRect = new EditorRect(panelX, panelY, panelW, panelH);
-
-        // Panel shadow / background
         var shadowPaint  = new EditorPaint { Color = new EditorColor(0, 0, 0, 40) };
         var bgPaint      = new EditorPaint { Color = EditorColor.White };
         var borderPaint  = new EditorPaint { Color = SeparatorColor };
         var textPaint    = new EditorPaint { Color = ButtonColor };
         var activePaint  = new EditorPaint { Color = ActiveColor };
 
+        // Widen the panel to fit the longest option (localized text is often longer than English).
+        float panelW = Math.Max(anchor.Width, 120f);
+        for (int i = 0; i < itemCount; i++)
+            panelW = Math.Max(panelW, ctx.MeasureText(dd.Items[i], textPaint).Width + 12f);
+        if (totalWidth > 0f) panelW = Math.Min(panelW, totalWidth);
+        float panelH = itemCount * _overlayItemH + 4f;
+
+        // Position below the dropdown button, clamped inside canvas
+        float panelX = anchor.X;
+        float panelY = anchor.Y + anchor.Height + 2f;
+        if (panelX + panelW > totalWidth)  panelX = Math.Max(0f, totalWidth - panelW);
+        if (panelY + panelH > totalHeight) panelY = anchor.Y - panelH - 2f;
+
+        _overlayRect = new EditorRect(panelX, panelY, panelW, panelH);
+
+        // Panel shadow / background
         ctx.FillRoundRect(_overlayRect.Inflate(2, 2), 5f, shadowPaint);
         ctx.FillRoundRect(_overlayRect, 4f, bgPaint);
         ctx.DrawRoundRect(_overlayRect, 4f, borderPaint);
@@ -362,7 +380,7 @@ public sealed class ToolbarRenderer
         bool canWrap = Definition.LayoutMode == ToolbarLayoutMode.Wrap
                     || Definition.LayoutMode == ToolbarLayoutMode.Overflow;
 
-        int  maxRows       = Definition.MaxRows; // 0 = unlimited
+        int  maxRows       = EffectiveMaxRows; // 0 = unlimited
         float overflowBtnW = ButtonSize + ButtonPadding;
         int  currentRow   = 0;
         bool inOverflow   = false;
@@ -502,7 +520,7 @@ public sealed class ToolbarRenderer
         EditorPaint textPaint,
         EditorPaint disabledTextPaint)
     {
-        int  maxRows       = Definition.MaxRows;
+        int  maxRows       = EffectiveMaxRows;
         float overflowBtnW = ButtonSize + ButtonPadding;
         int  currentRow   = 0;
         bool inOverflow   = false;

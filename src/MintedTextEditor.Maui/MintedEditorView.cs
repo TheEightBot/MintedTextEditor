@@ -7,6 +7,7 @@ using MintedTextEditor.Core.Html;
 using MintedTextEditor.Core.Markdown;
 using MintedTextEditor.Core.Input;
 using MintedTextEditor.Core.Layout;
+using MintedTextEditor.Core.Localization;
 using MintedTextEditor.Core.Rendering;
 using MintedTextEditor.Core.Theming;
 using MintedTextEditor.Core.Toolbar;
@@ -43,6 +44,7 @@ public class MintedEditorView : ContentView
     private readonly FontFormattingEngine _fontFormattingEngine = new();
     private readonly UndoManager _undoManager = new();
     private readonly EditorInputController _inputController;
+    private readonly EditorFindReplace _findReplace;
 
     // Persistent 1×1 off-screen surface used for text measurement calls (hit-testing)
     // that happen outside of a PaintSurface callback.
@@ -103,6 +105,8 @@ public class MintedEditorView : ContentView
     private readonly Dictionary<string, SKBitmap> _imageCache = new();
     private const int DefaultSvgRasterSize = 512;
     private int _iconLoadVersion;
+    // Weak, so an editor that is discarded without being unloaded can still be collected.
+    private IDisposable? _stringsSubscription;
 
 
 
@@ -380,14 +384,31 @@ public class MintedEditorView : ContentView
             propertyChanged: static (b, _, nv) =>
             {
                 var v = (MintedEditorView)b;
-                v._toolbarRenderer.Definition.MaxRows = (int)nv!;
+                v.ApplyToolbarMaxRows();
                 v.InvalidateCanvas();
+            },
+            // Setting the current value again, or clearing a value equal to the default, raises
+            // no property change, yet it switches between the explicit limit and the definition's
+            // MaxRows. MAUI calls coerceValue on every SetValue and ClearValue (before IsSet is
+            // updated), so request a repaint here; painting re-applies the override.
+            coerceValue: static (b, value) =>
+            {
+                ((MintedEditorView)b).InvalidateCanvas();
+                return value;
             });
 
     /// <summary>
     /// Maximum number of toolbar rows to display before remaining items are collapsed
     /// into an overflow (…) button. 0 (the default) means unlimited.
     /// </summary>
+    /// <remarks>
+    /// Once set (to any value, including 0), this property takes precedence over
+    /// <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> and stays in effect when
+    /// <see cref="ToolbarDefinition"/>, <see cref="ToolbarItems"/> or <see cref="ToolbarIconPack"/>
+    /// change. While it has never been set (or after <c>ClearValue(ToolbarMaxRowsProperty)</c>),
+    /// the current definition's <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> is used.
+    /// The definition object itself is never modified.
+    /// </remarks>
     public int ToolbarMaxRows
     {
         get => (int)GetValue(ToolbarMaxRowsProperty);
@@ -433,7 +454,8 @@ public class MintedEditorView : ContentView
     /// <summary>
     /// Optional custom <see cref="Core.Toolbar.ToolbarDefinition"/>.
     /// When <see langword="null"/> the editor uses <see cref="Core.Toolbar.ToolbarDefinition.CreateDefault()"/>.
-    /// Ignored while <see cref="ToolbarItems"/> is non-empty.
+    /// Ignored while <see cref="ToolbarItems"/> is non-empty. The definition's
+    /// <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> applies only while <see cref="ToolbarMaxRows"/> is unset.
     /// </summary>
     public ToolbarDefinition? ToolbarDefinition
     {
@@ -469,13 +491,7 @@ public class MintedEditorView : ContentView
             return;
         }
 
-        var definition = def ?? ToolbarDefinition.CreateDefault();
-        _toolbarRenderer = new ToolbarRenderer(definition);
-        _toolbarRenderer.IconPack = ToolbarIconPack;
-        _toolbarRenderer.IconResolver = key =>
-            _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
-        WireToolbarCallbacks(definition);
-        InvalidateCanvas();
+        ApplyToolbarDefinition(def ?? ToolbarDefinition.CreateDefault());
     }
 
     private void OnToolbarItemsChanged(IList<Core.Toolbar.ToolbarItem>? items)
@@ -491,27 +507,106 @@ public class MintedEditorView : ContentView
 
     private void ApplyToolbarDefinition(ToolbarDefinition definition)
     {
+        CreateToolbarRenderer(definition);
+        InvalidateCanvas();
+    }
+
+    // Every toolbar rebuild goes through here so view-level settings (icon pack,
+    // icon resolver, row limit) carry over to the new renderer.
+    private void CreateToolbarRenderer(ToolbarDefinition definition)
+    {
         _toolbarRenderer = new ToolbarRenderer(definition);
         _toolbarRenderer.IconPack = ToolbarIconPack;
         _toolbarRenderer.IconResolver = key =>
             _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
+        ApplyToolbarMaxRows();
         WireToolbarCallbacks(definition);
+    }
+
+    // Font families offered by the font-family dropdown after the localized "Default" entry.
+    private static readonly string[] s_fontFamilies =
+    [
+        "Arial", "Times New Roman", "Courier New",
+        "Georgia", "Verdana", "Trebuchet MS", "Comic Sans MS",
+    ];
+
+    /// <summary>
+    /// Fills the options of the built-in dropdowns (font family, heading level, edit, object and
+    /// table menus) from <see cref="EditorStrings.Current"/>, keeping each selection. Called when the
+    /// toolbar is wired and again whenever <see cref="EditorStrings.Current"/> changes.
+    /// </summary>
+    private static void ApplyLocalizedDropdownItems(ToolbarDefinition def)
+    {
+        var s = EditorStrings.Current;
+        foreach (var dd in def.AllItems.OfType<ToolbarDropdown>())
+        {
+            string[]? items = dd.Icon switch
+            {
+                "font-family"    => [s.DefaultFontFamily, .. s_fontFamilies],
+                "heading"        => [s.NormalText, s.Heading1, s.Heading2, s.Heading3, s.Heading4, s.Heading5, s.Heading6],
+                "edit-actions"   => [s.Copy, s.Cut, s.Paste, s.SelectAll],
+                "object-actions" => [s.OpenLink, s.RemoveLink, s.RemoveImage],
+                "table-actions"  =>
+                [
+                    s.InsertTableEllipsis, s.InsertRowAbove, s.InsertRowBelow, s.DeleteRow,
+                    s.InsertColumnLeft, s.InsertColumnRight, s.DeleteColumn, s.DeleteTable,
+                ],
+                _ => null,
+            };
+            if (items is null) continue;
+
+            dd.Items.Clear();
+            foreach (var text in items) dd.Items.Add(text);
+        }
+    }
+
+    private void OnEditorStringsChanged()
+    {
+        // EditorStrings.Current may be replaced from any thread.
+        Dispatcher.Dispatch(RefreshLocalizedStrings);
+    }
+
+    private void RefreshLocalizedStrings()
+    {
+        ApplyLocalizedDropdownItems(_toolbarRenderer.Definition);
         InvalidateCanvas();
     }
 
+    /// <summary>
+    /// Starts listening for <see cref="EditorStrings.CurrentChanged"/> (if not already) and applies
+    /// strings that were replaced while the editor was not listening.
+    /// </summary>
+    private void SubscribeToEditorStrings()
+    {
+        if (_stringsSubscription is not null) return;
+        _stringsSubscription = EditorStrings.SubscribeCurrentChangedWeak(
+            this, static view => view.OnEditorStringsChanged());
+        RefreshLocalizedStrings();
+    }
+
+    private void UnsubscribeFromEditorStrings()
+    {
+        _stringsSubscription?.Dispose();
+        _stringsSubscription = null;
+    }
+
+    private void OnViewLoaded(object? sender, EventArgs e) => SubscribeToEditorStrings();
+
+    private void OnViewUnloaded(object? sender, EventArgs e) => UnsubscribeFromEditorStrings();
+
+    // ToolbarMaxRows wins once the app has set it; otherwise the definition's MaxRows applies.
+    private void ApplyToolbarMaxRows() =>
+        _toolbarRenderer.MaxRowsOverride = IsSet(ToolbarMaxRowsProperty) ? ToolbarMaxRows : null;
+
     private void WireToolbarCallbacks(ToolbarDefinition def)
     {
-        string[] fontFamilies =
-        [
-            "Default", "Arial", "Times New Roman", "Courier New",
-            "Georgia", "Verdana", "Trebuchet MS", "Comic Sans MS",
-        ];
         string[] fontSizes =
         [
             "8", "9", "10", "11", "12", "14", "16", "18",
             "20", "24", "28", "32", "36", "48", "72",
         ];
-        string[] headingLevels = ["Normal", "H1", "H2", "H3", "H4", "H5", "H6"];
+
+        ApplyLocalizedDropdownItems(def);
 
         foreach (var item in def.AllItems)
         {
@@ -520,13 +615,12 @@ public class MintedEditorView : ContentView
                 switch (dd.Icon)
                 {
                     case "font-family":
-                        dd.Items.Clear();
-                        foreach (var f in fontFamilies) dd.Items.Add(f);
                         dd.SelectedIndex = 0;
                         dd.OnSelectionChanged = idx =>
                         {
+                            // Index 0 is the localized "Default" entry, which clears the font family.
                             if ((uint)idx < (uint)dd.Items.Count)
-                                _fontFormattingEngine.ApplyFontFamily(_document, _inputController.Selection.Range, dd.Items[idx] == "Default" ? "" : dd.Items[idx]);
+                                _fontFormattingEngine.ApplyFontFamily(_document, _inputController.Selection.Range, idx == 0 ? "" : dd.Items[idx]);
                             InvalidateCanvas();
                         };
                         break;
@@ -544,8 +638,6 @@ public class MintedEditorView : ContentView
                         break;
 
                     case "heading":
-                        dd.Items.Clear();
-                        foreach (var h in headingLevels) dd.Items.Add(h);
                         dd.SelectedIndex = 0;
                         dd.OnSelectionChanged = idx =>
                         {
@@ -556,11 +648,6 @@ public class MintedEditorView : ContentView
                         break;
 
                     case "edit-actions":
-                        dd.Items.Clear();
-                        dd.Items.Add("Copy");
-                        dd.Items.Add("Cut");
-                        dd.Items.Add("Paste");
-                        dd.Items.Add("Select All");
                         dd.SelectedIndex = -1;
                         dd.OnSelectionChanged = async idx =>
                         {
@@ -585,10 +672,6 @@ public class MintedEditorView : ContentView
                         break;
 
                     case "object-actions":
-                        dd.Items.Clear();
-                        dd.Items.Add("Open Link");
-                        dd.Items.Add("Remove Link");
-                        dd.Items.Add("Remove Image");
                         dd.SelectedIndex = -1;
                         dd.OnSelectionChanged = idx =>
                         {
@@ -617,15 +700,6 @@ public class MintedEditorView : ContentView
                         break;
 
                     case "table-actions":
-                        dd.Items.Clear();
-                        dd.Items.Add("Insert Table...");
-                        dd.Items.Add("Insert Row Above");
-                        dd.Items.Add("Insert Row Below");
-                        dd.Items.Add("Delete Row");
-                        dd.Items.Add("Insert Column Left");
-                        dd.Items.Add("Insert Column Right");
-                        dd.Items.Add("Delete Column");
-                        dd.Items.Add("Delete Table");
                         dd.SelectedIndex = -1;
                         dd.OnSelectionChanged = async idx =>
                         {
@@ -793,6 +867,13 @@ public class MintedEditorView : ContentView
     /// <summary>Raised when image insertion is requested so hosts can provide a source.</summary>
     public event EventHandler<ImageRequestedEventArgs>? ImageRequested;
 
+    /// <summary>
+    /// Raised after <see cref="FindNext"/>, <see cref="FindPrevious"/>, <see cref="Replace"/> or
+    /// <see cref="ReplaceAll"/> completes, with the match count and the 1-based index of the
+    /// selected match (0 when none) for the query after the operation.
+    /// </summary>
+    public event EventHandler<FindReplaceResultEventArgs>? FindReplaceCompleted;
+
     /// <summary>Platform handler used to open hyperlinks when activation is not cancelled.</summary>
     public IHyperlinkHandler HyperlinkHandler { get; set; } = new MauiHyperlinkHandler();
 
@@ -813,6 +894,8 @@ public class MintedEditorView : ContentView
             FormattingEngine = _formattingEngine,
             FontFormattingEngine = _fontFormattingEngine,
         };
+
+        _findReplace = new EditorFindReplace(_document, _inputController.Selection, _undoManager);
 
         _document.Changed += OnDocumentChanged;
 
@@ -838,16 +921,15 @@ public class MintedEditorView : ContentView
         _caret.IsFocused = false;
         _inputController.ClipboardProvider = new MauiClipboardProvider();
 
-        _toolbarRenderer = new ToolbarRenderer(ToolbarDefinition.CreateDefault());
-        _toolbarRenderer.IconPack = ToolbarIconPack;
-        _toolbarRenderer.IconResolver = key =>
-            _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
-        WireToolbarCallbacks(_toolbarRenderer.Definition);
+        CreateToolbarRenderer(ToolbarDefinition.CreateDefault());
 
         var grid = new Grid();
         grid.Add(_canvas);
         grid.Add(_keyboardProxy);
         Content = grid;
+
+        Loaded += OnViewLoaded;
+        Unloaded += OnViewUnloaded;
     }
 
     // ── HTML API ─────────────────────────────────────────────────────────────────
@@ -930,6 +1012,99 @@ public class MintedEditorView : ContentView
         }
     }
 
+    // ── Find / Replace ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Selects and scrolls to the next occurrence of <paramref name="query"/> after the current
+    /// selection, wrapping to the start of the document when <paramref name="wrapAround"/> is
+    /// <c>true</c>. Returns <c>false</c> (leaving the selection unchanged) when there is no match.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    /// <param name="wrapAround">When <c>true</c>, continues from the start after the last match.</param>
+    public bool FindNext(string query, bool matchCase = false, bool wholeWord = false, bool wrapAround = true)
+    {
+        var match = _findReplace.FindNext(query, CreateFindOptions(matchCase, wholeWord, wrapAround));
+        if (match is not null)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return match is not null;
+    }
+
+    /// <summary>
+    /// Selects and scrolls to the previous occurrence of <paramref name="query"/> before the
+    /// current selection, wrapping to the end of the document when <paramref name="wrapAround"/>
+    /// is <c>true</c>. Returns <c>false</c> (leaving the selection unchanged) when there is no match.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    /// <param name="wrapAround">When <c>true</c>, continues from the end before the first match.</param>
+    public bool FindPrevious(string query, bool matchCase = false, bool wholeWord = false, bool wrapAround = true)
+    {
+        var match = _findReplace.FindPrevious(query, CreateFindOptions(matchCase, wholeWord, wrapAround));
+        if (match is not null)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return match is not null;
+    }
+
+    /// <summary>
+    /// Replaces the selected occurrence of <paramref name="query"/> (or, when the selection is not
+    /// a match, the next one) with <paramref name="replacement"/> as a single undo step, then
+    /// selects the following match. Returns <c>true</c> when a replacement was made; always
+    /// <c>false</c> when <see cref="IsReadOnly"/> is set.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="replacement">The replacement text; empty deletes the match.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    public bool Replace(string query, string replacement, bool matchCase = false, bool wholeWord = false)
+    {
+        if (IsReadOnly) return false;
+        bool replaced = _findReplace.Replace(query, replacement, CreateFindOptions(matchCase, wholeWord, wrapAround: true));
+        if (replaced)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return replaced;
+    }
+
+    /// <summary>
+    /// Replaces every occurrence of <paramref name="query"/> with <paramref name="replacement"/>
+    /// as a single undo step and returns the number of replacements; always 0 when
+    /// <see cref="IsReadOnly"/> is set.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="replacement">The replacement text; empty deletes the matches.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    public int ReplaceAll(string query, string replacement, bool matchCase = false, bool wholeWord = false)
+    {
+        if (IsReadOnly) return 0;
+        int count = _findReplace.ReplaceAll(query, replacement, CreateFindOptions(matchCase, wholeWord, wrapAround: true));
+        if (count > 0)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return count;
+    }
+
+    private static FindOptions CreateFindOptions(bool matchCase, bool wholeWord, bool wrapAround) =>
+        new() { MatchCase = matchCase, WholeWord = wholeWord, WrapAround = wrapAround };
+
+    private void OnFindReplaceSelectionChanged()
+    {
+        _caret.MoveTo(_inputController.Selection.Active);
+        ScrollCaretIntoView();
+        RaiseSelectionChanged();
+        NotifyImeSelectionChanged();
+        InvalidateCanvas();
+    }
+
+    private void RaiseFindReplaceCompleted(string query) =>
+        FindReplaceCompleted?.Invoke(this, new FindReplaceResultEventArgs(
+            query ?? string.Empty, _findReplace.MatchCount, _findReplace.CurrentMatchIndex + 1));
+
     // ── Insert Hyperlink / Image ──────────────────────────────────────────────────
 
     private async Task HandleInsertHyperlinkAsync()
@@ -937,11 +1112,12 @@ public class MintedEditorView : ContentView
         var page = GetHostPage();
         if (page == null) return;
 
+        var strings = EditorStrings.Current;
         string? url = await page.DisplayPromptAsync(
-            "Insert Hyperlink",
-            "Enter URL:",
-            accept: "Insert",
-            cancel: "Cancel",
+            strings.HyperlinkDialogTitle,
+            strings.HyperlinkDialogMessage,
+            accept: strings.HyperlinkDialogInsert,
+            cancel: strings.HyperlinkDialogCancel,
             placeholder: "https://",
             keyboard: Keyboard.Url);
 
@@ -967,11 +1143,12 @@ public class MintedEditorView : ContentView
             var page = GetHostPage();
             if (page == null) return;
 
+            var strings = EditorStrings.Current;
             source = await page.DisplayPromptAsync(
-                "Insert Image",
-                "Enter image URL or path:",
-                accept: "Insert",
-                cancel: "Cancel",
+                strings.ImageDialogTitle,
+                strings.ImageDialogMessage,
+                accept: strings.ImageDialogInsert,
+                cancel: strings.ImageDialogCancel,
                 placeholder: "https://",
                 keyboard: Keyboard.Url);
         }
@@ -990,11 +1167,12 @@ public class MintedEditorView : ContentView
         var page = GetHostPage();
         if (page == null) return;
 
+        var strings = EditorStrings.Current;
         string? rowsInput = await page.DisplayPromptAsync(
-            "Insert Table",
-            "Rows:",
-            accept: "Next",
-            cancel: "Cancel",
+            strings.TableDialogTitle,
+            strings.TableDialogRows,
+            accept: strings.TableDialogNext,
+            cancel: strings.TableDialogCancel,
             initialValue: "2",
             keyboard: Keyboard.Numeric);
 
@@ -1002,10 +1180,10 @@ public class MintedEditorView : ContentView
             return;
 
         string? colsInput = await page.DisplayPromptAsync(
-            "Insert Table",
-            "Columns:",
-            accept: "Insert",
-            cancel: "Cancel",
+            strings.TableDialogTitle,
+            strings.TableDialogColumns,
+            accept: strings.TableDialogInsert,
+            cancel: strings.TableDialogCancel,
             initialValue: "2",
             keyboard: Keyboard.Numeric);
 
@@ -1038,14 +1216,20 @@ public class MintedEditorView : ContentView
 
     /// <inheritdoc/>
     /// <remarks>
-    /// When a handler is attached, loads the toolbar icons and starts the caret blink timer if the
-    /// editor is focused; when it is removed, stops the blink timer.
+    /// When a handler is attached, loads the toolbar icons, starts the caret blink timer if the
+    /// editor is focused, and starts listening for <see cref="EditorStrings.CurrentChanged"/>; when
+    /// it is removed, stops the blink timer and the listener. The listener is also started on
+    /// <see cref="VisualElement.Loaded"/> and stopped on <see cref="VisualElement.Unloaded"/>, and
+    /// holds the view only weakly, so an editor that is discarded without either can still be
+    /// garbage collected.
     /// </remarks>
     protected override void OnHandlerChanged()
     {
         base.OnHandlerChanged();
         if (Handler is not null)
         {
+            // Also picks up strings replaced while the view had no handler.
+            SubscribeToEditorStrings();
             // The blink timer is driven by focus (OnNativeFocusChanged), not by the
             // handler lifetime — an idle editor should not repaint 10x per second.
             if (_isEditorFocused)
@@ -1055,6 +1239,7 @@ public class MintedEditorView : ContentView
         else
         {
             StopBlinkTimer();
+            UnsubscribeFromEditorStrings();
         }
     }
 
@@ -1229,6 +1414,7 @@ public class MintedEditorView : ContentView
             _toolbarRenderer.SeparatorColor  = theme.ToolbarSeparatorColor;
             _toolbarRenderer.DisabledColor   = theme.ToolbarSeparatorColor;
             _toolbarRenderer.HoverColor      = theme.ToolbarHoverColor;
+            ApplyToolbarMaxRows(); // picks up set/clear transitions that raise no property change (see coerceValue)
             _toolbarRenderer.UpdateToggleStates(GetEditorContext());
             _toolbarRenderer.Render(dc, new EditorRect(0, 0, logicalW, logicalH));
             toolbarH = _toolbarRenderer.ToolbarHeight;
