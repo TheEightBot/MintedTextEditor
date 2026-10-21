@@ -38,12 +38,20 @@ public class CharacterFormatUndoTests
             Paragraph p => p.Inlines.Select(i => i switch
             {
                 TextRun r => (object)(r.Text, r.Style),
-                HyperlinkInline h => (h.Url, h.Title,
-                    string.Join("|", h.Children.OfType<TextRun>().Select(c => $"{c.Text}:{c.Style.IsBold}:{c.Style.IsItalic}"))),
-                _ => i.GetType().Name,
+                _ => Describe(i),
             }).ToList(),
             _ => new List<object> { b.GetType().Name },
         }).ToList();
+
+    /// <summary>Lossless text description of an inline, recursing into hyperlink children.</summary>
+    private static string Describe(Inline inline) => inline switch
+    {
+        TextRun r => $"T[{r.Text}|{r.Style.GetHashCode()}|{r.Style.IsBold}]",
+        ImageInline img => $"I[{img.Source}|{img.AltText}|{img.Width}x{img.Height}]",
+        LineBreak => "BR",
+        HyperlinkInline h => $"L[{h.Url}|{h.Title}|{string.Join(",", h.Children.Select(Describe))}]",
+        _ => inline.GetType().Name,
+    };
 
     private static EditorContext Ctx(EditorDocument doc, DocumentPosition anchor, DocumentPosition active, UndoManager undo)
     {
@@ -327,5 +335,175 @@ public class CharacterFormatUndoTests
         new RemoveHyperlinkCommand().Execute(Ctx(doc, caret, caret, undo));
 
         Assert.False(undo.CanUndo);
+    }
+
+    // ── Undo of earlier insertions after a snapshot restore ───────────────────
+    // Snapshot restores must put the original inline objects back: earlier insert
+    // actions find what they inserted by reference when they are undone.
+
+    private static void SelectRange(EditorContext ctx, int fromAbs, int toAbs)
+    {
+        var context = new DocumentPosition(0, 0, 0);
+        ctx.Selection.Set(
+            DocumentEditor.AbsoluteCharOffsetToPosition(ctx.Document, context, fromAbs),
+            DocumentEditor.AbsoluteCharOffsetToPosition(ctx.Document, context, toAbs));
+    }
+
+    [Fact]
+    public void InsertLink_RemoveLink_UndoTwice_RemovesTheLink()
+    {
+        var doc = new EditorDocument([new Paragraph("Click here now")]);
+        var undo = new UndoManager();
+        var ctx = Ctx(doc, new DocumentPosition(0, 0, 6), new DocumentPosition(0, 0, 10), undo);
+
+        new InsertHyperlinkCommand { Url = "https://example.com" }.Execute(ctx);
+        var linkIndex = ((Paragraph)doc.Blocks[0]).Inlines.FindIndex(i => i is HyperlinkInline);
+        ctx.Selection.CollapseTo(new DocumentPosition(0, linkIndex, 1));
+        new RemoveHyperlinkCommand().Execute(ctx);
+
+        undo.Undo();   // link is back
+        Assert.Contains(((Paragraph)doc.Blocks[0]).Inlines, i => i is HyperlinkInline);
+        undo.Undo();   // insertion undone
+        Assert.DoesNotContain(((Paragraph)doc.Blocks[0]).Inlines, i => i is HyperlinkInline);
+        Assert.Equal("Click here now", doc.GetText());
+        Assert.False(undo.CanUndo);
+    }
+
+    [Fact]
+    public void InsertLink_FormatOverIt_UndoTwice_RemovesTheLink()
+    {
+        var doc = new EditorDocument([new Paragraph("Click here now")]);
+        var undo = new UndoManager();
+        var ctx = Ctx(doc, new DocumentPosition(0, 0, 6), new DocumentPosition(0, 0, 10), undo);
+
+        new InsertHyperlinkCommand { Url = "https://example.com" }.Execute(ctx);
+        SelectRange(ctx, 0, 14);
+        new ToggleBoldCommand().Execute(ctx);
+
+        undo.Undo();   // bold undone; link still there
+        Assert.Contains(((Paragraph)doc.Blocks[0]).Inlines, i => i is HyperlinkInline);
+        undo.Undo();   // insertion undone
+        Assert.DoesNotContain(((Paragraph)doc.Blocks[0]).Inlines, i => i is HyperlinkInline);
+        Assert.Equal("Click here now", doc.GetText());
+    }
+
+    [Fact]
+    public void InsertImage_FormatOverIt_UndoTwice_RemovesTheImage()
+    {
+        var doc = new EditorDocument([new Paragraph("Before after")]);
+        var undo = new UndoManager();
+        var caret = new DocumentPosition(0, 0, 6);
+        var ctx = Ctx(doc, caret, caret, undo);
+
+        new InsertImageCommand { Source = "pic.png", Width = 10, Height = 20 }.Execute(ctx);
+        SelectRange(ctx, 0, 13);
+        new ApplyTextColorCommand { Color = EditorColor.Red }.Execute(ctx);
+
+        undo.Undo();   // colour undone; image still there
+        Assert.Single(((Paragraph)doc.Blocks[0]).Inlines.OfType<ImageInline>());
+        undo.Undo();   // insertion undone
+        Assert.Empty(((Paragraph)doc.Blocks[0]).Inlines.OfType<ImageInline>());
+        Assert.Equal("Before after", doc.GetText());
+    }
+
+    [Fact]
+    public void InsertImage_RemoveLinkInSameParagraph_UndoTwice_RemovesTheImage()
+    {
+        var (doc, _) = LinkDoc();
+        var undo = new UndoManager();
+        var caret = new DocumentPosition(0, 0, 2);
+        var ctx = Ctx(doc, caret, caret, undo);
+
+        new InsertImageCommand { Source = "pic.png" }.Execute(ctx);
+        var linkIndex = ((Paragraph)doc.Blocks[0]).Inlines.FindIndex(i => i is HyperlinkInline);
+        ctx.Selection.CollapseTo(new DocumentPosition(0, linkIndex, 1));
+        new RemoveHyperlinkCommand().Execute(ctx);
+
+        undo.Undo();   // link back
+        Assert.Contains(((Paragraph)doc.Blocks[0]).Inlines, i => i is HyperlinkInline);
+        undo.Undo();   // image insertion undone
+        Assert.Empty(((Paragraph)doc.Blocks[0]).Inlines.OfType<ImageInline>());
+        Assert.Equal("Click bold plain after", doc.GetText());
+    }
+
+    // ── Lossless snapshots ────────────────────────────────────────────────────
+
+    [Fact]
+    public void Format_AcrossLineBreak_UndoRestoresLineBreak_RedoKeepsIt()
+    {
+        var para = new Paragraph("first");
+        var doc = new EditorDocument([para]);
+        var lineBreak = new LineBreak();
+        para.AddInline(lineBreak);
+        para.AppendRun("second");
+        var undo = new UndoManager();
+        var ctx = Ctx(doc, new DocumentPosition(0, 0, 2), new DocumentPosition(0, 2, 3), undo);
+        var before = Dump(doc);
+
+        new ToggleBoldCommand().Execute(ctx);
+        var after = Dump(doc);
+        Assert.Contains(para.Inlines, i => i is LineBreak);
+
+        undo.Undo();
+        Assert.Equal(before, Dump(doc));
+        Assert.Same(lineBreak, para.Inlines[1]);
+
+        undo.Redo();
+        Assert.Equal(after, Dump(doc));
+        Assert.Contains(para.Inlines, i => i is LineBreak);
+    }
+
+    [Fact]
+    public void RemoveLink_WithNonTextChildren_UndoRestoresAllChildren_RedoKeepsThem()
+    {
+        var para = new Paragraph("See ");
+        var doc = new EditorDocument([para]);
+        var link = new HyperlinkInline("https://example.com", "Example");
+        para.AddInline(link);
+        link.AddChild(new TextRun("logo", Bold));
+        link.AddChild(new ImageInline("logo.png", "Logo", 16, 16));
+        link.AddChild(new LineBreak());
+        link.AddChild(new TextRun("caption", Italic));
+        para.AppendRun(" end");
+        var undo = new UndoManager();
+        var caret = new DocumentPosition(0, 1, 1);
+        var ctx = Ctx(doc, caret, caret, undo);
+        var before = Dump(doc);
+
+        new RemoveHyperlinkCommand().Execute(ctx);
+        var after = Dump(doc);
+        Assert.Contains(para.Inlines, i => i is ImageInline);
+        Assert.Contains(para.Inlines, i => i is LineBreak);
+        Assert.Equal("See logo￼\ncaption end", doc.GetText());
+
+        undo.Undo();
+        Assert.Equal(before, Dump(doc));
+        Assert.Same(link, para.Inlines[1]);
+        Assert.All(link.Children, c => Assert.Same(para, c.Parent));
+
+        undo.Redo();
+        Assert.Equal(after, Dump(doc));
+    }
+
+    [Fact]
+    public void Format_OverLinkWithNonTextChildren_UndoKeepsChildren()
+    {
+        var para = new Paragraph("A ");
+        var doc = new EditorDocument([para]);
+        var link = new HyperlinkInline("https://example.com");
+        para.AddInline(link);
+        link.AddChild(new TextRun("x", Bold));
+        link.AddChild(new LineBreak());
+        link.AddChild(new ImageInline("i.png"));
+        para.AppendRun(" B");
+        var undo = new UndoManager();
+        var ctx = Ctx(doc, new DocumentPosition(0, 0, 0), new DocumentPosition(0, 2, 2), undo);
+        var before = Dump(doc);
+
+        new ToggleItalicCommand().Execute(ctx);
+        undo.Undo();
+
+        Assert.Equal(before, Dump(doc));
+        Assert.Same(link, para.Inlines[1]);
     }
 }

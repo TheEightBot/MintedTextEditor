@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - **Undo for character formatting**: bold, italic, underline, strikethrough, subscript, superscript and clear formatting (toolbar, Ctrl+B/I/U and commands), the font family and size dropdowns, and the text and highlight colour pickers now record one undo step each. Undo restores the previous runs with their exact styles and redo reapplies the change. Toggling with a collapsed caret still only sets the pending style and is not recorded. `ApplyStyleAction` gains a constructor that wraps any formatting operation, and its undo no longer resets the paragraph style or restores the wrong paragraph when a table lies inside the range.
 - **Removing a hyperlink**: `HyperlinkEngine.RemoveHyperlink` keeps the link text's formatting instead of turning it into one plain run, and `RemoveHyperlinkCommand` (toolbar and context menu) is now undoable through the new `RemoveHyperlinkAction`.
+- **Undo restoring copies**: undoing a delete, paragraph merge, formatting change or link removal puts back the original runs, images, links and line breaks instead of copies, so undoing an earlier image or link insertion afterwards still removes it. Line breaks no longer come back as `"\n"` text, and images and line breaks inside links are no longer dropped.
 
 ---
 

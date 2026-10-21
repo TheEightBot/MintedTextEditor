@@ -5,12 +5,17 @@ namespace MintedTextEditor.Core.Editing;
 
 // ── Shared snapshot helpers ─────────────────────────────────────────────────
 
-internal abstract record InlineSnapshot;
-internal record TextRunSnapshot(string Text, TextStyle Style) : InlineSnapshot;
-internal record ImageInlineSnapshot(string Source, string AltText, float Width, float Height) : InlineSnapshot;
-internal record HyperChildSnapshot(string Text, TextStyle Style);
-internal record HyperlinkInlineSnapshot(string Url, string? Title, IReadOnlyList<HyperChildSnapshot> Children) : InlineSnapshot;
-internal record ParagraphSnapshot(ParagraphStyle Style, IReadOnlyList<InlineSnapshot> Inlines);
+// Snapshots keep a reference to each original object together with its mutable state at capture
+// time. Restoring puts those same objects back (with that state) instead of creating copies, so
+// other undo actions that hold an inline or paragraph reference (e.g. InsertImageAction) still
+// find it after an undo.
+internal abstract record InlineSnapshot(Inline Inline);
+internal record TextRunSnapshot(TextRun Run, string Text, TextStyle Style) : InlineSnapshot(Run);
+internal record ImageInlineSnapshot(ImageInline Image, string Source, string AltText, float Width, float Height) : InlineSnapshot(Image);
+internal record HyperlinkInlineSnapshot(HyperlinkInline Link, string Url, string? Title, IReadOnlyList<InlineSnapshot> Children) : InlineSnapshot(Link);
+// Inlines without mutable state of their own (LineBreak, and any other inline type).
+internal record OpaqueInlineSnapshot(Inline Inline) : InlineSnapshot(Inline);
+internal record ParagraphSnapshot(Paragraph Paragraph, ParagraphStyle Style, IReadOnlyList<InlineSnapshot> Inlines);
 
 /// <summary>
 /// A position stored as a character offset within its paragraph (or table-cell paragraph)
@@ -42,69 +47,90 @@ internal readonly struct ParagraphAnchor
 internal static class SnapshotHelper
 {
     internal static ParagraphSnapshot Capture(Paragraph p) =>
-        new(p.Style.Clone(), p.Inlines.Select(CaptureInline).ToList());
+        new(p, p.Style.Clone(), p.Inlines.Select(CaptureInline).ToList());
 
     private static InlineSnapshot CaptureInline(Inline inline) => inline switch
     {
-        TextRun t => new TextRunSnapshot(t.Text, t.Style),
-        ImageInline i => new ImageInlineSnapshot(i.Source, i.AltText, i.Width, i.Height),
-        HyperlinkInline h => new HyperlinkInlineSnapshot(h.Url, h.Title,
-            h.Children.OfType<TextRun>().Select(c => new HyperChildSnapshot(c.Text, c.Style)).ToList()),
-        _ => new TextRunSnapshot(inline.GetText(), TextStyle.Default)
+        TextRun t => new TextRunSnapshot(t, t.Text, t.Style),
+        ImageInline i => new ImageInlineSnapshot(i, i.Source, i.AltText, i.Width, i.Height),
+        HyperlinkInline h => new HyperlinkInlineSnapshot(h, h.Url, h.Title, h.Children.Select(CaptureInline).ToList()),
+        _ => new OpaqueInlineSnapshot(inline)
     };
 
     /// <summary>
-    /// Replaces the inlines (and style) of <paramref name="p"/> with the data from
-    /// <paramref name="snapshot"/>, without changing <paramref name="p"/>'s identity or parent.
+    /// Puts the inlines (and style) recorded in <paramref name="snapshot"/> back into
+    /// <paramref name="p"/>, without changing <paramref name="p"/>'s identity or parent.
+    /// The recorded inline objects themselves are reinserted with their recorded state.
     /// </summary>
     internal static void Restore(Paragraph p, ParagraphSnapshot snapshot)
     {
-        p.Style = snapshot.Style;
+        p.Style = snapshot.Style.Clone();
         // Remove existing inlines from back to front to keep indices stable
         for (int i = p.Inlines.Count - 1; i >= 0; i--)
             p.RemoveInline(i);
         foreach (var snap in snapshot.Inlines)
-            AppendInline(p, snap);
+            p.AddInline(RestoreInline(p, snap));
     }
 
     /// <summary>
-    /// Replaces only the inlines of <paramref name="p"/> with those in <paramref name="snapshot"/>,
-    /// leaving its paragraph style as it is.
+    /// Returns the paragraph recorded in <paramref name="snapshot"/>, restored to its recorded
+    /// content, for reinsertion into the document.
     /// </summary>
-    internal static void RestoreInlines(Paragraph p, ParagraphSnapshot snapshot)
-    {
-        for (int i = p.Inlines.Count - 1; i >= 0; i--)
-            p.RemoveInline(i);
-        foreach (var snap in snapshot.Inlines)
-            AppendInline(p, snap);
-    }
-
-    /// <summary>Creates a new <see cref="Paragraph"/> fully populated from a snapshot.</summary>
     internal static Paragraph CreateParagraph(ParagraphSnapshot snapshot)
     {
-        var p = new Paragraph { Style = snapshot.Style };
-        foreach (var snap in snapshot.Inlines)
-            AppendInline(p, snap);
-        return p;
+        Restore(snapshot.Paragraph, snapshot);
+        return snapshot.Paragraph;
     }
 
-    private static void AppendInline(Paragraph p, InlineSnapshot snap)
+    /// <summary>
+    /// Restores the paragraphs recorded from consecutive blocks starting at <paramref name="startBlock"/>.
+    /// A recorded paragraph still in the document is restored in place; one that was removed (merged
+    /// away) is reinserted at its original index. Returns whether any paragraph was reinserted, in
+    /// which case later blocks have moved and the caller must report a structural change.
+    /// </summary>
+    internal static bool RestoreBlocks(Document.Document document, int startBlock, IReadOnlyList<ParagraphSnapshot> snapshots)
+    {
+        bool reinserted = false;
+        for (int i = 0; i < snapshots.Count; i++)
+        {
+            var p = snapshots[i].Paragraph;
+            if (document.Blocks.Contains(p))
+            {
+                Restore(p, snapshots[i]);
+            }
+            else
+            {
+                document.InsertBlock(Math.Min(startBlock + i, document.Blocks.Count), CreateParagraph(snapshots[i]));
+                reinserted = true;
+            }
+        }
+        return reinserted;
+    }
+
+    private static Inline RestoreInline(Paragraph p, InlineSnapshot snap)
     {
         switch (snap)
         {
             case TextRunSnapshot t:
-                p.AppendRun(t.Text, t.Style);
+                t.Run.Text = t.Text;
+                t.Run.Style = t.Style;
                 break;
             case ImageInlineSnapshot i:
-                p.AddInline(new ImageInline(i.Source, i.AltText, i.Width, i.Height));
+                i.Image.Source = i.Source;
+                i.Image.AltText = i.AltText;
+                i.Image.Width = i.Width;
+                i.Image.Height = i.Height;
                 break;
             case HyperlinkInlineSnapshot h:
-                var link = new HyperlinkInline(h.Url, h.Title);
-                p.AddInline(link);  // set link.Parent = p before adding children
+                h.Link.Url = h.Url;
+                h.Link.Title = h.Title;
+                h.Link.Children.Clear();
                 foreach (var c in h.Children)
-                    link.AddChild(new TextRun(c.Text, c.Style));
+                    h.Link.Children.Add(RestoreInline(p, c));
                 break;
         }
+        snap.Inline.Parent = p;
+        return snap.Inline;
     }
 }
 
@@ -434,10 +460,21 @@ public sealed class ApplyStyleAction : IUndoableAction
         foreach (var (blockIndex, snapshot) in _snapshots)
         {
             if (blockIndex < _document.Blocks.Count && _document.Blocks[blockIndex] is Paragraph p)
-                SnapshotHelper.RestoreInlines(p, snapshot);
+                RestoreInlines(p, snapshot);
         }
         _document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.StyleChanged, _range));
         return _endAnchor.Resolve(_document);
+    }
+
+    /// <summary>
+    /// Restores the inlines recorded in <paramref name="snapshot"/> but keeps <paramref name="p"/>'s
+    /// current paragraph style, which inline-only changes never alter.
+    /// </summary>
+    internal static void RestoreInlines(Paragraph p, ParagraphSnapshot snapshot)
+    {
+        var style = p.Style;
+        SnapshotHelper.Restore(p, snapshot);
+        p.Style = style;
     }
 
     /// <inheritdoc/>
@@ -672,7 +709,7 @@ public sealed class RemoveHyperlinkAction : IUndoableAction
             _position.BlockIndex < _document.Blocks.Count &&
             _document.Blocks[_position.BlockIndex] is Paragraph para)
         {
-            SnapshotHelper.RestoreInlines(para, _snapshot);
+            ApplyStyleAction.RestoreInlines(para, _snapshot);
             _document.NotifyChanged(new DocumentChangedEventArgs(
                 DocumentChangeType.TextInserted,
                 new TextRange(_position, _position)));
