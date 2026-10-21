@@ -818,7 +818,11 @@ public class HtmlImporter
             Row = null;
         }
 
-        /// <summary>Ends the table, shortening rowspans that run past its last row.</summary>
+        /// <summary>
+        /// Ends the table, shortening rowspans that run past its last row and padding every
+        /// row with empty cells to the widest row's width (layout reads the column count from
+        /// the first row, so a shorter row would hide cells in the wider ones).
+        /// </summary>
         public void Finish()
         {
             EndRow();
@@ -827,6 +831,13 @@ public class HtmlImporter
             {
                 if (_covered[c] > 0 && _coveredBy[c] is { } anchor && clamped.Add(anchor))
                     anchor.RowSpan -= _covered[c];
+            }
+
+            int width = _table.Rows.Count > 0 ? _table.Rows.Max(r => r.Cells.Count) : 0;
+            foreach (var row in _table.Rows)
+            {
+                while (row.Cells.Count < width)
+                    row.Cells.Add(new TableCell { Parent = row });
             }
         }
 
@@ -913,6 +924,8 @@ public class HtmlImporter
             var slash = args.Split('/');
             if (slash.Length > 2) return false;
             var channels = slash[0].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            // Exactly r g b; the alpha, if any, must follow a '/'.
+            if (channels.Length != 3) return false;
             parts = slash.Length == 2 ? [.. channels, slash[1]] : channels;
         }
 

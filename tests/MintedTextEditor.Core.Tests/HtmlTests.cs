@@ -901,6 +901,45 @@ public class HtmlTests
     }
 
     [Fact]
+    public void Import_RowspanWidensLaterRow_ShorterRowsArePadded()
+    {
+        // Span expansion makes row 0 one slot wide and row 1 two; the column count comes
+        // from row 0, so without padding layout would never reach B.
+        var doc = new HtmlImporter().Import(
+            "<table><tr><td rowspan=\"2\">A</td></tr><tr><td>B</td></tr></table>");
+
+        var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+        Assert.Equal(2, table.ColumnCount);
+        Assert.All(table.Rows, r => Assert.Equal(2, r.Cells.Count));
+        var pad = table.Rows[0].Cells[1];
+        Assert.False(pad.IsMerged);
+        Assert.Same(table.Rows[0], pad.Parent);
+        Assert.Equal("", pad.GetText());
+        Assert.True(table.Rows[1].Cells[0].IsMerged);
+        Assert.Equal("B", table.Rows[1].Cells[1].GetText());
+    }
+
+    [Fact]
+    public void Import_ColspanWidensLaterRow_ShorterRowsArePadded()
+    {
+        var doc = new HtmlImporter().Import(
+            "<table><tr><td>A</td></tr><tr><td colspan=\"2\">B</td><td>C</td></tr><tr><td>D</td></tr></table>");
+
+        var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+        Assert.Equal(3, table.ColumnCount);
+        Assert.All(table.Rows, r => Assert.Equal(3, r.Cells.Count));
+        Assert.Equal("C", table.Rows[1].Cells[2].GetText());
+        foreach (int row in new[] { 0, 2 })
+        {
+            Assert.All(table.Rows[row].Cells.Skip(1), c =>
+            {
+                Assert.False(c.IsMerged);
+                Assert.Same(table.Rows[row], c.Parent);
+            });
+        }
+    }
+
+    [Fact]
     public void Import_NestedTable_DoesNotEndOuterTable()
     {
         var doc = new HtmlImporter().Import(
@@ -957,6 +996,9 @@ public class HtmlTests
     [InlineData("rgb(1, 2, x)")]
     [InlineData("rgba(1, 2, 3, 4, 5)")]
     [InlineData("rgb(1 2 3 / 4 / 5)")]
+    [InlineData("rgb(255 0 / 50%)")]
+    [InlineData("rgb(1 2 3 4)")]
+    [InlineData("rgb(1 2 3 4 / 50%)")]
     [InlineData("hsl(0, 100%, 50%)")]
     [InlineData("notacolor")]
     public void TryParseCssColor_InvalidValues_ReturnFalse(string css)
@@ -964,11 +1006,14 @@ public class HtmlTests
         Assert.False(HtmlImporter.TryParseCssColor(css, out _));
     }
 
-    [Fact]
-    public void Import_InvalidColor_KeepsInheritedColor()
+    [Theory]
+    [InlineData("rgb(1,2)")]
+    [InlineData("rgb(255 0 / 50%)")]
+    [InlineData("rgb(255 0 0 50%)")]
+    public void Import_InvalidColor_KeepsInheritedColor(string css)
     {
         var doc = new HtmlImporter().Import(
-            "<p><span style=\"color:#0000ff\"><span style=\"color:rgb(1,2)\">x</span></span></p>");
+            $"<p><span style=\"color:#0000ff\"><span style=\"color:{css}\">x</span></span></p>");
 
         var run = Assert.IsType<TextRun>(((Paragraph)doc.Blocks[0]).Inlines[0]);
         Assert.Equal(EditorColor.Blue, run.Style.TextColor);
