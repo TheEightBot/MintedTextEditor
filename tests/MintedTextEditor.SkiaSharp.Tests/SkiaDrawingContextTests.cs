@@ -369,6 +369,43 @@ public class SkiaDrawingContextTests : IDisposable
     }
 
     [Fact]
+    public void MeasureCaretOffset_ManyFontSwitches_FindsTheRightSegment()
+    {
+        // Alternating text and emoji gives hundreds of segments; each caret query must land
+        // in the segment that holds its index. At a segment boundary the caret sits at the
+        // width of the text before it, which the prefix measures on its own.
+        const int repeats = 300;
+        var sb = new System.Text.StringBuilder();
+        for (int r = 0; r < repeats; r++) sb.Append("a😀");
+        string text = sb.ToString(); // 'a' at 3r, the emoji's surrogates at 3r+1 and 3r+2
+
+        var offsets = new float[text.Length + 1];
+        for (int i = 0; i <= text.Length; i++)
+            offsets[i] = _ctx.MeasureCaretOffset(text, i, _paint);
+        Assert.Equal(1, _ctx.SegmentationCount);
+
+        using var reference = new SkiaDrawingContext(_surface.Canvas);
+        float letter = reference.MeasureText("a", _paint).Width;
+        float emoji = reference.MeasureText("😀", _paint).Width;
+        Assert.True(letter > 0f && emoji > 0f);
+
+        for (int r = 0; r < repeats; r++)
+        {
+            int k = 3 * r;
+            Assert.Equal(r * (letter + emoji), offsets[k], 0.01f);
+            Assert.Equal(r * (letter + emoji) + letter, offsets[k + 1], 0.01f);
+            // Inside the surrogate pair the caret stays within the emoji.
+            Assert.InRange(offsets[k + 2], offsets[k + 1] - 0.01f, offsets[k + 3] + 0.01f);
+        }
+
+        Assert.Equal(repeats * (letter + emoji), offsets[text.Length], 0.01f);
+        Assert.Equal(reference.MeasureText(text, _paint).Width, offsets[text.Length], 0.01f);
+
+        foreach (int k in new[] { 3, 4, 151, 450, 451, 897, 898 })
+            Assert.Equal(reference.MeasureText(text[..k], _paint).Width, offsets[k], 0.01f);
+    }
+
+    [Fact]
     public void MeasureCaretOffset_FontChange_IsSegmentedSeparately()
     {
         // The cache must not hand one font's segments (and widths) to another.

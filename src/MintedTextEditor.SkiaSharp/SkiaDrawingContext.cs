@@ -183,20 +183,28 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
             return CaretOffsetInRun(text, index, skFont, skPaint, ShapeAllText);
 
         var offsets = GetSegmentOffsets(segmentation, skPaint);
-        for (int i = 0; i < segments.Count; i++)
-        {
-            var (start, runText, font) = segments[i];
-            if (index <= start)
-                return offsets[i];
 
-            if (index < start + runText.Length)
-            {
-                bool shape = ShapeAllText || !ReferenceEquals(font, skFont);
-                return offsets[i] + CaretOffsetInRun(runText, index - start, font, skPaint, shape);
-            }
+        // Binary-search the segment holding the index: the first one that ends after it.
+        // A line that switches font often (e.g. text and emoji alternating) has hundreds of
+        // segments, and scanning them from the start on every query is quadratic again.
+        var ends = segmentation.SegmentEnds!;
+        int lo = 0, hi = ends.Length;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >>> 1;
+            if (ends[mid] <= index) lo = mid + 1;
+            else hi = mid;
         }
 
-        return offsets[^1];
+        if (lo == segments.Count)
+            return offsets[^1];
+
+        var (start, runText, font) = segments[lo];
+        if (index <= start)
+            return offsets[lo];
+
+        bool shape = ShapeAllText || !ReferenceEquals(font, skFont);
+        return offsets[lo] + CaretOffsetInRun(runText, index - start, font, skPaint, shape);
     }
 
     private float CaretOffsetInRun(string text, int index, SKFont font, SKPaint paint, bool shape)
@@ -554,6 +562,9 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
         /// <summary>The segments, or <c>null</c> when the primary font covers the whole text.</summary>
         public List<(int Start, string Text, SKFont Font)>? Segments { get; } = segments;
+
+        /// <summary>The end index (exclusive) of each segment, ascending, for binary search.</summary>
+        public int[]? SegmentEnds { get; } = segments?.Select(s => s.Start + s.Text.Length).ToArray();
 
         public float[]? Offsets { get; set; }
         public bool OffsetsShapeAllText { get; set; }
