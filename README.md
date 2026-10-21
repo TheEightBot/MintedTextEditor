@@ -207,7 +207,7 @@ Right-click, long-press the selection, or long-press without dragging to open th
 Editor.IsContextMenuEnabled = false;
 ```
 
-See [docs/commands-events.md](docs/commands-events.md#context-menu).
+See [docs/commands-events.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/commands-events.md#context-menu).
 
 ### Focus
 
