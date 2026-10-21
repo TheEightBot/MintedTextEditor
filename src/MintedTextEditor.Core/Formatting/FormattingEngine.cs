@@ -10,9 +10,41 @@ public class FormattingEngine
 {
     /// <summary>
     /// Style to apply on the next text insert when the caret is collapsed and the
-    /// user has toggled a format with no selection.  Consumed after one use.
+    /// user has toggled a format with no selection.  Consumed after one use, and discarded
+    /// when the caret moves away (see <see cref="DiscardPendingStyleIfMoved"/>).
     /// </summary>
     public TextStyle? PendingStyle { get; private set; }
+
+    /// <summary>The caret position where <see cref="PendingStyle"/> was chosen, or null when there is none.</summary>
+    public DocumentPosition? PendingStylePosition { get; private set; }
+
+    // Where the pending style was chosen, as a paragraph and character offset taken when it was chosen.
+    private PendingStyleAnchor? _pendingAnchor;
+
+    /// <summary>
+    /// Discards <see cref="PendingStyle"/> unless <paramref name="selection"/> is still the collapsed
+    /// caret where it was chosen, so a pending style applies only at that caret.
+    /// </summary>
+    /// <param name="doc">The document.</param>
+    /// <param name="selection">The current selection.</param>
+    public void DiscardPendingStyleIfMoved(Document.Document doc, TextRange selection)
+    {
+        if (PendingStyle is not null && !PendingStyleAnchor.IsCaretAt(doc, selection, _pendingAnchor))
+            SetPendingStyle(doc, null, null);
+    }
+
+    /// <summary>Re-anchors the pending style at <paramref name="position"/> (an edit such as Enter carried it there).</summary>
+    internal void MovePendingStyleTo(Document.Document doc, DocumentPosition position)
+    {
+        if (PendingStyle is not null) SetPendingStyle(doc, PendingStyle, position);
+    }
+
+    private void SetPendingStyle(Document.Document doc, TextStyle? style, DocumentPosition? position)
+    {
+        PendingStyle = style;
+        PendingStylePosition = style is null ? null : position;
+        _pendingAnchor = style is not null && position is { } p ? PendingStyleAnchor.At(doc, p) : null;
+    }
 
     // ── Public toggle API ─────────────────────────────────────────────
 
@@ -66,7 +98,7 @@ public class FormattingEngine
     {
         if (range.IsEmpty)
         {
-            PendingStyle = TextStyle.Default;
+            SetPendingStyle(doc, TextStyle.Default, range.Start);
             return;
         }
         DocumentEditor.ApplyTextStyle(doc, range, _ => TextStyle.Default);
@@ -80,6 +112,8 @@ public class FormattingEngine
     {
         var style = PendingStyle;
         PendingStyle = null;
+        PendingStylePosition = null;
+        _pendingAnchor = null;
         return style;
     }
 
@@ -122,8 +156,9 @@ public class FormattingEngine
             // No selection: update pending style so the next typed character picks it up.
             // Start from the style the caret would otherwise type with, so toggling bold off
             // inside bold text really turns it off and other formatting is kept.
+            DiscardPendingStyleIfMoved(doc, range);
             var baseStyle = PendingStyle ?? DocumentEditor.GetInsertionStyle(doc, range.Start);
-            PendingStyle = setter(baseStyle, !getter(baseStyle));
+            SetPendingStyle(doc, setter(baseStyle, !getter(baseStyle)), range.Start);
             return;
         }
 
@@ -183,4 +218,32 @@ public class FormattingEngine
 
         return true;
     }
+}
+
+/// <summary>
+/// Where a pending style was chosen: the paragraph (block, and cell inside a table) and the character
+/// offset in it, taken when the style was chosen so later edits to the runs don't shift it.
+/// </summary>
+internal readonly record struct PendingStyleAnchor(int BlockIndex, int CellRow, int CellCol, int Offset)
+{
+    /// <summary>The anchor for <paramref name="position"/> in <paramref name="doc"/> as it is now.</summary>
+    public static PendingStyleAnchor At(Document.Document doc, DocumentPosition position)
+    {
+        var p = Normalize(doc, position);
+        return new PendingStyleAnchor(p.BlockIndex, p.CellRow, p.CellCol, DocumentEditor.GetAbsoluteCharOffset(doc, p));
+    }
+
+    /// <summary>
+    /// Whether <paramref name="selection"/> is a collapsed caret at <paramref name="anchor"/>: the same
+    /// paragraph and character offset, however the caret position is split across inlines.
+    /// </summary>
+    public static bool IsCaretAt(Document.Document doc, TextRange selection, PendingStyleAnchor? anchor)
+        => anchor is { } a && selection.IsEmpty && At(doc, selection.Start) == a;
+
+    // Cell coordinates only mean something in a table block; elsewhere (e.g. default(DocumentPosition),
+    // whose cell is 0/0) they are dropped so the position matches the same spot outside a table.
+    private static DocumentPosition Normalize(Document.Document doc, DocumentPosition p)
+        => p.IsInTableCell && !(p.BlockIndex >= 0 && p.BlockIndex < doc.Blocks.Count && doc.Blocks[p.BlockIndex] is TableBlock)
+            ? new DocumentPosition(p.BlockIndex, p.InlineIndex, p.Offset)
+            : p;
 }

@@ -68,9 +68,18 @@ public class EditorInputController
 
     /// <summary>
     /// Handles a key-down event, dispatching to the appropriate navigation or edit action.
-    /// Returns true if the event was handled.
+    /// Returns true if the event was handled. A pending style is discarded when the caret had moved
+    /// before the key (e.g. the selection was set from code) or the key moved it.
     /// </summary>
     public bool HandleKeyDown(EditorKeyEventArgs e, Document.Document document, DocumentLayout layout, IDrawingContext context)
+    {
+        if (e.IsKeyDown) DiscardStalePendingStyles(document);
+        bool handled = HandleKeyDownCore(e, document, layout, context);
+        if (handled) DiscardStalePendingStyles(document);
+        return handled;
+    }
+
+    private bool HandleKeyDownCore(EditorKeyEventArgs e, Document.Document document, DocumentLayout layout, IDrawingContext context)
     {
         if (!e.IsKeyDown) return false;
 
@@ -272,6 +281,7 @@ public class EditorInputController
     private void InsertLiteralText(string text, Document.Document document)
     {
         SyncToVisibleCell(document);
+        DiscardStalePendingStyles(document);
         DocumentPosition insertPos = _caret.Position;
         bool replacesSelection = !_selection.IsEmpty;
         if (replacesSelection)
@@ -280,16 +290,34 @@ public class EditorInputController
             _selection.CollapseTo(insertPos);
         }
 
-        // Pending styles (picked with no selection) win; otherwise the text inherits the
-        // style of the character before the caret (or after it at a paragraph start).
-        var style = Formatting.FormattingEngine.GetEffectiveCaretStyle(
+        var style = ConsumeInsertionStyle(document, insertPos);
+        var newPos = InsertAndTrack(document, insertPos, text, style, replacesSelection);
+        _selection.CollapseTo(newPos);
+        _caret.MoveTo(newPos);
+    }
+
+    /// <summary>
+    /// Returns the style for text typed or pasted at <paramref name="insertPos"/>, consuming the pending
+    /// styles: they win when they were picked at this caret; otherwise the text inherits the style of
+    /// the character before the caret (or after it at a paragraph start).
+    /// </summary>
+    private TextStyle ConsumeInsertionStyle(Document.Document document, DocumentPosition insertPos)
+        => Formatting.FormattingEngine.GetEffectiveCaretStyle(
             document,
             insertPos,
             FormattingEngine?.ConsumePendingStyle(),
             FontFormattingEngine?.ConsumePendingStyle());
-        var newPos = InsertAndTrack(document, insertPos, text, style, replacesSelection);
-        _selection.CollapseTo(newPos);
-        _caret.MoveTo(newPos);
+
+    /// <summary>
+    /// Discards pending styles that were picked at a different caret than the current one
+    /// (or before a selection was made), so they apply only where they were chosen.
+    /// </summary>
+    private void DiscardStalePendingStyles(Document.Document document)
+    {
+        // Text goes in at the caret when nothing is selected.
+        var current = _selection.IsEmpty ? new TextRange(_caret.Position, _caret.Position) : _selection.Range;
+        FormattingEngine?.DiscardPendingStyleIfMoved(document, current);
+        FontFormattingEngine?.DiscardPendingStyleIfMoved(document, current);
     }
 
     /// <summary>
@@ -402,7 +430,10 @@ public class EditorInputController
         _caret.MoveTo(pos);
     }
 
-    /// <summary>Pastes clipboard text at the caret, replacing any active selection.</summary>
+    /// <summary>
+    /// Pastes clipboard text at the caret, replacing any active selection. The text gets the style
+    /// typing would use there: the pending style, else the style inherited from the caret.
+    /// </summary>
     public async Task HandlePasteAsync(Document.Document document)
     {
         if (ClipboardProvider == null) return;
@@ -410,6 +441,7 @@ public class EditorInputController
         if (string.IsNullOrEmpty(pasteText)) return;
 
         SyncToVisibleCell(document);
+        DiscardStalePendingStyles(document);
         DocumentPosition insertPos = _caret.Position;
         bool replacesSelection = !_selection.IsEmpty;
         if (replacesSelection)
@@ -418,7 +450,9 @@ public class EditorInputController
             _selection.CollapseTo(insertPos);
         }
 
-        var newPos = InsertAndTrack(document, insertPos, pasteText, null, replacesSelection);
+        // Plain text gets the same style as typing at the caret.
+        var style = ConsumeInsertionStyle(document, insertPos);
+        var newPos = InsertAndTrack(document, insertPos, pasteText, style, replacesSelection);
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
     }
@@ -441,6 +475,7 @@ public class EditorInputController
                 var dragResult = DocumentHitTester.HitTest(e.X, e.Y, layout, document, context);
                 _selection.ExtendTo(dragResult.Position);
                 _caret.MoveTo(dragResult.Position);
+                DiscardStalePendingStyles(document);
             }
             return;
         }
@@ -468,6 +503,8 @@ public class EditorInputController
             _caret.MoveTo(result.Position);
             _isDragging = true;
         }
+
+        DiscardStalePendingStyles(document);
     }
 
     // ── Editing helpers ───────────────────────────────────────────────
@@ -558,6 +595,7 @@ public class EditorInputController
     private void HandleEnter(Document.Document document)
     {
         SyncToVisibleCell(document);
+        DiscardStalePendingStyles(document);
         DocumentPosition insertPos = _caret.Position;
         if (!_selection.IsEmpty)
         {
@@ -568,6 +606,10 @@ public class EditorInputController
         var newPos = PushOrExecute(new SplitBlockAction(document, insertPos));
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
+
+        // A pending style picked before Enter applies to the text typed in the new paragraph.
+        FormattingEngine?.MovePendingStyleTo(document, newPos);
+        FontFormattingEngine?.MovePendingStyleTo(document, newPos);
     }
 
     // ── IME support ───────────────────────────────────────────────────

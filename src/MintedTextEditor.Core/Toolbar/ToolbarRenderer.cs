@@ -338,11 +338,14 @@ public sealed class ToolbarRenderer
     /// toggle button's <see cref="ToolbarButton.IsActive"/> flag accordingly.
     /// With a selection, a format is active when it covers the whole selection; at a
     /// collapsed caret, it reflects the style the next typed text would get (the pending
-    /// style when one is set, otherwise the style inherited from the text at the caret).
+    /// style when one was picked at this caret, otherwise the style inherited from the text at the caret).
+    /// Pending styles picked at a different caret are discarded.
     /// </summary>
     public void UpdateToggleStates(EditorContext ctx)
     {
         var range = ctx.Selection.Range;
+        ctx.FormattingEngine.DiscardPendingStyleIfMoved(ctx.Document, range);
+        ctx.FontFormattingEngine.DiscardPendingStyleIfMoved(ctx.Document, range);
         var caretStyle = range.IsEmpty
             ? FormattingEngine.GetEffectiveCaretStyle(
                 ctx.Document,

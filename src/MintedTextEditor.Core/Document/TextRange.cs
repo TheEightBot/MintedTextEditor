@@ -14,8 +14,8 @@ public readonly struct TextRange : IEquatable<TextRange>
     /// <summary>Whether the range is empty (start equals end).</summary>
     public bool IsEmpty => Start == End;
 
-    /// <summary>An empty range at the document origin.</summary>
-    public static TextRange Empty => default;
+    /// <summary>An empty range at the document origin (outside any table cell).</summary>
+    public static TextRange Empty { get; } = new(new DocumentPosition(0, 0, 0), new DocumentPosition(0, 0, 0));
 
     /// <summary>
     /// Creates a range between two positions, swapping them if <paramref name="start"/>

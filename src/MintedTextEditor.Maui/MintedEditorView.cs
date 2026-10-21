@@ -1186,6 +1186,7 @@ public class MintedEditorView : ContentView
         {
             var pos = _undoManager.Undo();
             if (pos.HasValue) MoveCaretAfterHistoryChange(pos.Value);
+            NotifyImeSelectionChanged();
             InvalidateCanvas();
         }
     }
@@ -1197,6 +1198,7 @@ public class MintedEditorView : ContentView
         {
             var pos = _undoManager.Redo();
             if (pos.HasValue) MoveCaretAfterHistoryChange(pos.Value);
+            NotifyImeSelectionChanged();
             InvalidateCanvas();
         }
     }
@@ -2843,6 +2845,11 @@ public class MintedEditorView : ContentView
 
     private FormattingState ComputeFormattingState()
     {
+        // A pending style applies only at the caret where it was picked.
+        var range = _inputController.Selection.Range;
+        _formattingEngine.DiscardPendingStyleIfMoved(_document, range);
+        _fontFormattingEngine.DiscardPendingStyleIfMoved(_document, range);
+
         // Merge the pending styles the same way typed input does: character toggles from
         // one, font family, size and colours from the other.
         var pending = _formattingEngine.PendingStyle;
@@ -2855,7 +2862,7 @@ public class MintedEditorView : ContentView
                 .WithTextColor(pendingFont.TextColor)
                 .WithHighlightColor(pendingFont.HighlightColor);
         }
-        return FormattingState.Compute(_document, _inputController.Selection.Range, pending ?? pendingFont);
+        return FormattingState.Compute(_document, range, pending ?? pendingFont);
     }
 
     /// <summary>
