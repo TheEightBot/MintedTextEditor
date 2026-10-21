@@ -23,8 +23,10 @@ public class TableBlock : Block
     /// <summary>Number of columns in the table (determined from the first row).</summary>
     public int ColumnCount => Rows.Count > 0 ? Rows[0].Cells.Count : 0;
 
+    /// <summary>Creates an empty table with no rows.</summary>
     public TableBlock() { }
 
+    /// <summary>Creates a table with the given number of rows and columns; each cell holds an empty paragraph.</summary>
     public TableBlock(int rows, int cols)
     {
         for (int c = 0; c < cols; c++)
@@ -46,8 +48,10 @@ public class TableBlock : Block
         return row.Cells[colIndex];
     }
 
+    /// <summary>Sum of the lengths of all blocks in all cells.</summary>
     public override int Length => Rows.Sum(r => r.Cells.Sum(c => c.Blocks.Sum(b => b.Length)));
 
+    /// <summary>Gets the table text with cells separated by tabs and rows separated by newlines.</summary>
     public override string GetText() =>
         string.Join("\n", Rows.Select(r => string.Join("\t", r.Cells.Select(c => c.GetText()))));
 }

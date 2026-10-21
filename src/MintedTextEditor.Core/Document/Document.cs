@@ -7,6 +7,7 @@ public class Document
 {
     private readonly List<IDocumentChangeListener> _listeners = new();
 
+    /// <summary>The top-level blocks of the document, in order.</summary>
     public List<Block> Blocks { get; } = new();
 
     /// <summary>Fired when the document content changes.</summary>
@@ -35,18 +36,24 @@ public class Document
         }
     }
 
+    /// <summary>Appends a block to the end of the document and sets its parent.</summary>
     public void AddBlock(Block block)
     {
         block.Parent = this;
         Blocks.Add(block);
     }
 
+    /// <summary>Inserts a block at the given index and sets its parent.</summary>
     public void InsertBlock(int index, Block block)
     {
         block.Parent = this;
         Blocks.Insert(index, block);
     }
 
+    /// <summary>
+    /// Removes the block at the given index. Does nothing if the index is out of range
+    /// or if it is the only block in the document.
+    /// </summary>
     public void RemoveBlock(int index)
     {
         if (index >= 0 && index < Blocks.Count && Blocks.Count > 1)
@@ -64,9 +71,12 @@ public class Document
 
     // ── Change notifications ─────────────────────────────────────
 
+    /// <summary>Registers a listener that is notified of document changes.</summary>
     public void AddChangeListener(IDocumentChangeListener listener) => _listeners.Add(listener);
+    /// <summary>Unregisters a previously added change listener.</summary>
     public void RemoveChangeListener(IDocumentChangeListener listener) => _listeners.Remove(listener);
 
+    /// <summary>Raises <see cref="Changed"/> and notifies all registered change listeners.</summary>
     public void NotifyChanged(DocumentChangedEventArgs e)
     {
         Changed?.Invoke(this, e);

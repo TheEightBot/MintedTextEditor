@@ -17,18 +17,23 @@ public class FontFormattingEngine
 
     // ── Apply API ─────────────────────────────────────────────────────
 
+    /// <summary>Sets the font family of the text in <paramref name="range"/>. When <paramref name="range"/> is empty, updates <see cref="PendingStyle"/> instead.</summary>
     public void ApplyFontFamily(Document.Document doc, TextRange range, string family)
         => Apply(doc, range, s => s.WithFontFamily(family));
 
+    /// <summary>Sets the font size of the text in <paramref name="range"/>. When <paramref name="range"/> is empty, updates <see cref="PendingStyle"/> instead.</summary>
     public void ApplyFontSize(Document.Document doc, TextRange range, float size)
         => Apply(doc, range, s => s.WithFontSize(size));
 
+    /// <summary>Sets the text color of the text in <paramref name="range"/>. When <paramref name="range"/> is empty, updates <see cref="PendingStyle"/> instead.</summary>
     public void ApplyTextColor(Document.Document doc, TextRange range, EditorColor color)
         => Apply(doc, range, s => s.WithTextColor(color));
 
+    /// <summary>Sets the highlight color of the text in <paramref name="range"/>. When <paramref name="range"/> is empty, updates <see cref="PendingStyle"/> instead.</summary>
     public void ApplyHighlightColor(Document.Document doc, TextRange range, EditorColor color)
         => Apply(doc, range, s => s.WithHighlightColor(color));
 
+    /// <summary>Sets the highlight color of the text in <paramref name="range"/> to transparent. When <paramref name="range"/> is empty, updates <see cref="PendingStyle"/> instead.</summary>
     public void RemoveHighlightColor(Document.Document doc, TextRange range)
         => Apply(doc, range, s => s.WithHighlightColor(EditorColor.Transparent));
 

@@ -14,8 +14,10 @@ public class TableRow
     /// <summary>The parent table that owns this row.</summary>
     public TableBlock? Parent { get; internal set; }
 
+    /// <summary>Creates an empty row with no cells.</summary>
     public TableRow() { }
 
+    /// <summary>Creates a row with the given number of cells, each holding an empty paragraph.</summary>
     public TableRow(int columnCount)
     {
         for (int i = 0; i < columnCount; i++)

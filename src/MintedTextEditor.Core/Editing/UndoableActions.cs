@@ -109,6 +109,7 @@ public sealed class InsertTextAction : IUndoableAction
     private ParagraphAnchor? _startAnchor;
     private ParagraphAnchor _endAnchor;
 
+    /// <summary>Creates an action that inserts <paramref name="text"/> at <paramref name="position"/> with an optional style.</summary>
     public InsertTextAction(Document.Document document, DocumentPosition position, string text, TextStyle? style = null)
     {
         _document = document;
@@ -117,8 +118,10 @@ public sealed class InsertTextAction : IUndoableAction
         _style = style;
     }
 
+    /// <inheritdoc/>
     public string Description => $"Insert \"{_text}\"";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         var start = _startAnchor is { } anchor ? anchor.Resolve(_document) : _position;
@@ -128,6 +131,7 @@ public sealed class InsertTextAction : IUndoableAction
         return _resultPosition;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         var start = _startAnchor?.Resolve(_document) ?? _position;
@@ -136,6 +140,7 @@ public sealed class InsertTextAction : IUndoableAction
         return start;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
 
     /// <summary>
@@ -172,6 +177,7 @@ public sealed class DeleteRangeAction : IUndoableAction
     private readonly ParagraphAnchor _endAnchor;
     private List<ParagraphSnapshot> _snapshots = [];
 
+    /// <summary>Creates an action that deletes <paramref name="range"/> from the document.</summary>
     public DeleteRangeAction(Document.Document document, TextRange range)
     {
         _document = document;
@@ -180,8 +186,10 @@ public sealed class DeleteRangeAction : IUndoableAction
         _endAnchor = new ParagraphAnchor(document, range.End);
     }
 
+    /// <inheritdoc/>
     public string Description => "Delete";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
@@ -194,6 +202,7 @@ public sealed class DeleteRangeAction : IUndoableAction
         return DocumentEditor.DeleteRange(_document, _range);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         if (_snapshots.Count == 0) return _range.Start;
@@ -216,8 +225,10 @@ public sealed class DeleteRangeAction : IUndoableAction
         return _startAnchor.Resolve(_document);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
 
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
@@ -234,6 +245,7 @@ public sealed class SplitBlockAction : IUndoableAction
     private readonly ParagraphAnchor _anchor;
     private DocumentPosition _resultPosition;
 
+    /// <summary>Creates an action that splits the block at <paramref name="position"/>.</summary>
     public SplitBlockAction(Document.Document document, DocumentPosition position)
     {
         _document = document;
@@ -241,22 +253,27 @@ public sealed class SplitBlockAction : IUndoableAction
         _anchor = new ParagraphAnchor(document, position);
     }
 
+    /// <inheritdoc/>
     public string Description => "Split Paragraph";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         _resultPosition = DocumentEditor.SplitBlock(_document, _anchor.Resolve(_document));
         return _resultPosition;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         DocumentEditor.MergeBlocks(_document, _position.BlockIndex);
         return _anchor.Resolve(_document);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
 
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
@@ -274,14 +291,17 @@ public sealed class MergeBlocksAction : IUndoableAction
     private ParagraphSnapshot? _secondSnapshot;
     private DocumentPosition _resultPosition;
 
+    /// <summary>Creates an action that merges the block at <paramref name="blockIndex"/> with the block after it.</summary>
     public MergeBlocksAction(Document.Document document, int blockIndex)
     {
         _document = document;
         _blockIndex = blockIndex;
     }
 
+    /// <inheritdoc/>
     public string Description => "Merge Paragraphs";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         if (_blockIndex < _document.Blocks.Count && _document.Blocks[_blockIndex] is Paragraph p1)
@@ -293,6 +313,7 @@ public sealed class MergeBlocksAction : IUndoableAction
         return _resultPosition;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         if (_firstSnapshot == null) return _resultPosition;
@@ -314,8 +335,10 @@ public sealed class MergeBlocksAction : IUndoableAction
         return _resultPosition;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
 
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
@@ -334,6 +357,7 @@ public sealed class ApplyStyleAction : IUndoableAction
     private readonly Func<TextStyle, TextStyle> _transform;
     private List<ParagraphSnapshot> _snapshots = [];
 
+    /// <summary>Creates an action that applies <paramref name="transform"/> to the style of the text in <paramref name="range"/>.</summary>
     public ApplyStyleAction(Document.Document document, TextRange range, Func<TextStyle, TextStyle> transform)
     {
         _document = document;
@@ -343,8 +367,10 @@ public sealed class ApplyStyleAction : IUndoableAction
         _transform = transform;
     }
 
+    /// <inheritdoc/>
     public string Description => "Apply Style";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
@@ -358,6 +384,7 @@ public sealed class ApplyStyleAction : IUndoableAction
         return _range.Start;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         for (int i = 0; i < _snapshots.Count; i++)
@@ -370,8 +397,10 @@ public sealed class ApplyStyleAction : IUndoableAction
         return _range.Start;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
 
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
@@ -385,13 +414,16 @@ public sealed class CompositeAction : IUndoableAction
     private readonly IReadOnlyList<IUndoableAction> _actions;
     private DocumentPosition _resultPosition;
 
+    /// <summary>Creates a composite that executes <paramref name="actions"/> in order and undoes them in reverse order.</summary>
     public CompositeAction(IEnumerable<IUndoableAction> actions)
     {
         _actions = [.. actions];
     }
 
+    /// <inheritdoc/>
     public string Description => string.Join(" + ", _actions.Select(a => a.Description));
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         foreach (var a in _actions)
@@ -399,6 +431,7 @@ public sealed class CompositeAction : IUndoableAction
         return _resultPosition;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         DocumentPosition pos = _resultPosition;
@@ -407,6 +440,7 @@ public sealed class CompositeAction : IUndoableAction
         return pos;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo()
     {
         foreach (var a in _actions)
@@ -414,6 +448,7 @@ public sealed class CompositeAction : IUndoableAction
         return _resultPosition;
     }
 
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
@@ -433,6 +468,7 @@ public sealed class InsertImageAction : IUndoableAction
     private ImageInline? _inserted;
     private DocumentPosition _resultPosition;
 
+    /// <summary>Creates an action that inserts an image at <paramref name="insertPosition"/>.</summary>
     public InsertImageAction(Document.Document document, DocumentPosition insertPosition,
         string source, string altText = "", float width = 0, float height = 0)
     {
@@ -444,8 +480,10 @@ public sealed class InsertImageAction : IUndoableAction
         _height = height;
     }
 
+    /// <inheritdoc/>
     public string Description => "Insert Image";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         _inserted = ImageEngine.InsertImage(_document, _insertPosition, _source, _altText, _width, _height);
@@ -462,6 +500,7 @@ public sealed class InsertImageAction : IUndoableAction
         return _resultPosition;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         if (_inserted is not null)
@@ -469,8 +508,10 @@ public sealed class InsertImageAction : IUndoableAction
         return _insertPosition;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
 
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
@@ -487,6 +528,7 @@ public sealed class InsertHyperlinkAction : IUndoableAction
     private HyperlinkInline? _inserted;
     private DocumentPosition _resultPosition;
 
+    /// <summary>Creates an action that inserts a hyperlink to <paramref name="url"/> over <paramref name="originalRange"/>.</summary>
     public InsertHyperlinkAction(Document.Document document, TextRange originalRange, string url)
     {
         _document = document;
@@ -494,8 +536,10 @@ public sealed class InsertHyperlinkAction : IUndoableAction
         _url = url;
     }
 
+    /// <inheritdoc/>
     public string Description => "Insert Hyperlink";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         _inserted = HyperlinkEngine.InsertHyperlink(_document, _originalRange, _url);
@@ -512,6 +556,7 @@ public sealed class InsertHyperlinkAction : IUndoableAction
         return _resultPosition;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         if (_inserted is null || _inserted.Parent is not Paragraph para)
@@ -533,8 +578,10 @@ public sealed class InsertHyperlinkAction : IUndoableAction
         return _originalRange.Start;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
 
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
@@ -552,6 +599,7 @@ public sealed class InsertTableAction : IUndoableAction
     private TableBlock? _inserted;
     private DocumentPosition _resultPosition;
 
+    /// <summary>Creates an action that inserts a table with <paramref name="rows"/> rows and <paramref name="cols"/> columns at <paramref name="insertPosition"/>.</summary>
     public InsertTableAction(Document.Document document, DocumentPosition insertPosition, int rows, int cols)
     {
         _document = document;
@@ -560,8 +608,10 @@ public sealed class InsertTableAction : IUndoableAction
         _cols = cols;
     }
 
+    /// <inheritdoc/>
     public string Description => "Insert Table";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         _inserted = TableEngine.InsertTable(_document, _insertPosition, _rows, _cols);
@@ -572,6 +622,7 @@ public sealed class InsertTableAction : IUndoableAction
         return _resultPosition;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         if (_inserted is not null)
@@ -588,13 +639,16 @@ public sealed class InsertTableAction : IUndoableAction
         return _insertPosition;
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
 
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
 // ── InsertRowAction ──────────────────────────────────────────────────────────
 
+/// <summary>Records a table row insertion so it can be undone by removing the inserted row.</summary>
 public sealed class InsertRowAction : IUndoableAction
 {
     private readonly Document.Document _document;
@@ -603,6 +657,11 @@ public sealed class InsertRowAction : IUndoableAction
     private readonly int _originalCellRow;
     private TableRow? _inserted;
 
+    /// <summary>Creates an action that inserts a new row into <paramref name="table"/>.</summary>
+    /// <param name="document">The document that contains the table.</param>
+    /// <param name="table">The table to modify.</param>
+    /// <param name="afterRowIndex">Index of the row after which the new row is inserted.</param>
+    /// <param name="originalCellRow">Row of the caret before the insert; the caret returns to this row on undo.</param>
     public InsertRowAction(Document.Document document, TableBlock table, int afterRowIndex, int originalCellRow)
     {
         _document = document;
@@ -611,8 +670,10 @@ public sealed class InsertRowAction : IUndoableAction
         _originalCellRow = originalCellRow;
     }
 
+    /// <inheritdoc/>
     public string Description => "Insert Row";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         _inserted = TableEngine.InsertRow(_table, _afterRowIndex);
@@ -623,6 +684,7 @@ public sealed class InsertRowAction : IUndoableAction
             : new DocumentPosition(0, 0, 0);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         if (_inserted is not null)
@@ -638,12 +700,15 @@ public sealed class InsertRowAction : IUndoableAction
             : new DocumentPosition(0, 0, 0);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
 // ── DeleteRowAction ──────────────────────────────────────────────────────────
 
+/// <summary>Records a table row deletion so it can be undone by reinserting the removed row.</summary>
 public sealed class DeleteRowAction : IUndoableAction
 {
     private readonly Document.Document _document;
@@ -651,6 +716,7 @@ public sealed class DeleteRowAction : IUndoableAction
     private readonly int _rowIndex;
     private TableRow? _removed;
 
+    /// <summary>Creates an action that deletes the row at <paramref name="rowIndex"/> from <paramref name="table"/>.</summary>
     public DeleteRowAction(Document.Document document, TableBlock table, int rowIndex)
     {
         _document = document;
@@ -658,8 +724,10 @@ public sealed class DeleteRowAction : IUndoableAction
         _rowIndex = rowIndex;
     }
 
+    /// <inheritdoc/>
     public string Description => "Delete Row";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         _removed = _table.Rows[_rowIndex];
@@ -671,6 +739,7 @@ public sealed class DeleteRowAction : IUndoableAction
             : new DocumentPosition(0, 0, 0);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         if (_removed is not null)
@@ -692,12 +761,15 @@ public sealed class DeleteRowAction : IUndoableAction
             : new DocumentPosition(0, 0, 0);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
 // ── InsertColumnAction ───────────────────────────────────────────────────────
 
+/// <summary>Records a table column insertion so it can be undone by deleting the inserted column.</summary>
 public sealed class InsertColumnAction : IUndoableAction
 {
     private readonly Document.Document _document;
@@ -705,6 +777,11 @@ public sealed class InsertColumnAction : IUndoableAction
     private readonly int _afterColIndex;
     private readonly int _originalCellCol;
 
+    /// <summary>Creates an action that inserts a new column into <paramref name="table"/>.</summary>
+    /// <param name="document">The document that contains the table.</param>
+    /// <param name="table">The table to modify.</param>
+    /// <param name="afterColIndex">Index of the column after which the new column is inserted.</param>
+    /// <param name="originalCellCol">Column of the caret before the insert; the caret returns to this column on undo.</param>
     public InsertColumnAction(Document.Document document, TableBlock table, int afterColIndex, int originalCellCol)
     {
         _document = document;
@@ -713,8 +790,10 @@ public sealed class InsertColumnAction : IUndoableAction
         _originalCellCol = originalCellCol;
     }
 
+    /// <inheritdoc/>
     public string Description => "Insert Column";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         TableEngine.InsertColumn(_table, _afterColIndex);
@@ -725,6 +804,7 @@ public sealed class InsertColumnAction : IUndoableAction
             : new DocumentPosition(0, 0, 0);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         int colToRemove = Math.Clamp(_afterColIndex + 1, 0, _table.ColumnCount - 1);
@@ -737,12 +817,15 @@ public sealed class InsertColumnAction : IUndoableAction
             : new DocumentPosition(0, 0, 0);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
 // ── DeleteColumnAction ───────────────────────────────────────────────────────
 
+/// <summary>Records a table column deletion so it can be undone by reinserting the removed cells.</summary>
 public sealed class DeleteColumnAction : IUndoableAction
 {
     private readonly Document.Document _document;
@@ -750,6 +833,7 @@ public sealed class DeleteColumnAction : IUndoableAction
     private readonly int _colIndex;
     private List<TableCell>? _removedCells;
 
+    /// <summary>Creates an action that deletes the column at <paramref name="colIndex"/> from <paramref name="table"/>.</summary>
     public DeleteColumnAction(Document.Document document, TableBlock table, int colIndex)
     {
         _document = document;
@@ -757,8 +841,10 @@ public sealed class DeleteColumnAction : IUndoableAction
         _colIndex = colIndex;
     }
 
+    /// <inheritdoc/>
     public string Description => "Delete Column";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         _removedCells = _table.Rows.Select(r => r.Cells[_colIndex]).ToList();
@@ -770,6 +856,7 @@ public sealed class DeleteColumnAction : IUndoableAction
             : new DocumentPosition(0, 0, 0);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         if (_removedCells is not null)
@@ -795,26 +882,32 @@ public sealed class DeleteColumnAction : IUndoableAction
             : new DocumentPosition(0, 0, 0);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }
 
 // ── DeleteTableAction ────────────────────────────────────────────────────────
 
+/// <summary>Records the removal of a table so it can be undone by reinserting it at its original block index.</summary>
 public sealed class DeleteTableAction : IUndoableAction
 {
     private readonly Document.Document _document;
     private readonly TableBlock _table;
     private int _blockIndex = -1;
 
+    /// <summary>Creates an action that removes <paramref name="table"/> from the document.</summary>
     public DeleteTableAction(Document.Document document, TableBlock table)
     {
         _document = document;
         _table = table;
     }
 
+    /// <inheritdoc/>
     public string Description => "Delete Table";
 
+    /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         _blockIndex = _document.Blocks.IndexOf(_table);
@@ -831,6 +924,7 @@ public sealed class DeleteTableAction : IUndoableAction
         return new DocumentPosition(targetBlock, 0, 0);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Undo()
     {
         if (_blockIndex >= 0)
@@ -847,6 +941,8 @@ public sealed class DeleteTableAction : IUndoableAction
             : new DocumentPosition(0, 0, 0);
     }
 
+    /// <inheritdoc/>
     public DocumentPosition Redo() => Execute();
+    /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
 }

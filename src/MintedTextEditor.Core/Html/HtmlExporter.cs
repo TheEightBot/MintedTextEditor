@@ -22,6 +22,7 @@ public class HtmlExporter
 {
     private readonly HtmlExportOptions _options;
 
+    /// <summary>Creates an exporter. A <c>null</c> <paramref name="options"/> uses default options.</summary>
     public HtmlExporter(HtmlExportOptions? options = null)
         => _options = options ?? new HtmlExportOptions();
 
