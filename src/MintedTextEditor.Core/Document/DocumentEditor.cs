@@ -11,6 +11,23 @@ public static class DocumentEditor
     /// Returns the new position immediately after the inserted text.
     /// </summary>
     public static DocumentPosition InsertText(Document document, DocumentPosition position, string text, TextStyle? style = null)
+        => InsertText(document, position, text, style, escapeHyperlinkBoundary: false);
+
+    /// <summary>
+    /// Inserts text at the given position with the specified style.
+    /// Returns the new position immediately after the inserted text.
+    /// </summary>
+    /// <param name="document">The document to edit.</param>
+    /// <param name="position">Where to insert the text.</param>
+    /// <param name="text">The text to insert.</param>
+    /// <param name="style">The style of the inserted text, or null for <see cref="TextStyle.Default"/>.</param>
+    /// <param name="escapeHyperlinkBoundary">
+    /// When true and <paramref name="position"/> is at the start or end of a hyperlink, the text is
+    /// inserted outside the link instead of extending it. Use this for text typed at a collapsed caret;
+    /// pass false when the text replaces part of a link (typing over a selection, find and replace),
+    /// so the replacement stays in the link.
+    /// </param>
+    public static DocumentPosition InsertText(Document document, DocumentPosition position, string text, TextStyle? style, bool escapeHyperlinkBoundary)
     {
         if (string.IsNullOrEmpty(text)) return position;
 
@@ -57,11 +74,12 @@ public static class DocumentEditor
                 return newPos;
             }
         }
-        else if (inline is HyperlinkInline boundaryLink && boundaryLink.Length > 0
+        else if (escapeHyperlinkBoundary && inline is HyperlinkInline boundaryLink && boundaryLink.Length > 0
                  && (position.Offset <= 0 || position.Offset >= boundaryLink.Length))
         {
             // At a link boundary the text goes outside the link, so typing right after
-            // (or right before) a hyperlink does not extend it.
+            // (or right before) a hyperlink does not extend it. Only for a collapsed caret:
+            // text replacing part of a link keeps its membership (see the parameter docs).
             bool atEnd = position.Offset >= boundaryLink.Length;
             int neighborIndex = atEnd ? inlineIndex + 1 : inlineIndex - 1;
             if (neighborIndex >= 0 && neighborIndex < paragraph.Inlines.Count
@@ -284,6 +302,7 @@ public static class DocumentEditor
 
         var paragraph = GetParagraph(document, position.BlockIndex);
         var newParagraph = new Paragraph { Style = paragraph.Style.Clone() };
+        var caretStyle = GetInsertionStyle(document, position);
 
         // Move inlines after the split point to the new paragraph
         int inlineIndex = position.InlineIndex;
@@ -310,6 +329,11 @@ public static class DocumentEditor
             inline.Parent = null;
             newParagraph.AddInline(inline);
         }
+
+        // Splitting at the end leaves the new paragraph empty. Give it an empty run with the
+        // caret's formatting, so text typed after Enter keeps it (e.g. stays bold).
+        if (newParagraph.Inlines.Count == 0 && caretStyle != TextStyle.Default)
+            newParagraph.AddInline(new TextRun(string.Empty, caretStyle));
 
         document.InsertBlock(position.BlockIndex + 1, newParagraph);
 
@@ -880,6 +904,42 @@ public static class DocumentEditor
             return context.With(last, paragraph.Inlines[last].Length);
         }
         return context.With(0, 0);
+    }
+
+    /// <summary>
+    /// When <paramref name="position"/> is at the end of an inline that is followed by a hyperlink
+    /// (by <paramref name="link"/>, when given), returns the same place expressed as the start of
+    /// that hyperlink, so text inserted there goes into the link. Otherwise returns
+    /// <paramref name="position"/> unchanged.
+    /// </summary>
+    internal static DocumentPosition PreferFollowingHyperlink(Document document, DocumentPosition position, HyperlinkInline? link = null)
+    {
+        Paragraph paragraph;
+        try { paragraph = GetParagraph(document, position); }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException) { return position; }
+
+        int i = position.InlineIndex;
+        if (i < 0 || i + 1 >= paragraph.Inlines.Count || position.Offset < paragraph.Inlines[i].Length)
+            return position;
+        if (paragraph.Inlines[i + 1] is not HyperlinkInline next || (link is not null && !ReferenceEquals(next, link)))
+            return position;
+        return position.With(i + 1, 0);
+    }
+
+    /// <summary>Returns the hyperlink at <paramref name="position"/>, or null when it is not in one.</summary>
+    internal static HyperlinkInline? GetHyperlinkAt(Document document, DocumentPosition position)
+    {
+        try
+        {
+            var paragraph = GetParagraph(document, position);
+            return position.InlineIndex >= 0 && position.InlineIndex < paragraph.Inlines.Count
+                ? paragraph.Inlines[position.InlineIndex] as HyperlinkInline
+                : null;
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private static void NotifyTextInserted(Document document, DocumentPosition start, DocumentPosition end)

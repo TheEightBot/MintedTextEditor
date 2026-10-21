@@ -22,15 +22,27 @@ internal readonly struct ParagraphAnchor
 {
     private readonly DocumentPosition _context;
     private readonly int _offset;
+    private readonly bool _atHyperlinkStart;
 
-    public ParagraphAnchor(Document.Document document, DocumentPosition position)
+    /// <param name="document">The document containing <paramref name="position"/>.</param>
+    /// <param name="position">The position to anchor.</param>
+    /// <param name="keepHyperlinkStart">
+    /// When true and <paramref name="position"/> is at the start of a hyperlink, <see cref="Resolve"/>
+    /// returns the start of the hyperlink rather than the end of the inline before it.
+    /// </param>
+    public ParagraphAnchor(Document.Document document, DocumentPosition position, bool keepHyperlinkStart = false)
     {
         _context = position;
         _offset = DocumentEditor.GetAbsoluteCharOffset(document, position);
+        _atHyperlinkStart = keepHyperlinkStart && position.Offset == 0
+            && DocumentEditor.GetHyperlinkAt(document, position) is not null;
     }
 
     public DocumentPosition Resolve(Document.Document document)
-        => DocumentEditor.AbsoluteCharOffsetToPosition(document, _context, _offset);
+    {
+        var position = DocumentEditor.AbsoluteCharOffsetToPosition(document, _context, _offset);
+        return _atHyperlinkStart ? DocumentEditor.PreferFollowingHyperlink(document, position) : position;
+    }
 
     public bool SameAs(ParagraphAnchor other)
         => _context.BlockIndex == other._context.BlockIndex
@@ -121,12 +133,19 @@ public sealed class InsertTextAction : IUndoableAction
     /// <inheritdoc/>
     public string Description => $"Insert \"{_text}\"";
 
+    /// <summary>
+    /// When true, text inserted at the start or end of a hyperlink goes outside the link instead
+    /// of extending it (see <see cref="DocumentEditor.InsertText(Document.Document, DocumentPosition, string, TextStyle?, bool)"/>).
+    /// Set it for text typed or pasted at a collapsed caret; leave it false when the text replaces a selection.
+    /// </summary>
+    public bool EscapeHyperlinkBoundary { get; init; }
+
     /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         var start = _startAnchor is { } anchor ? anchor.Resolve(_document) : _position;
-        _startAnchor ??= new ParagraphAnchor(_document, start);
-        _resultPosition = DocumentEditor.InsertText(_document, start, _text, _style);
+        _startAnchor ??= new ParagraphAnchor(_document, start, keepHyperlinkStart: true);
+        _resultPosition = DocumentEditor.InsertText(_document, start, _text, _style, EscapeHyperlinkBoundary);
         _endAnchor = new ParagraphAnchor(_document, _resultPosition);
         return _resultPosition;
     }
@@ -152,7 +171,8 @@ public sealed class InsertTextAction : IUndoableAction
         if (next is InsertTextAction insert &&
             insert._startAnchor is { } nextStart &&
             nextStart.SameAs(_endAnchor) &&
-            insert._style == _style)
+            insert._style == _style &&
+            insert.EscapeHyperlinkBoundary == EscapeHyperlinkBoundary)
         {
             _text += insert._text;
             _resultPosition = insert._resultPosition;
