@@ -68,10 +68,12 @@ public class EditorInputController
 
     /// <summary>
     /// Handles a key-down event, dispatching to the appropriate navigation or edit action.
-    /// Returns true if the event was handled. A pending style is discarded when the key moved the caret.
+    /// Returns true if the event was handled. A pending style is discarded when the caret had moved
+    /// before the key (e.g. the selection was set from code) or the key moved it.
     /// </summary>
     public bool HandleKeyDown(EditorKeyEventArgs e, Document.Document document, DocumentLayout layout, IDrawingContext context)
     {
+        if (e.IsKeyDown) DiscardStalePendingStyles(document);
         bool handled = HandleKeyDownCore(e, document, layout, context);
         if (handled) DiscardStalePendingStyles(document);
         return handled;

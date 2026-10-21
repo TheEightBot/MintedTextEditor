@@ -233,6 +233,25 @@ public class PendingStyleTests
         Assert.False(RunContaining(e.Doc, "X").Style.IsBold);
     }
 
+    [Theory]
+    [InlineData(EditorKey.Backspace)]
+    [InlineData(EditorKey.Delete)]
+    public void PendingBold_SelectionSetFromCode_ThenDeleteKey_DiscardsPendingStyle(EditorKey key)
+    {
+        var e = Setup(null, Para(("Hello World", TextStyle.Default)));
+        PlaceCaret(e, new DocumentPosition(0, 0, 5));
+        Key(e, EditorKey.B, InputModifiers.Control);
+
+        e.Ctrl.Selection.Set(new DocumentPosition(0, 0, 5), new DocumentPosition(0, 0, 8));
+        e.Caret.MoveTo(new DocumentPosition(0, 0, 8));
+        Key(e, key);
+        Assert.Null(e.Fmt.PendingStyle);
+        e.Ctrl.HandleTextInput("X", e.Doc);
+
+        Assert.Equal("HelloXrld", e.Doc.GetText());
+        Assert.False(RunContaining(e.Doc, "X").Style.IsBold);
+    }
+
     [Fact]
     public void Toolbar_PendingBold_AfterCaretMoved_ShowsBoldInactive()
     {
