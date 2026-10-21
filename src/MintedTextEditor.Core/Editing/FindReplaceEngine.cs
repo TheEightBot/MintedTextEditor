@@ -199,7 +199,9 @@ public sealed class FindReplaceEngine
 
         for (int bi = 0; bi < _document.Blocks.Count; bi++)
         {
-            var block = _document.Blocks[bi];
+            // Only top-level paragraphs are searched; other blocks (e.g. tables) have no
+            // inline positions a match could map to.
+            if (_document.Blocks[bi] is not Paragraph block) continue;
             string blockText = block.GetText();
             int searchFrom = 0;
 
@@ -235,14 +237,8 @@ public sealed class FindReplaceEngine
     /// <see cref="DocumentPosition"/> values by walking the inline chain.
     /// </summary>
     private static (DocumentPosition start, DocumentPosition end) OffsetToPosition(
-        Block block, int blockIndex, int charStart, int charEnd)
+        Paragraph para, int blockIndex, int charStart, int charEnd)
     {
-        if (block is not Paragraph para)
-        {
-            var def = new DocumentPosition(blockIndex, 0, 0);
-            return (def, def);
-        }
-
         int accumulated = 0;
         DocumentPosition startPos = new(blockIndex, 0, 0);
         DocumentPosition endPos   = new(blockIndex, 0, 0);
