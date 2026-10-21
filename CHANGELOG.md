@@ -12,6 +12,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.3.1] — 2026-10-21
 
+### Added
+- XML documentation for every public type and member in `MintedTextEditor.Core`, `MintedTextEditor.SkiaSharp` and `MintedTextEditor.Maui`, so IntelliSense describes the whole API and the build is free of documentation warnings.
+- A CI check that fails a pull request changing `src/` without an entry under `[Unreleased]` in this file (add the `skip-changelog` label when no entry is needed).
+
+### Changed
+- README and docs updated for the 0.2–0.3 features (caret magnifier, focus events, Markdown, text shaping, emoji handling) and checked against the current API.
+- This changelog now covers every release, including 0.1.1, and the initial release is correctly listed as 0.1.0.
+
 ### Fixed
 - **Images from a custom `ImageProvider`**: a bitmap returned by `ImageProvider` is no longer replaced (and leaked) by decoding the image name as an app-package asset, or lost when that asset decode fails.
 - **Wrapping very long unbroken text**: character wrapping finds grapheme boundaries once per text fragment and searches each line from its own position, measuring only text near the line end. A 20,000-character token with no spaces now lays out in linear rather than quadratic time. Lines still always take at least one whole grapheme.
@@ -39,6 +47,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.2.0] — 2026-10-20
 
+### Added
+- **Markdown import/export**: `MarkdownImporter` and `MarkdownExporter` (with `MarkdownExportOptions` for GitHub-flavoured tables and strikethrough, and line endings), `Document.GetMarkdown()` / `AppendMarkdown()` / `MarkdownDocumentExtensions.LoadMarkdown()`, and `GetMarkdown()` / `LoadMarkdown()` / `AppendMarkdown()` on `MintedEditorView`.
+
 ### Fixed
 - **Android input (#5)**: soft keyboard now appears on tap/focus; hardware-keyboard printable keys and Ctrl shortcuts are handled; IME composing text (`setComposingText`) is applied as you type; the Return key (committed as `"\n"`) splits the paragraph instead of inserting a literal newline.
 - Formatting toggles (e.g. superscript) no longer drift the selection, lose text, or leave the Android IME composing against stale state.
@@ -63,7 +74,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
-## [1.0.0] — 2026-03-25
+## [0.1.1] — 2026-03-26
+
+### Changed
+- CI and publish workflows no longer cache NuGet packages and install the MAUI workload in one step. No library changes.
+
+---
+
+## [0.1.0] — 2026-03-25
+
+Initial release.
 
 ### Added
 - **Document model**: `Document`, `Block`, `Paragraph`, `TableBlock`, `Inline`, `TextRun`, `HyperlinkInline`, `ImageInline`, `LineBreak`
@@ -71,19 +91,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Paragraph formatting**: alignment (left, center, right, justify), heading levels (H1–H6), bullet lists, numbered lists, indent/outdent, line spacing, space before/after, blockquote, RTL direction
 - **Tables**: insert/delete rows and columns, column width control, cell merge/split, header cells
 - **Images**: insert from bytes/stream/file, display size, alt text, resize handle
-- **Hyperlinks**: insert, edit, remove; `HyperlinkActivated` event; URL validation at click time
-- **HTML import/export**: round-trip HTML via `ImportHtml`/`ExportHtml` with full inline style and attribute support
+- **Hyperlinks**: insert, edit, remove; `HyperlinkClicked` event and `IHyperlinkHandler`; URL validation at click time
+- **HTML import/export**: round-trip HTML via `HtmlImporter`/`HtmlExporter` (`LoadHtml`/`GetHtml`) with inline style and attribute support
 - **Undo/redo**: unlimited history, operation merging for consecutive character input
 - **Clipboard**: cut, copy, paste with plain text and rich (internal format) support
 - **Find/Replace**: case-sensitive and case-insensitive search, replace one/all
 - **Spell-check integration point**: `ISpellCheckProvider` interface, red squiggle rendering
 - **Embedded icon packs**: Lucide, Heroicons, and Material Symbols icon sets embedded as assembly resources in `MintedTextEditor.Core` — no app-bundle asset setup required. Icons are rasterized at the correct display resolution via Svg.Skia.
 - **Theme-aware icon tinting**: icons are stored as black-ink SVGs and recolored at draw time using `SKColorFilter` (SrcIn blend mode) to match the current theme foreground color; dark-mode toolbars are fully supported.
-- **Custom toolbar**: `ToolbarDefinition`, `ToolbarGroup`, built-in and custom `ToolbarItemKind` values
+- **Custom toolbar**: `ToolbarDefinition`, `ToolbarGroup` and `ToolbarItem` types, built-in and custom items, `ToolbarLayoutMode`
 - **Theming**: built-in Light, Dark, and High Contrast themes; full custom `EditorTheme`
-- **Command system**: `IEditorCommand`, `CommandRegistry`, keyboard binding customization
-- **Accessibility**: screen reader support (TalkBack, VoiceOver, Narrator), keyboard-only navigation, high contrast, RTL, localization via `IEditorStringProvider`
-- **Platforms**: Android (API 21+), iOS (15.0+), macOS/Mac Catalyst (15.0+), Windows (10 build 1803+)
+- **Command system**: `IEditorCommand`, `EditorCommandRegistry`, keyboard binding customization
+- **Accessibility**: screen reader support (TalkBack, VoiceOver, Narrator), keyboard-only navigation, high contrast, RTL, localization via `EditorStrings`
+- **Platforms**: Android (API 21+), iOS (15.0+), macOS/Mac Catalyst (15.0+), Windows (10 version 1809+, when built on Windows)
 - **Rendering**: fully custom-drawn via SkiaSharp — no native `TextView`/`UITextView`/`WebView` wrapping
 - **NuGet packages**: `MintedTextEditor.Core`, `MintedTextEditor.SkiaSharp`, `MintedTextEditor.Maui`
 - **CI/CD**: GitHub Actions pipeline for build, test, and NuGet publish
@@ -91,5 +111,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
-[Unreleased]: https://github.com/TheEightBot/MintedTextEditor/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/TheEightBot/MintedTextEditor/releases/tag/v1.0.0
+[Unreleased]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/TheEightBot/MintedTextEditor/releases/tag/v0.1.0
