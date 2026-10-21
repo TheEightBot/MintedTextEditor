@@ -43,6 +43,7 @@ public class MintedEditorView : ContentView
     private readonly FontFormattingEngine _fontFormattingEngine = new();
     private readonly UndoManager _undoManager = new();
     private readonly EditorInputController _inputController;
+    private readonly EditorFindReplace _findReplace;
 
     // Persistent 1×1 off-screen surface used for text measurement calls (hit-testing)
     // that happen outside of a PaintSurface callback.
@@ -354,14 +355,31 @@ public class MintedEditorView : ContentView
             propertyChanged: static (b, _, nv) =>
             {
                 var v = (MintedEditorView)b;
-                v._toolbarRenderer.Definition.MaxRows = (int)nv!;
+                v.ApplyToolbarMaxRows();
                 v.InvalidateCanvas();
+            },
+            // Setting the current value again, or clearing a value equal to the default, raises
+            // no property change, yet it switches between the explicit limit and the definition's
+            // MaxRows. MAUI calls coerceValue on every SetValue and ClearValue (before IsSet is
+            // updated), so request a repaint here; painting re-applies the override.
+            coerceValue: static (b, value) =>
+            {
+                ((MintedEditorView)b).InvalidateCanvas();
+                return value;
             });
 
     /// <summary>
     /// Maximum number of toolbar rows to display before remaining items are collapsed
     /// into an overflow (…) button. 0 (the default) means unlimited.
     /// </summary>
+    /// <remarks>
+    /// Once set (to any value, including 0), this property takes precedence over
+    /// <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> and stays in effect when
+    /// <see cref="ToolbarDefinition"/>, <see cref="ToolbarItems"/> or <see cref="ToolbarIconPack"/>
+    /// change. While it has never been set (or after <c>ClearValue(ToolbarMaxRowsProperty)</c>),
+    /// the current definition's <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> is used.
+    /// The definition object itself is never modified.
+    /// </remarks>
     public int ToolbarMaxRows
     {
         get => (int)GetValue(ToolbarMaxRowsProperty);
@@ -407,7 +425,8 @@ public class MintedEditorView : ContentView
     /// <summary>
     /// Optional custom <see cref="Core.Toolbar.ToolbarDefinition"/>.
     /// When <see langword="null"/> the editor uses <see cref="Core.Toolbar.ToolbarDefinition.CreateDefault()"/>.
-    /// Ignored while <see cref="ToolbarItems"/> is non-empty.
+    /// Ignored while <see cref="ToolbarItems"/> is non-empty. The definition's
+    /// <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> applies only while <see cref="ToolbarMaxRows"/> is unset.
     /// </summary>
     public ToolbarDefinition? ToolbarDefinition
     {
@@ -443,13 +462,7 @@ public class MintedEditorView : ContentView
             return;
         }
 
-        var definition = def ?? ToolbarDefinition.CreateDefault();
-        _toolbarRenderer = new ToolbarRenderer(definition);
-        _toolbarRenderer.IconPack = ToolbarIconPack;
-        _toolbarRenderer.IconResolver = key =>
-            _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
-        WireToolbarCallbacks(definition);
-        InvalidateCanvas();
+        ApplyToolbarDefinition(def ?? ToolbarDefinition.CreateDefault());
     }
 
     private void OnToolbarItemsChanged(IList<Core.Toolbar.ToolbarItem>? items)
@@ -465,13 +478,25 @@ public class MintedEditorView : ContentView
 
     private void ApplyToolbarDefinition(ToolbarDefinition definition)
     {
+        CreateToolbarRenderer(definition);
+        InvalidateCanvas();
+    }
+
+    // Every toolbar rebuild goes through here so view-level settings (icon pack,
+    // icon resolver, row limit) carry over to the new renderer.
+    private void CreateToolbarRenderer(ToolbarDefinition definition)
+    {
         _toolbarRenderer = new ToolbarRenderer(definition);
         _toolbarRenderer.IconPack = ToolbarIconPack;
         _toolbarRenderer.IconResolver = key =>
             _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
+        ApplyToolbarMaxRows();
         WireToolbarCallbacks(definition);
-        InvalidateCanvas();
     }
+
+    // ToolbarMaxRows wins once the app has set it; otherwise the definition's MaxRows applies.
+    private void ApplyToolbarMaxRows() =>
+        _toolbarRenderer.MaxRowsOverride = IsSet(ToolbarMaxRowsProperty) ? ToolbarMaxRows : null;
 
     private void WireToolbarCallbacks(ToolbarDefinition def)
     {
@@ -767,6 +792,13 @@ public class MintedEditorView : ContentView
     /// <summary>Raised when image insertion is requested so hosts can provide a source.</summary>
     public event EventHandler<ImageRequestedEventArgs>? ImageRequested;
 
+    /// <summary>
+    /// Raised after <see cref="FindNext"/>, <see cref="FindPrevious"/>, <see cref="Replace"/> or
+    /// <see cref="ReplaceAll"/> completes, with the match count and the 1-based index of the
+    /// selected match (0 when none) for the query after the operation.
+    /// </summary>
+    public event EventHandler<FindReplaceResultEventArgs>? FindReplaceCompleted;
+
     /// <summary>Platform handler used to open hyperlinks when activation is not cancelled.</summary>
     public IHyperlinkHandler HyperlinkHandler { get; set; } = new MauiHyperlinkHandler();
 
@@ -787,6 +819,8 @@ public class MintedEditorView : ContentView
             FormattingEngine = _formattingEngine,
             FontFormattingEngine = _fontFormattingEngine,
         };
+
+        _findReplace = new EditorFindReplace(_document, _inputController.Selection, _undoManager);
 
         _document.Changed += OnDocumentChanged;
 
@@ -812,11 +846,7 @@ public class MintedEditorView : ContentView
         _caret.IsFocused = false;
         _inputController.ClipboardProvider = new MauiClipboardProvider();
 
-        _toolbarRenderer = new ToolbarRenderer(ToolbarDefinition.CreateDefault());
-        _toolbarRenderer.IconPack = ToolbarIconPack;
-        _toolbarRenderer.IconResolver = key =>
-            _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
-        WireToolbarCallbacks(_toolbarRenderer.Definition);
+        CreateToolbarRenderer(ToolbarDefinition.CreateDefault());
 
         var grid = new Grid();
         grid.Add(_canvas);
@@ -903,6 +933,99 @@ public class MintedEditorView : ContentView
             InvalidateCanvas();
         }
     }
+
+    // ── Find / Replace ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Selects and scrolls to the next occurrence of <paramref name="query"/> after the current
+    /// selection, wrapping to the start of the document when <paramref name="wrapAround"/> is
+    /// <c>true</c>. Returns <c>false</c> (leaving the selection unchanged) when there is no match.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    /// <param name="wrapAround">When <c>true</c>, continues from the start after the last match.</param>
+    public bool FindNext(string query, bool matchCase = false, bool wholeWord = false, bool wrapAround = true)
+    {
+        var match = _findReplace.FindNext(query, CreateFindOptions(matchCase, wholeWord, wrapAround));
+        if (match is not null)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return match is not null;
+    }
+
+    /// <summary>
+    /// Selects and scrolls to the previous occurrence of <paramref name="query"/> before the
+    /// current selection, wrapping to the end of the document when <paramref name="wrapAround"/>
+    /// is <c>true</c>. Returns <c>false</c> (leaving the selection unchanged) when there is no match.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    /// <param name="wrapAround">When <c>true</c>, continues from the end before the first match.</param>
+    public bool FindPrevious(string query, bool matchCase = false, bool wholeWord = false, bool wrapAround = true)
+    {
+        var match = _findReplace.FindPrevious(query, CreateFindOptions(matchCase, wholeWord, wrapAround));
+        if (match is not null)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return match is not null;
+    }
+
+    /// <summary>
+    /// Replaces the selected occurrence of <paramref name="query"/> (or, when the selection is not
+    /// a match, the next one) with <paramref name="replacement"/> as a single undo step, then
+    /// selects the following match. Returns <c>true</c> when a replacement was made; always
+    /// <c>false</c> when <see cref="IsReadOnly"/> is set.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="replacement">The replacement text; empty deletes the match.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    public bool Replace(string query, string replacement, bool matchCase = false, bool wholeWord = false)
+    {
+        if (IsReadOnly) return false;
+        bool replaced = _findReplace.Replace(query, replacement, CreateFindOptions(matchCase, wholeWord, wrapAround: true));
+        if (replaced)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return replaced;
+    }
+
+    /// <summary>
+    /// Replaces every occurrence of <paramref name="query"/> with <paramref name="replacement"/>
+    /// as a single undo step and returns the number of replacements; always 0 when
+    /// <see cref="IsReadOnly"/> is set.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="replacement">The replacement text; empty deletes the matches.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    public int ReplaceAll(string query, string replacement, bool matchCase = false, bool wholeWord = false)
+    {
+        if (IsReadOnly) return 0;
+        int count = _findReplace.ReplaceAll(query, replacement, CreateFindOptions(matchCase, wholeWord, wrapAround: true));
+        if (count > 0)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return count;
+    }
+
+    private static FindOptions CreateFindOptions(bool matchCase, bool wholeWord, bool wrapAround) =>
+        new() { MatchCase = matchCase, WholeWord = wholeWord, WrapAround = wrapAround };
+
+    private void OnFindReplaceSelectionChanged()
+    {
+        _caret.MoveTo(_inputController.Selection.Active);
+        ScrollCaretIntoView();
+        RaiseSelectionChanged();
+        NotifyImeSelectionChanged();
+        InvalidateCanvas();
+    }
+
+    private void RaiseFindReplaceCompleted(string query) =>
+        FindReplaceCompleted?.Invoke(this, new FindReplaceResultEventArgs(
+            query ?? string.Empty, _findReplace.MatchCount, _findReplace.CurrentMatchIndex + 1));
 
     // ── Insert Hyperlink / Image ──────────────────────────────────────────────────
 
@@ -1202,6 +1325,7 @@ public class MintedEditorView : ContentView
             _toolbarRenderer.ActiveColor     = theme.ToolbarActiveColor;
             _toolbarRenderer.SeparatorColor  = theme.ToolbarSeparatorColor;
             _toolbarRenderer.DisabledColor   = theme.ToolbarSeparatorColor;
+            ApplyToolbarMaxRows(); // picks up set/clear transitions that raise no property change (see coerceValue)
             _toolbarRenderer.UpdateToggleStates(GetEditorContext());
             _toolbarRenderer.Render(dc, new EditorRect(0, 0, logicalW, logicalH));
             toolbarH = _toolbarRenderer.ToolbarHeight;
