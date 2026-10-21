@@ -1,0 +1,69 @@
+name: Changelog
+
+# Every pull request that changes the libraries must describe the change under
+# "## [Unreleased]" in CHANGELOG.md. Add the `skip-changelog` label to a PR that
+# needs no entry (e.g. a test-only or internal refactor).
+
+"on":
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Changelog entry
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-changelog') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require an Unreleased entry when src/ changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+
+          if ! git diff --name-only "$base" "$HEAD_SHA" | grep -q '^src/'; then
+            echo "No library changes under src/; no changelog entry needed."
+            exit 0
+          fi
+
+          # Line numbers (in the PR's CHANGELOG.md) of the Unreleased section:
+          # from "## [Unreleased]" up to the first released "## [x.y.z]" heading.
+          # A release PR adds that heading itself, moving the entries under it, so
+          # then the new version's section counts too.
+          git show "$HEAD_SHA:CHANGELOG.md" > "$RUNNER_TEMP/CHANGELOG.md"
+          start=$(grep -n '^## \[Unreleased\]' "$RUNNER_TEMP/CHANGELOG.md" | head -1 | cut -d: -f1 || true)
+          if [ -z "$start" ]; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md has no '## [Unreleased]' section."
+            exit 1
+          fi
+          section=1
+          if git diff -U0 "$base" "$HEAD_SHA" -- CHANGELOG.md | grep -q '^+## \[[0-9]'; then
+            section=2
+          fi
+          end=$(grep -n '^## \[[0-9]' "$RUNNER_TEMP/CHANGELOG.md" | sed -n "${section}p" | cut -d: -f1 || true)
+          end=${end:-999999}
+
+          # Count lines this PR adds inside that section (ignoring blank lines and rules).
+          added=$(git diff -U0 "$base" "$HEAD_SHA" -- CHANGELOG.md | awk -v s="$start" -v e="$end" '
+            /^@@/ { split($3, a, ","); line = substr(a[1], 2); next }
+            /^\+\+\+/ { next }
+            /^\+/ { if (line > s && line < e && $0 !~ /^\+[[:space:]]*(---)?[[:space:]]*$/) n++; line++; next }
+            END { print n + 0 }')
+
+          if [ "$added" -eq 0 ]; then
+            echo "::error file=CHANGELOG.md::This PR changes src/ but adds nothing under '## [Unreleased]' in CHANGELOG.md. Describe the change there (Added / Changed / Fixed / Removed), or add the 'skip-changelog' label if no entry is needed."
+            exit 1
+          fi
+
+          echo "Found $added new line(s) under [Unreleased]."

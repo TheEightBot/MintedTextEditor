@@ -12,6 +12,7 @@ public class MarkdownExporter
 {
     private readonly MarkdownExportOptions _options;
 
+    /// <summary>Creates an exporter. A <c>null</c> <paramref name="options"/> uses default options.</summary>
     public MarkdownExporter(MarkdownExportOptions? options = null)
         => _options = options ?? new MarkdownExportOptions();
 

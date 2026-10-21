@@ -7,17 +7,22 @@ public class TextRun : Inline
 {
     private string _text;
 
+    /// <summary>The run's text. Assigning <c>null</c> stores an empty string.</summary>
     public string Text
     {
         get => _text;
         set => _text = value ?? string.Empty;
     }
 
+    /// <summary>The style applied to the whole run.</summary>
     public TextStyle Style { get; set; }
 
+    /// <inheritdoc/>
     public override int Length => _text.Length;
+    /// <inheritdoc/>
     public override string GetText() => _text;
 
+    /// <summary>Creates a text run. A <c>null</c> style uses <see cref="TextStyle.Default"/>.</summary>
     public TextRun(string text, TextStyle? style = null)
     {
         _text = text ?? string.Empty;

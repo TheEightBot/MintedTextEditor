@@ -15,6 +15,8 @@ public sealed class ImeCompositionTracker
     private int _composingStart;
     private string _composingText = string.Empty;
 
+    /// <summary>Creates a tracker that applies composition edits to <paramref name="sink"/>.</summary>
+    /// <param name="sink">The editor-side target that receives the edits.</param>
     public ImeCompositionTracker(IImeEditSink sink) => _sink = sink;
 
     /// <summary>The text currently in the composing region (already present in the editor).</summary>

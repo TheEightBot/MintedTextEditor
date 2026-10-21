@@ -43,6 +43,16 @@ public class LayoutRun
     /// </summary>
     public string? ImageSource { get; }
 
+    /// <summary>Creates a layout run.</summary>
+    /// <param name="text">The text content of the run.</param>
+    /// <param name="x">Horizontal offset from the left edge of the line.</param>
+    /// <param name="width">Width of the run in pixels.</param>
+    /// <param name="sourceInline">The source inline in the document model, or null.</param>
+    /// <param name="style">Style applied to the run.</param>
+    /// <param name="sourceOffset">Character offset within the source inline where the run's text begins.</param>
+    /// <param name="isImage">True when the run is an image placeholder.</param>
+    /// <param name="imageSource">Image source URI or resource key for image runs.</param>
+    /// <param name="height">Height of the run in pixels.</param>
     public LayoutRun(string text, float x, float width, Inline? sourceInline, TextStyle style, int sourceOffset,
         bool isImage = false, string? imageSource = null, float height = 0)
     {

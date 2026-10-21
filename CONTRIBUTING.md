@@ -19,24 +19,38 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 ### Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- .NET MAUI workload: `dotnet workload install maui`
-- macOS with Xcode (for iOS/macOS targets) or Windows with VS 2022+ (for WinUI target)
+- For `MintedTextEditor.Maui` and the sample app only: the .NET MAUI workload (`dotnet workload install maui`), plus macOS with Xcode for the iOS/Mac Catalyst targets, or Windows for the Windows target (which is only added when building on Windows)
+
+`MintedTextEditor.Core`, `MintedTextEditor.SkiaSharp` and their tests are plain `net10.0` projects and build on any OS.
 
 ### Building
 
 ```bash
 git clone https://github.com/TheEightBot/MintedTextEditor.git
 cd MintedTextEditor
-dotnet build
+dotnet build src/MintedTextEditor.SkiaSharp/   # also builds Core
+dotnet build src/MintedTextEditor.Maui/        # needs the MAUI workload
 ```
+
+`dotnet build` at the root builds `MintedTextEditor.slnx`, which includes the MAUI library and the sample app, so it needs the MAUI workload too.
 
 ### Running the Tests
 
 ```bash
 dotnet test tests/MintedTextEditor.Core.Tests/
+dotnet test tests/MintedTextEditor.SkiaSharp.Tests/
 ```
 
-All 537+ tests must pass before submitting a PR.
+The SkiaSharp tests draw text and emoji with real fonts. Install a color emoji font first, or the emoji tests return early without checking anything; on Debian/Ubuntu: `sudo apt-get install fonts-noto-color-emoji`. On Linux the test project brings in the SkiaSharp and HarfBuzzSharp native assets itself.
+
+All tests must pass before submitting a PR.
+
+### Continuous Integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on pushes and pull requests to `main` and `develop` (changes that only touch `*.md` files or `docs/` are skipped):
+
+- **Build & Test (Core + SkiaSharp)** on Ubuntu: builds in Release, installs `fonts-noto-color-emoji`, runs both test projects, and does a pack dry-run of both packages.
+- **Build (MAUI)** on Windows: restores the MAUI workload, builds `MintedTextEditor.Maui` in Release, and does a pack dry-run.
 
 ### Running the Sample App
 
@@ -59,14 +73,23 @@ dotnet build -t:Run -f net10.0-android       # Android (emulator required)
 
 4. **Update documentation** — update `docs/` or `README.md` if your change affects public API or user-facing behavior.
 
-5. **Ensure tests pass**:
+5. **Add a changelog entry** — see [Changelog](#changelog) below.
+
+6. **Ensure tests pass**:
    ```bash
    dotnet test tests/MintedTextEditor.Core.Tests/
+   dotnet test tests/MintedTextEditor.SkiaSharp.Tests/
    ```
 
-6. **Commit** using the format below.
+7. **Commit** using the format below.
 
-7. **Open a Pull Request** against the `main` branch. Fill out the PR template.
+8. **Open a Pull Request** against the `main` branch, describing what changed and why.
+
+## Changelog
+
+Every pull request that changes anything under `src/` must add an entry to [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]`, in the matching `### Added`, `### Changed`, `### Fixed` or `### Removed` section (add the section if it isn't there yet). Write it for users of the packages: what changed and how it affects them.
+
+A CI check enforces this: it fails a pull request that changes `src/` without changing `CHANGELOG.md`, unless the PR has the `skip-changelog` label (for changes users won't notice, such as internal refactoring).
 
 ## Commit Message Format
 
@@ -92,12 +115,13 @@ test(undo): add regression test for multi-step undo
 
 ## Coding Guidelines
 
-- **Language**: C# 13, targeting `net10.0`
+- **Language**: C# 14 (the .NET 10 default), targeting `net10.0` (plus the `net10.0-*` platform targets in `MintedTextEditor.Maui`)
 - **Nullable**: `<Nullable>enable</Nullable>` — all public APIs must be nullable-annotated
 - **Style**: Follow the existing style (4-space indent, Allman braces)
 - **XML docs**: All public types and members must have `<summary>` XML doc comments
-- **Immutability**: `TextStyle` and `ParagraphStyle` are value types — extend them via `with` expressions, not mutation
+- **Immutability**: `TextStyle` is an immutable class — create modified copies with its `With…` methods. `ParagraphStyle` is mutable; change it through `DocumentEditor.ApplyParagraphStyle` (or call `Document.NotifyChanged`) so the layout updates
 - **No platform code in Core**: `MintedTextEditor.Core` must not reference any platform APIs or SkiaSharp
+- **Platform input code**: goes in the matching `KeyboardProxyHandler.<Platform>.cs` partial file in `MintedTextEditor.Maui/Input` (`Android`, `Apple` for iOS and Mac Catalyst, `Windows`); the csproj compiles each file only for its platforms
 
 ## Licensing
 

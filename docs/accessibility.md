@@ -1,96 +1,93 @@
 # Accessibility
 
-MintedTextEditor is designed to be usable with assistive technologies across all supported platforms.
+MintedTextEditor draws all of its content, including the toolbar, on a single SkiaSharp canvas. This page describes what is supported today and what is not.
 
 ## Screen Reader Support
 
-The editor exposes semantic accessibility information through the host platform's accessibility APIs:
-
-- The editor canvas announces its role as a "text editor" to screen readers.
-- The current text content and caret position are reported via `AccessibilityValue` and assistive technology notifications.
-- Selection changes trigger accessibility announcements.
-- Toolbar buttons have accessible labels and hints.
+The editor does not yet expose its content to screen readers (TalkBack, VoiceOver, Narrator): the text, caret, selection and toolbar buttons are pixels on a canvas, and the native accessibility tree contains only the canvas view and a hidden keyboard-input view.
 
 ### Customize Accessible Labels
 
+`MintedEditorView` is a regular MAUI view, so you can describe it as a whole with MAUI's semantic properties:
+
 ```csharp
-editor.AccessibilityHint = "Main document editor";
+SemanticProperties.SetDescription(editor, "Main document editor");
+SemanticProperties.SetHint(editor, "Double-tap to edit text");
 ```
 
-Toolbar buttons use their `Label` property (set on `IEditorCommand.Label`) as the accessible name.
+`MintedTextEditor.Core.Accessibility.AccessibilityProperties` and the accessibility strings on `EditorStrings` (`EditorAccessibilityLabel`, `EditorAccessibilityHint`, `ToolbarAccessibilityLabel`, `ContextMenuAccessibilityLabel`) are building blocks for this; the control does not apply them yet.
 
 ## Keyboard-Only Operation
 
-The editor is fully operable without a pointer:
+With a hardware keyboard, text can be edited without a pointer:
 
 | Category | Notes |
 |---|---|
 | Caret navigation | Arrow keys, Home, End, Page Up/Down |
-| Selection | Shift + any navigation key |
+| Selection | Shift + any navigation key; Ctrl/Cmd+A selects all |
 | Word navigation | Ctrl/Cmd + Left/Right |
 | Select word | Ctrl/Cmd + Shift + Left/Right |
 | Start/end of line | Home / End |
 | Start/end of document | Ctrl/Cmd + Home / Ctrl/Cmd + End |
-| Editing | Standard keys for insert, delete, backspace |
-| Formatting | Ctrl/Cmd + B/I/U, etc. |
-| Toolbar focus | F6 to move focus to toolbar; Enter to activate |
+| Editing | Standard keys for insert, delete, backspace; Backspace/Delete remove a whole emoji or other grapheme cluster |
+| Formatting | Ctrl/Cmd + B/I/U |
+| Tables | Tab / Shift+Tab between cells; see [Tables](tables.md#keyboard-navigation) |
+
+The toolbar has no keyboard focus; its actions are available as shortcuts above or through your own UI (see [Commands & Events](commands-events.md)).
 
 ## High Contrast Theme
 
 MintedTextEditor ships with a built-in high contrast theme:
 
 ```csharp
-editor.Theme = EditorTheme.HighContrast;
+editor.Theme = EditorTheme.CreateHighContrast();
+// or
+editor.ThemeMode = EditorThemeMode.HighContrast;
 ```
 
 The high contrast theme:
 - White text on black background
 - Yellow selection highlight
-- White caret
-- All interactive elements have a visible focus ring
+- White caret, 3 units wide
+
+It is not selected automatically; switch to it when the platform reports high contrast.
 
 ## RTL Text Support
 
-Right-to-left text is supported at the paragraph level:
+Right-to-left direction is set per paragraph:
 
 ```csharp
-// Set via ParagraphFormattingEngine
-editor.ParagraphFormattingEngine.SetDirection(TextDirection.RightToLeft);
-
-// Or set directly on a paragraph
-para.Style = para.Style with { Direction = TextDirection.RightToLeft };
+// Set on the paragraphs in the selection
+DocumentEditor.ApplyParagraphStyle(editor.Document, editor.Selection.Range,
+    s => s.Direction = TextDirection.RightToLeft);
 ```
 
-The editor automatically mirrors paragraph layout and selection rendering for RTL paragraphs. Bidirectional (BIDI) text within a single paragraph is supported via the underlying SkiaSharp text shaping engine.
+HTML `dir="rtl"` and `direction: rtl` are imported as well. In an RTL paragraph, indentation is taken from the right and `Left` alignment means the start of the line, so text is right-aligned. Text is shaped with HarfBuzz, which applies each script's shaping rules (for example Arabic joining), but glyphs are kept in logical order to match caret placement: bidirectional reordering is not implemented.
 
 ## Localization
 
-MintedTextEditor's toolbar labels and dialog strings are loaded from a resource dictionary and can be replaced with localized versions:
+UI strings are provided by `EditorStrings` (namespace `MintedTextEditor.Core.Localization`). Subclass it, override the strings you need, and set `EditorStrings.Current`:
 
 ```csharp
-editor.StringProvider = new MyLocalizedStringProvider();
-```
-
-Implement `IEditorStringProvider`:
-
-```csharp
-public class MyLocalizedStringProvider : IEditorStringProvider
+public class SpanishEditorStrings : EditorStrings
 {
-    public string GetString(string key)
-        => Resources.ResourceManager.GetString(key) ?? key;
+    public override string Bold => "Negrita";
+    public override string Italic => "Cursiva";
 }
+
+EditorStrings.Current = new SpanishEditorStrings();
 ```
+
+The built-in toolbar labels and the insert prompts in `MintedEditorView` are currently fixed English text and do not read `EditorStrings`; use it for your own UI and custom toolbars (see the sample app's Localization page).
 
 ## Platform-Specific Notes
 
 ### Android
-- TalkBack is supported via `AccessibilityNodeInfo` on the editor canvas view.
-- Users can swipe to navigate by character and word.
+- The soft keyboard appears when the editor is tapped or focused. Gboard and other IMEs (Samsung, MIUI) are supported, including composing text, suggestions, auto-capitalisation and whole-emoji delete.
+- Hardware keyboards are supported, including dead keys (accents) on international layouts.
 
-### iOS / macOS
-- VoiceOver is supported via `UIAccessibility` (iOS) and macOS Accessibility APIs.
-- The editor responds to VoiceOver focus and reads paragraph content.
+### iOS / Mac Catalyst
+- Keyboard input goes through a hidden `UIKeyInput` view; navigation keys are handled with `UIKeyCommand`s.
 
 ### Windows
-- Narrator is supported via `AutomationPeer` on the backing `SKXamlCanvas`.
-- High contrast detection via `AccessibilitySettings.HighContrast` automatically switches the theme.
+- Keyboard input goes through a hidden WinUI `TextBox`.

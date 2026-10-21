@@ -17,6 +17,11 @@ public class EditorKeyEventArgs
     /// <summary>True if this is a key-down event; false for key-up.</summary>
     public bool IsKeyDown { get; }
 
+    /// <summary>Creates keyboard event data.</summary>
+    /// <param name="key">The key that was pressed or released.</param>
+    /// <param name="character">The character produced by the key, or '\0' if none.</param>
+    /// <param name="modifiers">Active modifier keys.</param>
+    /// <param name="isKeyDown">True for a key-down event; false for key-up.</param>
     public EditorKeyEventArgs(EditorKey key, char character = '\0', InputModifiers modifiers = InputModifiers.None, bool isKeyDown = true)
     {
         Key = key;

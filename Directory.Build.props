@@ -33,6 +33,13 @@
     <!-- Enable SourceLink for GitHub -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!--
+      Keep the public API fully documented: a missing or broken XML doc comment
+      fails the build. Only projects with GenerateDocumentationFile (the
+      libraries) report these.
+    -->
+    <WarningsAsErrors>$(WarningsAsErrors);CS1591;CS1572;CS1573;CS1574;CS1734</WarningsAsErrors>
   </PropertyGroup>
 
   <!-- Include README and icon in every package -->

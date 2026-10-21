@@ -2,56 +2,79 @@
 
 ## Command System
 
-MintedTextEditor uses a command pattern (`IEditorCommand`) for all editor operations. Every toolbar button, menu item, and keyboard shortcut dispatches a command through the `CommandRegistry`.
+MintedTextEditor uses a command pattern (`IEditorCommand`, namespace `MintedTextEditor.Core.Commands`) for editor operations. Toolbar buttons hold an `IEditorCommand` and execute it when tapped; `EditorCommandRegistry` keeps commands by name.
 
 ### IEditorCommand
 
 ```csharp
 public interface IEditorCommand
 {
-    string Id { get; }
-    string Label { get; }
+    string Name { get; }
+    string Description { get; }
+    void Execute(EditorContext context);
     bool CanExecute(EditorContext context);
-    DocumentPosition Execute(EditorContext context);
 }
 ```
 
+Commands that only toggle or apply inline character formatting also implement the marker interface `ICharacterFormattingCommand`, so the editor keeps the selection stable around them.
+
 ### EditorContext
 
-`EditorContext` is passed to every command and provides access to the full editor state:
+`EditorContext` is passed to every command and provides access to the editor state:
 
 | Property | Type | Description |
 |---|---|---|
 | `Document` | `Document` | The current document |
-| `CaretPosition` | `DocumentPosition` | Current caret location |
-| `Selection` | `TextRange?` | Current selection, or `null` |
-| `UndoManager` | `UndoManager` | Push-able undo stack |
+| `Selection` | `Selection` | Current selection (`Anchor`, `Active`, `Range`, `IsEmpty`) |
+| `UndoManager` | `UndoManager` | Undo stack; `Push` executes and records an action |
 | `FormattingEngine` | `FormattingEngine` | Character formatting helpers |
-| `ParagraphFormattingEngine` | `ParagraphFormattingEngine` | Block formatting helpers |
-| `Clipboard` | `IClipboardProvider` | Read/write clipboard access |
+| `FontFormattingEngine` | `FontFormattingEngine` | Font family, size and color helpers |
+| `Clipboard` | `IClipboardProvider?` | Clipboard access, if available |
 
 ### Executing a Command Programmatically
 
+Build an `EditorContext` from the control's public state and execute a command directly:
+
 ```csharp
-editor.CommandRegistry.Execute("Bold");
-editor.CommandRegistry.Execute("InsertHyperlink", new HyperlinkCommandArgs("https://example.com", "Example"));
+using MintedTextEditor.Core.Commands;
+
+var ctx = new EditorContext(
+    editor.Document,
+    editor.Selection,
+    editor.UndoManager,
+    editor.Formatting,
+    editor.FontFormatting);
+
+var link = new InsertHyperlinkCommand { Url = "https://example.com" };
+if (link.CanExecute(ctx))
+    link.Execute(ctx);
 ```
+
+Or look commands up by name in a registry. `EditorCommandRegistry.CreateDefault()` contains all built-in commands (names are case-insensitive):
+
+```csharp
+var registry = EditorCommandRegistry.CreateDefault();
+registry.Execute("ToggleBold", ctx);   // returns false if not found or CanExecute is false
+```
+
+Built-in command names: `ToggleBold`, `ToggleItalic`, `ToggleUnderline`, `ToggleStrikethrough`, `ToggleSubscript`, `ToggleSuperscript`, `ClearFormatting`, `AlignLeft`, `AlignCenter`, `AlignRight`, `AlignJustify`, `ToggleBulletList`, `ToggleNumberList`, `IncreaseIndent`, `DecreaseIndent`, `Undo`, `Redo`, `Copy`, `Cut`, `SelectAll`, `InsertHyperlink`, `RemoveHyperlink`, `OpenHyperlink`, `InsertImage`, `RemoveImage`, `InsertTable`, `InsertRowAbove`, `InsertRowBelow`, `DeleteRow`, `InsertColumnLeft`, `InsertColumnRight`, `DeleteColumn`, `DeleteTable`, `ApplyFontFamily`, `ApplyFontSize`, `ApplyTextColor`, `ApplyHighlightColor`. Commands that need input expose it as properties (e.g. `InsertHyperlinkCommand.Url`, `InsertTableCommand.Rows`/`Columns`, `ApplyFontFamilyCommand.FontFamily`).
 
 ### Registering a Custom Command
 
 ```csharp
-editor.CommandRegistry.Register(new MyCustomCommand());
+var registry = EditorCommandRegistry.CreateDefault();
+registry.Register(new MyCustomCommand());   // replaces any command with the same Name
 ```
 
-See [Toolbar Customization](toolbar-customization.md) for surfacing custom commands in the toolbar.
+The control does not expose a registry of its own. To surface a custom command in the toolbar, put it on a `ToolbarButton`; see [Toolbar Customization](toolbar-customization.md).
 
 ---
 
 ## Keyboard Bindings
 
-Default bindings:
+Default bindings (`Ctrl` and `Cmd` are interchangeable):
 
-| Shortcut | Command |
+| Shortcut | Action |
 |---|---|
 | `Ctrl/Cmd+B` | Bold |
 | `Ctrl/Cmd+I` | Italic |
@@ -62,28 +85,43 @@ Default bindings:
 | `Ctrl/Cmd+X` | Cut |
 | `Ctrl/Cmd+V` | Paste |
 | `Ctrl/Cmd+A` | Select All |
-| `Ctrl/Cmd+K` | Insert/Edit Hyperlink |
-| `Tab` | Indent (in list) |
-| `Shift+Tab` | Outdent (in list) |
+| `Ctrl/Cmd+Left/Right` | Move by word (add `Shift` to select) |
+| `Ctrl/Cmd+Home/End` | Start/end of document |
+| `Tab` / `Shift+Tab` | Next/previous table cell; outside a table, `Tab` inserts a tab character |
+
+Table shortcuts are listed in [Tables](tables.md#keyboard-navigation).
 
 ### Adding Custom Key Bindings
 
+`EditorInputController.KeyBindings` holds `EditorKeyBinding` entries that are checked before the defaults. The MAUI control does not expose its input controller, so custom bindings apply when you host `EditorInputController` yourself:
+
 ```csharp
-editor.KeyBindings.Add(new KeyBinding(Key.S, ModifierKeys.Control, "Save"));
+using MintedTextEditor.Core.Input;
+
+inputController.KeyBindings.Add(new EditorKeyBinding(
+    EditorKey.S,
+    InputModifiers.Control,
+    (controller, document, layout, drawingContext) =>
+    {
+        Save(document);
+        return true;   // handled
+    }));
 ```
 
 ---
 
 ## Events
 
-### DocumentChanged
+`MintedEditorView` raises the following events. Event argument types are in `MintedTextEditor.Core.Events`.
 
-Raised after any mutation to the document content.
+### TextChanged
+
+Raised after any change to the document content or formatting.
 
 ```csharp
-editor.DocumentChanged += (sender, e) =>
+editor.TextChanged += (sender, e) =>
 {
-    // e.ChangeKind: Insert | Delete | FormatApplied | StructureChanged
+    // e.AffectedRange: the TextRange that changed
     SaveButton.IsEnabled = true;
 };
 ```
@@ -95,42 +133,52 @@ Raised when the caret moves or the selection range changes.
 ```csharp
 editor.SelectionChanged += (sender, e) =>
 {
-    StatusLabel.Text = e.Selection is { } sel
-        ? $"Selected: {sel.Length} chars"
-        : $"Line {e.CaretPosition.BlockIndex + 1}";
+    StatusLabel.Text = e.IsEmpty
+        ? $"Paragraph {e.Active.BlockIndex + 1}"
+        : $"Selected from {e.Anchor} to {e.Active}";
 };
 ```
 
-### HyperlinkActivated
+### HyperlinkClicked
 
-Raised when the user taps/clicks a hyperlink.
+Raised when the user taps/clicks a hyperlink. Afterwards, if `Cancel` is not set and Ctrl/Cmd was held, the editor opens the URL through its `HyperlinkHandler`.
 
 ```csharp
-editor.HyperlinkActivated += async (sender, e) =>
+editor.HyperlinkClicked += async (sender, e) =>
 {
+    e.Cancel = true;
     await Browser.OpenAsync(e.Url, BrowserLaunchMode.SystemPreferred);
 };
 ```
 
-### ImageTapped
+### IsHyperlinkSelectedChanged
 
-Raised when the user taps/clicks on an embedded image.
+Raised when the caret or selection enters or leaves a hyperlink (`e.IsSelected`, `e.Url`).
+
+### EditorFocusChanged
+
+Raised once per native focus change (`e.IsFocused`), including a tap into the editor and focus moving to another control. Read the current state from `IsEditorFocused`.
+
+### ImageRequested
+
+Raised when the toolbar's insert-image button is tapped. Set `Source` and `Handled = true` to supply the image; otherwise the editor prompts for a URL or path.
 
 ```csharp
-editor.ImageTapped += (sender, e) =>
+editor.ImageRequested += (sender, e) =>
 {
-    // Show re-size / replace dialog, etc.
+    e.Source = "https://example.com/photo.png";
+    e.Handled = true;
 };
 ```
 
 ### UndoStackChanged
 
-Raised when the undo stack changes — useful for updating undo/redo button states in a custom toolbar.
+Raised by `editor.UndoManager` when the undo stack changes — useful for updating undo/redo button states in a custom toolbar.
 
 ```csharp
-editor.UndoStackChanged += (sender, e) =>
+editor.UndoManager.UndoStackChanged += (sender, e) =>
 {
-    UndoButton.IsEnabled = e.CanUndo;
-    RedoButton.IsEnabled = e.CanRedo;
+    UndoButton.IsEnabled = editor.UndoManager.CanUndo;
+    RedoButton.IsEnabled = editor.UndoManager.CanRedo;
 };
 ```

@@ -18,6 +18,9 @@ public class EditorInputController
     private readonly Selection _selection = new Selection();
     private bool _isDragging;
 
+    /// <summary>Creates an input controller that drives the given caret and its renderer.</summary>
+    /// <param name="caret">The caret moved by navigation and editing.</param>
+    /// <param name="caretRenderer">Used to measure the caret X position for vertical navigation.</param>
     public EditorInputController(Caret caret, CaretRenderer caretRenderer)
     {
         _caret = caret;

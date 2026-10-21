@@ -16,21 +16,45 @@ public class FormattingEngine
 
     // ── Public toggle API ─────────────────────────────────────────────
 
+    /// <summary>
+    /// Toggles bold for <paramref name="range"/>: removes it if the entire range already has it,
+    /// otherwise applies it. When the range is empty, toggles it on <see cref="PendingStyle"/> instead.
+    /// </summary>
     public void ToggleBold(Document.Document doc, TextRange range)
         => Toggle(doc, range, s => s.IsBold, (s, v) => s.WithBold(v));
 
+    /// <summary>
+    /// Toggles italic for <paramref name="range"/>: removes it if the entire range already has it,
+    /// otherwise applies it. When the range is empty, toggles it on <see cref="PendingStyle"/> instead.
+    /// </summary>
     public void ToggleItalic(Document.Document doc, TextRange range)
         => Toggle(doc, range, s => s.IsItalic, (s, v) => s.WithItalic(v));
 
+    /// <summary>
+    /// Toggles underline for <paramref name="range"/>: removes it if the entire range already has it,
+    /// otherwise applies it. When the range is empty, toggles it on <see cref="PendingStyle"/> instead.
+    /// </summary>
     public void ToggleUnderline(Document.Document doc, TextRange range)
         => Toggle(doc, range, s => s.IsUnderline, (s, v) => s.WithUnderline(v));
 
+    /// <summary>
+    /// Toggles strikethrough for <paramref name="range"/>: removes it if the entire range already has it,
+    /// otherwise applies it. When the range is empty, toggles it on <see cref="PendingStyle"/> instead.
+    /// </summary>
     public void ToggleStrikethrough(Document.Document doc, TextRange range)
         => Toggle(doc, range, s => s.IsStrikethrough, (s, v) => s.WithStrikethrough(v));
 
+    /// <summary>
+    /// Toggles subscript (superscript is always cleared) for <paramref name="range"/>: removes it if the entire range already has it,
+    /// otherwise applies it. When the range is empty, toggles it on <see cref="PendingStyle"/> instead.
+    /// </summary>
     public void ToggleSubscript(Document.Document doc, TextRange range)
         => Toggle(doc, range, s => s.IsSubscript, (s, v) => s.WithSubscript(v));
 
+    /// <summary>
+    /// Toggles superscript (subscript is always cleared) for <paramref name="range"/>: removes it if the entire range already has it,
+    /// otherwise applies it. When the range is empty, toggles it on <see cref="PendingStyle"/> instead.
+    /// </summary>
     public void ToggleSuperscript(Document.Document doc, TextRange range)
         => Toggle(doc, range, s => s.IsSuperscript, (s, v) => s.WithSuperscript(v));
 

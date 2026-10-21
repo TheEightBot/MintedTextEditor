@@ -29,6 +29,7 @@ public class TableCell
     /// <summary>Whether this cell has been absorbed into a merged span and should be skipped during layout.</summary>
     public bool IsMerged { get; internal set; }
 
+    /// <summary>Creates a cell containing a single empty paragraph.</summary>
     public TableCell()
     {
         Blocks.Add(new Paragraph());
@@ -41,14 +42,20 @@ public class TableCell
 /// <summary>Per-side border specification (widths in pixels).</summary>
 public sealed class EditorBorder
 {
+    /// <summary>Top border width.</summary>
     public float Top { get; set; }
+    /// <summary>Right border width.</summary>
     public float Right { get; set; }
+    /// <summary>Bottom border width.</summary>
     public float Bottom { get; set; }
+    /// <summary>Left border width.</summary>
     public float Left { get; set; }
 
+    /// <summary>Creates a border with the same width on all sides.</summary>
     public EditorBorder(float uniform = 1f)
         => Top = Right = Bottom = Left = uniform;
 
+    /// <summary>Creates a border with individual widths per side.</summary>
     public EditorBorder(float top, float right, float bottom, float left)
         => (Top, Right, Bottom, Left) = (top, right, bottom, left);
 }

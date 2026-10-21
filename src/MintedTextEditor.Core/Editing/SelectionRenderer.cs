@@ -15,6 +15,7 @@ public class SelectionRenderer
     /// <summary>Fill color used for the selection highlight.</summary>
     public EditorColor SelectionColor { get; set; } = new EditorColor(0x66, 0x99, 0xCC, 0x99); // semi-transparent blue
 
+    /// <summary>Creates a selection renderer that uses <paramref name="caretRenderer"/> to compute caret x-positions.</summary>
     public SelectionRenderer(CaretRenderer caretRenderer)
     {
         _caretRenderer = caretRenderer;

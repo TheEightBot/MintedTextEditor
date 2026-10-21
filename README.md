@@ -12,8 +12,8 @@
 Rich text editing for .NET MAUI, rendered entirely on a SkiaSharp canvas.
 
 MintedTextEditor is organized into three packages:
-- `MintedTextEditor.Core`: document model, editing engine, layout, formatting, commands, events, HTML interop.
-- `MintedTextEditor.SkiaSharp`: drawing backend implementing `IDrawingContext`.
+- `MintedTextEditor.Core`: document model, editing engine, layout, formatting, commands, events, HTML and Markdown interop.
+- `MintedTextEditor.SkiaSharp`: drawing backend implementing `IDrawingContext`, with HarfBuzz text shaping.
 - `MintedTextEditor.Maui`: MAUI control (`MintedEditorView`) and platform integration.
 
 ## Table of Contents
@@ -37,12 +37,15 @@ MintedTextEditor is organized into three packages:
 - Paragraph formatting: alignment, indentation, line spacing, headings, lists, block quote.
 - Inline content: hyperlinks, images, tables.
 - Editing primitives: caret navigation, selection, clipboard, undo/redo.
+- Touch caret drag with a native-style magnifier (loupe), configurable or switchable off.
+- Text shaped with HarfBuzz (kerning, ligatures, complex scripts); emoji, ZWJ sequences and flags draw as one glyph and are never split by the caret, Backspace, wrapping or hit-testing.
+- Android soft-keyboard and IME support (composition, suggestions, dead keys on hardware keyboards).
 - Toolbar and command architecture with customizable item sets.
 - Three built-in toolbar icon packs (Lucide, Heroicons, Material Symbols) — all embedded in the `MintedTextEditor.Core` package, no app-bundle asset setup required.
 - Theme-aware toolbar icons: automatically recolored to the current theme's foreground at draw time, including full dark-mode support.
 - HTML and Markdown import/export pipelines, including support for GitHub Flavored Markdown (GFM).
 - Theming support (light, dark, high contrast, and custom styles).
-- Accessibility and localization support including RTL scenarios.
+- Right-to-left paragraphs and replaceable UI strings (`EditorStrings`).
 
 ## Package Layout
 
@@ -55,6 +58,7 @@ samples/
   SampleApp.Maui/
 tests/
   MintedTextEditor.Core.Tests/
+  MintedTextEditor.SkiaSharp.Tests/
 ```
 
 ## Platform Support
@@ -64,7 +68,7 @@ tests/
 | Android | API 21 (Android 5.0) |
 | iOS | 15.0 |
 | macOS (Mac Catalyst) | 15.0 |
-| Windows | 10.0.17763 |
+| Windows | 10.0.17763 (the Windows target is only built on a Windows machine) |
 
 ## Quick Start
 
@@ -73,6 +77,8 @@ tests/
 ```bash
 dotnet add package MintedTextEditor.Maui
 ```
+
+This brings in `MintedTextEditor.Core`, `MintedTextEditor.SkiaSharp`, SkiaSharp 4.153.1 (`SkiaSharp.Views.Maui.Controls`), HarfBuzzSharp and Svg.Skia 5.2.3. The packages target .NET 10 / MAUI 10.
 
 ### 2) Register services
 
@@ -115,13 +121,8 @@ string html = Editor.GetHtml();
 ### 5) Load or export Markdown
 
 ```csharp
-using MintedTextEditor.Core.Markdown;
-
-// Load a document from Markdown
-var document = EditorDocumentExtensions.LoadMarkdown("# Hello World\nThis is a paragraph.");
-
-// Export the current document to a Markdown string
-var markdown = editor.Document.GetMarkdown();
+Editor.LoadMarkdown("# Hello World\nThis is a paragraph.");
+string markdown = Editor.GetMarkdown();
 ```
 
 For full import/export options, including GitHub Flavored Markdown (GFM) support, see [docs/markdown-interop.md](docs/markdown-interop.md).
@@ -129,11 +130,13 @@ For full import/export options, including GitHub Flavored Markdown (GFM) support
 ## Sample App
 
 The repository includes a runnable MAUI sample with focused pages for:
-- basic editing
+- basic editing and read-only mode
 - formatting
 - load/save, HTML, and Markdown
 - images and hyperlinks
 - tables
+- custom commands and a dynamic toolbar
+- event monitoring
 - localization
 - theming and toolbar icon packs
 
@@ -144,6 +147,8 @@ Project: [samples/SampleApp.Maui](samples/SampleApp.Maui)
 ### Theming
 
 ```csharp
+using MintedTextEditor.Core.Theming;
+
 Editor.Theme = EditorTheme.CreateDark();
 Editor.UseSystemTheme = false;
 ```
@@ -159,6 +164,8 @@ Three icon packs are included and embedded in `MintedTextEditor.Core` — no ext
 | `ToolbarIconPack.MaterialSymbols` | Filled, Material Design paths |
 
 ```csharp
+using MintedTextEditor.Core.Toolbar;
+
 Editor.ToolbarIconPack = ToolbarIconPack.Lucide;          // default
 Editor.ToolbarIconPack = ToolbarIconPack.Heroicons;
 Editor.ToolbarIconPack = ToolbarIconPack.MaterialSymbols;
@@ -168,43 +175,45 @@ All icons are rendered with black ink and recolored at draw time using `SKColorF
 
 ### Markdown Interop
 
-#### Import Markdown
-You can load Markdown content into the editor using the `LoadMarkdown` or `AppendMarkdown` methods:
 ```csharp
 using MintedTextEditor.Core.Markdown;
 
-// Load a new document from Markdown
-var document = EditorDocumentExtensions.LoadMarkdown("# Hello World\nThis is a paragraph.");
+Editor.AppendMarkdown("## Subheading\nAnother paragraph.");
 
-// Append Markdown to an existing document
-editor.Document.AppendMarkdown("## Subheading\nAnother paragraph.");
-```
-
-#### Export Markdown
-Export the current document to a Markdown string:
-```csharp
-using MintedTextEditor.Core.Markdown;
-
-var markdown = editor.Document.GetMarkdown();
-```
-
-#### Export Options
-Customize the Markdown export behavior using the `MarkdownExportOptions` class:
-```csharp
-var options = new MarkdownExportOptions
+var markdown = Editor.GetMarkdown(new MarkdownExportOptions
 {
-    UseGfmExtensions = true, // Enable GitHub Flavored Markdown (default: true)
-    LineEnding = "\r\n"      // Customize line endings (default: "\n")
-};
-var markdown = editor.Document.GetMarkdown(options);
+    UseGfmExtensions = true, // GitHub Flavored Markdown: tables, ~~strikethrough~~ (default: true)
+    LineEnding = "\r\n"      // default: "\n"
+});
 ```
+
+### Caret drag and magnifier
+
+On touch screens, press and hold to pick up the caret and drag it; a magnifier shows the line under your finger.
+
+```csharp
+using MintedTextEditor.Core.Editing;
+
+Editor.IsMagnifierEnabled = false;                      // turn it off
+Editor.MagnifierOptions = MagnifierOptions.Android;     // or customise size, zoom, border, shadow
+```
+
+### Focus
+
+```csharp
+Editor.Focus();                      // focus the editor and show the soft keyboard
+bool focused = Editor.IsEditorFocused;
+Editor.EditorFocusChanged += (_, e) => { /* e.IsFocused */ };
+```
+
+`EditorFocusChanged` fires once per real native focus change, including a tap into the editor or focus moving to another control. The editor starts unfocused.
 
 ### Events
 
 ```csharp
 Editor.TextChanged += (_, e) => { /* document changed */ };
 Editor.SelectionChanged += (_, e) => { /* selection changed */ };
-Editor.HyperlinkClicked += (_, e) => { /* inspect/cancel open */ };
+Editor.HyperlinkClicked += (_, e) => { /* e.Url; set e.Cancel to stop the default open */ };
 ```
 
 For deeper API details, see [docs/getting-started.md](docs/getting-started.md), [docs/commands-events.md](docs/commands-events.md), and [docs/toolbar-customization.md](docs/toolbar-customization.md).
@@ -232,17 +241,14 @@ For deeper API details, see [docs/getting-started.md](docs/getting-started.md), 
 git clone https://github.com/TheEightBot/MintedTextEditor.git
 cd MintedTextEditor
 
-# Build solution
-dotnet build
-
-# Run core tests
+# Build and test the platform-independent projects (any OS)
+dotnet build src/MintedTextEditor.SkiaSharp/
 dotnet test tests/MintedTextEditor.Core.Tests/
+dotnet test tests/MintedTextEditor.SkiaSharp.Tests/
 
-# Build MAUI project (after installing MAUI workload)
+# Build MAUI project and sample app (needs the MAUI workload; iOS/Mac Catalyst need macOS)
 dotnet workload install maui
 dotnet build src/MintedTextEditor.Maui/
-
-# Build sample app
 dotnet build samples/SampleApp.Maui/
 ```
 

@@ -10,23 +10,28 @@ Document
     ├── Paragraph
     │   └── Inline[]
     │       ├── TextRun          (styled text)
-    │       ├── HyperlinkInline  (linked text)
+    │       ├── HyperlinkInline  (linked text; holds child inlines)
     │       ├── ImageInline      (embedded image)
     │       └── LineBreak        (soft line break)
     └── TableBlock
         └── TableRow[]
             └── TableCell[]
-                └── Paragraph[]
+                └── Block[]  (paragraphs)
 ```
+
+All model types live in the `MintedTextEditor.Core.Document` namespace.
 
 ## Document
 
-`Document` is the root container. It holds an ordered list of `Block` objects and owns the shared document state.
+`Document` is the root container. It holds an ordered list of `Block` objects (`Blocks`) and raises `Changed` after every mutation made through the editing APIs. A new `Document` contains one empty paragraph.
 
 ```csharp
 var doc = editor.Document;
-int blockCount = doc.Blocks.Count;
+int blockCount = doc.BlockCount;
+string plain = doc.GetText();   // blocks joined with "\n"
 ```
+
+If you change the model directly (for example `para.Style.Alignment = ...`), call `doc.NotifyChanged(...)` so the layout is refreshed; the `DocumentEditor` and formatting engine methods do this for you.
 
 ## Block
 
@@ -41,7 +46,7 @@ int blockCount = doc.Blocks.Count;
 foreach (Block block in doc.Blocks)
 {
     if (block is Paragraph para)
-        Console.WriteLine(para.PlainText);
+        Console.WriteLine(para.GetText());
     else if (block is TableBlock table)
         Console.WriteLine($"Table: {table.RowCount}×{table.ColumnCount}");
 }
@@ -58,10 +63,10 @@ var para = (Paragraph)doc.Blocks[0];
 ParagraphStyle style = para.Style;
 Console.WriteLine(style.Alignment);    // Left | Center | Right | Justify
 Console.WriteLine(style.HeadingLevel); // 0 = body, 1–6 = heading level
-Console.WriteLine(style.ListType);     // None | Bullet | Numbered
+Console.WriteLine(style.ListType);     // None | Bullet | Number
 
 // Plain text content
-string text = para.PlainText;
+string text = para.GetText();
 ```
 
 ### ParagraphStyle Properties
@@ -70,44 +75,50 @@ string text = para.PlainText;
 |---|---|---|
 | `Alignment` | `TextAlignment` | Horizontal alignment |
 | `HeadingLevel` | `int` | 0 = body text, 1–6 = H1–H6 |
-| `ListType` | `ListType` | None, Bullet, or Numbered |
+| `ListType` | `ListType` | `None`, `Bullet`, or `Number` |
 | `IndentLevel` | `int` | Indentation depth (0 = none) |
 | `LineSpacing` | `float` | Line height multiplier |
-| `SpaceBefore` | `float` | Extra space before paragraph (px) |
-| `SpaceAfter` | `float` | Extra space after paragraph (px) |
+| `SpaceBefore` | `float` | Extra space before paragraph (logical units) |
+| `SpaceAfter` | `float` | Extra space after paragraph (default 8) |
 | `IsBlockQuote` | `bool` | Renders as a block quote |
-| `Direction` | `TextDirection` | LTR or RTL |
+| `Direction` | `TextDirection` | `LeftToRight` or `RightToLeft` |
+
+`ParagraphStyle` is a mutable class; `Clone()` returns a copy.
 
 ## Inline
 
-`Inline` is the base class for all content within a paragraph. Four concrete types:
+`Inline` is the base class for all content within a paragraph. Each inline has a `Length` (in UTF-16 code units; images and line breaks count as 1) and `GetText()`. Four concrete types:
 
 ### TextRun
 
 A contiguous span of text with a single `TextStyle`.
 
 ```csharp
-var run = new TextRun("Hello, ", new TextStyle { IsBold = true });
+var run = new TextRun("Hello, ", new TextStyle(isBold: true));
 Console.WriteLine(run.Text);     // "Hello, "
 Console.WriteLine(run.Style.IsBold); // true
 ```
 
 ### HyperlinkInline
 
-A clickable inline element that wraps a `TextRun` and carries a URL.
+A clickable inline element that carries a URL (and optional `Title`) and holds its display content as child inlines.
 
 ```csharp
-var link = new HyperlinkInline("MintedTextEditor", "https://github.com/TheEightBot/MintedTextEditor");
-Console.WriteLine(link.Url);   // "https://github.com/TheEightBot/MintedTextEditor"
+var link = new HyperlinkInline("https://github.com/TheEightBot/MintedTextEditor");
+link.AddChild(new TextRun("MintedTextEditor"));
+Console.WriteLine(link.Url);       // "https://github.com/TheEightBot/MintedTextEditor"
+Console.WriteLine(link.GetText()); // "MintedTextEditor"
 ```
 
 ### ImageInline
 
-An embedded image, stored as raw bytes with optional display dimensions.
+An embedded image, referenced by a source string (URL, file path or app-package asset name) with alt text and optional display dimensions (0 = natural size).
 
 ```csharp
-var image = new ImageInline(imageBytes, width: 320, height: 240);
+var image = new ImageInline("photo.png", altText: "A photo", width: 320, height: 240);
 ```
+
+See [Images & Hyperlinks](images-hyperlinks.md) for how sources are loaded.
 
 ### LineBreak
 
@@ -119,10 +130,10 @@ var lb = new LineBreak();
 
 ## TextStyle
 
-`TextStyle` describes character-level formatting and is an **immutable value type**. All mutation returns a new instance.
+`TextStyle` describes character-level formatting and is an **immutable class**. The `With…` methods (`WithBold`, `WithItalic`, `WithUnderline`, `WithStrikethrough`, `WithSubscript`, `WithSuperscript`, `WithFontFamily`, `WithFontSize`, `WithTextColor`, `WithHighlightColor`) return a new instance; styles compare by value.
 
 ```csharp
-var style = new TextStyle();
+var style = TextStyle.Default;
 var bold = style.WithBold(true);
 var boldItalic = bold.WithItalic(true);
 ```
@@ -137,39 +148,48 @@ var boldItalic = bold.WithItalic(true);
 | `IsStrikethrough` | `bool` | `false` |
 | `IsSubscript` | `bool` | `false` |
 | `IsSuperscript` | `bool` | `false` |
-| `FontFamily` | `string?` | `null` (system default) |
-| `FontSize` | `float?` | `null` (theme default) |
-| `ForegroundColor` | `EditorColor?` | `null` (theme default) |
-| `BackgroundColor` | `EditorColor?` | `null` (none) |
+| `FontFamily` | `string` | `"Default"` (platform default family) |
+| `FontSize` | `float` | `14` |
+| `TextColor` | `EditorColor` | `EditorColor.Black` (drawn in the theme's text color) |
+| `HighlightColor` | `EditorColor` | `EditorColor.Transparent` (none) |
+| `BaselineOffset` | `float` | `0` |
+
+Subscript and superscript are mutually exclusive: `WithSubscript(true)` clears superscript and vice versa.
 
 ## DocumentEditor
 
-`DocumentEditor` is the high-level API for programmatic editing. It wraps a `Document` and exposes operations that correctly maintain invariants and return a `DocumentPosition` pointing to the resulting cursor location.
+`DocumentEditor` is a static class of low-level editing operations. They maintain the model's invariants, raise `Document.Changed`, and return a `DocumentPosition` for the resulting caret location. They are **not** recorded for undo; to make an edit undoable, push the matching action (`InsertTextAction`, `DeleteRangeAction`, `ApplyStyleAction`, … in `MintedTextEditor.Core.Editing`) to the `UndoManager`, which executes it.
 
 ```csharp
-var editor = new DocumentEditor(doc);
-
 // Insert text at a position
-var pos = new DocumentPosition(blockIndex: 0, inlineIndex: 0, charOffset: 0);
-editor.Insert(pos, "Hello, world!");
+var start = new DocumentPosition(blockIndex: 0, inlineIndex: 0, offset: 0);
+var end = DocumentEditor.InsertText(doc, start, "Hello, world!");
+var range = new TextRange(start, end);
 
-// Delete a range of characters
-editor.Delete(new TextRange(start, end));
+// Apply character or paragraph formatting over a range
+DocumentEditor.ApplyTextStyle(doc, range, s => s.WithBold(true));
+DocumentEditor.ApplyParagraphStyle(doc, range, s => s.Alignment = TextAlignment.Center);
 
-// Apply character formatting over a range
-editor.ApplyStyle(range, s => s.WithBold(true));
+// Delete a range
+DocumentEditor.DeleteRange(doc, range);
+
+// Undoable equivalent
+editor.UndoManager.Push(new InsertTextAction(doc, start, "Hello"));
 ```
+
+Other members: `SplitBlock`, `MergeBlocks`, `GetSelectedText`, `NormalizePosition`.
 
 ## DocumentPosition
 
-`DocumentPosition` identifies a location within the document by block index, inline index, and character offset.
+`DocumentPosition` is a struct that identifies a location within the document by block index, inline index, and offset within that inline. Positions inside a table cell also carry `CellRow` and `CellCol` (`IsInTableCell` is then `true`). `TextRange` pairs two positions and always stores them in order (`Start <= End`).
 
 ```csharp
-var pos = new DocumentPosition(blockIndex: 0, inlineIndex: 0, charOffset: 5);
+var pos = new DocumentPosition(blockIndex: 0, inlineIndex: 0, offset: 5);
+var selection = editor.Selection.Range;   // TextRange
 ```
 
 ## TableBlock
 
-`TableBlock` contains a rectangular grid of cells. Each cell contains one or more `Paragraph` blocks, allowing rich content within table cells.
+`TableBlock` contains a grid of rows (`Rows`) and cells (`TableRow.Cells`). Each `TableCell` holds a list of blocks (`Blocks`), normally paragraphs, so cells can contain formatted text.
 
-See [docs/tables.md](tables.md) for the full table API.
+See [Tables](tables.md) for the full table API.

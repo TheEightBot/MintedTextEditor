@@ -110,3 +110,7 @@ nCrunchTemp_*
 coverage/
 *.coverage
 *.coveragexml
+
+## ---------- Claude Code ----------
+.claude/worktrees/
+.claude/settings.local.json

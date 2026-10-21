@@ -109,9 +109,9 @@ public static class HyperlinkEngine
     // ── Auto-detect ───────────────────────────────────────────────────
 
     /// <summary>
-    /// Scans the most-recently-typed word in <paramref name="paragraph"/>
-    /// ending at <paramref name="caretOffset"/> for a URL pattern.  When a
-    /// URL is found, wraps it in a <see cref="HyperlinkInline"/> and returns
+    /// Scans the most-recently-typed word in the paragraph at <paramref name="blockIndex"/>,
+    /// ending at <paramref name="caretOffset"/> within the inline at <paramref name="caretInlineIndex"/>,
+    /// for a URL pattern. When a URL is found, wraps it in a <see cref="HyperlinkInline"/> and returns
     /// the hyperlink; otherwise returns <see langword="null"/>.
     ///
     /// Call this after inserting a space/newline character (word-commit).
