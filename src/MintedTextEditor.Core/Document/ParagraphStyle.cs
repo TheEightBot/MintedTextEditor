@@ -38,12 +38,46 @@ public class ParagraphStyle
     public TextAlignment Alignment { get; set; } = TextAlignment.Left;
     /// <summary>Number of indentation levels applied to the paragraph.</summary>
     public int IndentLevel { get; set; }
-    /// <summary>Line height multiplier (1.0 = single spacing).</summary>
-    public float LineSpacing { get; set; } = 1.0f;
+    // Null until set, so layout can tell an explicit value from the default and fall back
+    // to the theme's spacing (see TextLayoutEngine.DefaultLineSpacing / DefaultParagraphSpacing).
+    private float? _lineSpacing;
+    private float? _spaceAfter;
+
+    /// <summary>
+    /// Line height multiplier (1.0 = single spacing). Defaults to 1.0. Setting it, even to 1.0,
+    /// makes the paragraph ignore the theme's extra line spacing.
+    /// </summary>
+    public float LineSpacing
+    {
+        get => _lineSpacing ?? 1.0f;
+        set => _lineSpacing = value;
+    }
+
+    /// <summary>
+    /// <c>true</c> when <see cref="LineSpacing"/> has been set explicitly; <c>false</c> when the
+    /// layout uses the theme's line spacing for this paragraph.
+    /// </summary>
+    public bool IsLineSpacingSet => _lineSpacing.HasValue;
+
     /// <summary>Extra space above the paragraph, in pixels.</summary>
     public float SpaceBefore { get; set; }
-    /// <summary>Extra space below the paragraph, in pixels.</summary>
-    public float SpaceAfter { get; set; } = 8f;
+
+    /// <summary>
+    /// Extra space below the paragraph, in pixels. Defaults to 8. While it has not been set,
+    /// the layout uses the theme's paragraph spacing instead (8 in the built-in themes).
+    /// </summary>
+    public float SpaceAfter
+    {
+        get => _spaceAfter ?? 8f;
+        set => _spaceAfter = value;
+    }
+
+    /// <summary>
+    /// <c>true</c> when <see cref="SpaceAfter"/> has been set explicitly; <c>false</c> when the
+    /// layout uses the theme's paragraph spacing for this paragraph.
+    /// </summary>
+    public bool IsSpaceAfterSet => _spaceAfter.HasValue;
+
     /// <summary>The list type of the paragraph.</summary>
     public ListType ListType { get; set; } = ListType.None;
 
@@ -61,9 +95,9 @@ public class ParagraphStyle
     {
         Alignment = Alignment,
         IndentLevel = IndentLevel,
-        LineSpacing = LineSpacing,
+        _lineSpacing = _lineSpacing,
         SpaceBefore = SpaceBefore,
-        SpaceAfter = SpaceAfter,
+        _spaceAfter = _spaceAfter,
         ListType = ListType,
         HeadingLevel = HeadingLevel,
         Direction = Direction,

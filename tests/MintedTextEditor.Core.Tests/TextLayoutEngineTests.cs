@@ -222,6 +222,120 @@ public class TextLayoutEngineTests
             "Paragraph with spacing should be taller");
     }
 
+    // ── Theme spacing defaults ───────────────────────────────────
+
+    private static Paragraph TwoLineParagraph()
+    {
+        var para = new Paragraph("First");
+        para.AddInline(new LineBreak());
+        para.AppendRun("Second");
+        return para;
+    }
+
+    [Fact]
+    public void Layout_UnsetSpaceAfter_UsesDefaultParagraphSpacing()
+    {
+        var para = new Paragraph("Text");
+        var doc = new EditorDocument(new Block[] { para });
+
+        float lineHeight = _engine.Layout(doc, 500f, _ctx).Blocks[0].Lines[0].Height;
+        _engine.DefaultParagraphSpacing = 20f;
+        var block = _engine.Layout(doc, 500f, _ctx).Blocks[0];
+
+        Assert.False(para.Style.IsSpaceAfterSet);
+        Assert.Equal(lineHeight + 20f, block.TotalHeight);
+    }
+
+    [Fact]
+    public void Layout_ExplicitSpaceAfter_WinsOverDefaultParagraphSpacing()
+    {
+        var para = new Paragraph("Text");
+        para.Style.SpaceAfter = 3f;
+        var doc = new EditorDocument(new Block[] { para });
+        _engine.DefaultParagraphSpacing = 20f;
+
+        var block = _engine.Layout(doc, 500f, _ctx).Blocks[0];
+
+        Assert.Equal(block.Lines[0].Height + 3f, block.TotalHeight);
+    }
+
+    [Fact]
+    public void Layout_ExplicitSpaceAfterEqualToDefault_StillWins()
+    {
+        var para = new Paragraph("Text");
+        para.Style.SpaceAfter = 8f; // same as the default, but set: the theme no longer applies
+        var doc = new EditorDocument(new Block[] { para });
+        _engine.DefaultParagraphSpacing = 20f;
+
+        var block = _engine.Layout(doc, 500f, _ctx).Blocks[0];
+
+        Assert.True(para.Style.IsSpaceAfterSet);
+        Assert.Equal(block.Lines[0].Height + 8f, block.TotalHeight);
+    }
+
+    [Fact]
+    public void Layout_DefaultLineSpacing_AddsGapBetweenLinesOnly()
+    {
+        var doc = new EditorDocument(new Block[] { TwoLineParagraph() });
+        _engine.DefaultLineSpacing = 5f;
+
+        var block = _engine.Layout(doc, 500f, _ctx).Blocks[0];
+
+        Assert.Equal(2, block.Lines.Count);
+        Assert.Equal(0f, block.Lines[0].Y);
+        Assert.Equal(block.Lines[0].Height + 5f, block.Lines[1].Y);
+        // No gap after the last line: only the paragraph spacing (8) follows it.
+        Assert.Equal(block.Lines[1].Y + block.Lines[1].Height + 8f, block.TotalHeight);
+    }
+
+    [Fact]
+    public void Layout_ExplicitLineSpacing_IgnoresDefaultLineSpacing()
+    {
+        var para = TwoLineParagraph();
+        para.Style.LineSpacing = 1.0f;
+        var doc = new EditorDocument(new Block[] { para });
+        _engine.DefaultLineSpacing = 5f;
+
+        var block = _engine.Layout(doc, 500f, _ctx).Blocks[0];
+
+        Assert.True(para.Style.IsLineSpacingSet);
+        Assert.Equal(block.Lines[0].Height, block.Lines[1].Y);
+    }
+
+    [Theory]
+    [InlineData(MintedTextEditor.Core.Theming.EditorThemeMode.Light)]
+    [InlineData(MintedTextEditor.Core.Theming.EditorThemeMode.Dark)]
+    [InlineData(MintedTextEditor.Core.Theming.EditorThemeMode.HighContrast)]
+    public void Layout_BuiltInThemeSpacing_MatchesUnthemedLayout(MintedTextEditor.Core.Theming.EditorThemeMode mode)
+    {
+        var theme = MintedTextEditor.Core.Theming.EditorTheme.Create(mode);
+        var doc = new EditorDocument(new Block[] { TwoLineParagraph(), new Paragraph("Next") });
+
+        var unthemed = new TextLayoutEngine().Layout(doc, 500f, _ctx);
+        var themed = new TextLayoutEngine
+        {
+            DefaultLineSpacing = theme.LineSpacing,
+            DefaultParagraphSpacing = theme.ParagraphSpacing,
+        }.Layout(doc, 500f, _ctx);
+
+        Assert.Equal(unthemed.TotalHeight, themed.TotalHeight);
+        Assert.Equal(unthemed.Blocks[0].Lines[1].Y, themed.Blocks[0].Lines[1].Y);
+    }
+
+    [Fact]
+    public void ParagraphStyle_Clone_KeepsWhetherSpacingWasSet()
+    {
+        var unset = new ParagraphStyle().Clone();
+        var set = new ParagraphStyle { LineSpacing = 1.5f, SpaceAfter = 8f }.Clone();
+
+        Assert.False(unset.IsLineSpacingSet);
+        Assert.False(unset.IsSpaceAfterSet);
+        Assert.True(set.IsLineSpacingSet);
+        Assert.True(set.IsSpaceAfterSet);
+        Assert.Equal(1.5f, set.LineSpacing);
+        Assert.Equal(8f, set.SpaceAfter);
+    }
+
     // ── TotalHeight ──────────────────────────────────────────────
 
     [Fact]

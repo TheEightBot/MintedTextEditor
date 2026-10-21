@@ -46,6 +46,36 @@ public static class DocumentHitTester
     /// Finds the block at the given Y coordinate.
     /// If Y is below all blocks, returns the last block and sets isAfterLastBlock = true.
     /// </summary>
+    /// <summary>
+    /// Returns the hyperlink whose text lies under the point, or <c>null</c>. Unlike
+    /// <see cref="HitTest"/> this does not snap to the nearest position: the point must be
+    /// inside a link run's box. Coordinates are in document space, as for <see cref="HitTest"/>.
+    /// Links inside table cells are not found.
+    /// </summary>
+    public static HyperlinkInline? HitTestHyperlink(float x, float y, DocumentLayout layout)
+    {
+        foreach (var block in layout.Blocks)
+        {
+            if (y < block.Y || y >= block.Y + block.TotalHeight) continue;
+
+            foreach (var line in block.Lines)
+            {
+                float top = block.Y + line.Y;
+                if (y < top || y >= top + line.Height) continue;
+
+                foreach (var run in line.Runs)
+                {
+                    if (run.SourceInline is HyperlinkInline link && x >= run.X && x < run.X + run.Width)
+                        return link;
+                }
+            }
+
+            return null;
+        }
+
+        return null;
+    }
+
     private static LayoutBlock? FindBlockAtY(float y, DocumentLayout layout, out bool isAfterLastBlock)
     {
         isAfterLastBlock = false;
