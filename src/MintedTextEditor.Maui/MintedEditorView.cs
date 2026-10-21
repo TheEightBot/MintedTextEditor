@@ -1108,7 +1108,7 @@ public class MintedEditorView : ContentView
             }
 
             // Prefer app-package assets, then fall back to absolute/relative file paths.
-            if (!source.Contains('/') && !source.Contains('\\'))
+            if (bmp is null && !source.Contains('/') && !source.Contains('\\'))
             {
                 try
                 {
