@@ -19,6 +19,9 @@ public class FontFormattingEngine
     /// <summary>The caret position where <see cref="PendingStyle"/> was chosen, or null when there is none.</summary>
     public DocumentPosition? PendingStylePosition { get; private set; }
 
+    // Where the pending style was chosen, as a paragraph and character offset taken when it was chosen.
+    private PendingStyleAnchor? _pendingAnchor;
+
     /// <summary>
     /// Discards <see cref="PendingStyle"/> unless <paramref name="selection"/> is still the collapsed
     /// caret where it was chosen, so a pending style applies only at that caret.
@@ -27,20 +30,21 @@ public class FontFormattingEngine
     /// <param name="selection">The current selection.</param>
     public void DiscardPendingStyleIfMoved(Document.Document doc, TextRange selection)
     {
-        if (PendingStyle is not null && !FormattingEngine.IsCaretAt(doc, selection, PendingStylePosition))
-            SetPendingStyle(null, null);
+        if (PendingStyle is not null && !PendingStyleAnchor.IsCaretAt(doc, selection, _pendingAnchor))
+            SetPendingStyle(doc, null, null);
     }
 
     /// <summary>Re-anchors the pending style at <paramref name="position"/> (an edit such as Enter carried it there).</summary>
-    internal void MovePendingStyleTo(DocumentPosition position)
+    internal void MovePendingStyleTo(Document.Document doc, DocumentPosition position)
     {
-        if (PendingStyle is not null) PendingStylePosition = position;
+        if (PendingStyle is not null) SetPendingStyle(doc, PendingStyle, position);
     }
 
-    private void SetPendingStyle(TextStyle? style, DocumentPosition? position)
+    private void SetPendingStyle(Document.Document doc, TextStyle? style, DocumentPosition? position)
     {
         PendingStyle = style;
         PendingStylePosition = style is null ? null : position;
+        _pendingAnchor = style is not null && position is { } p ? PendingStyleAnchor.At(doc, p) : null;
     }
 
     // ── Apply API ─────────────────────────────────────────────────────
@@ -71,7 +75,9 @@ public class FontFormattingEngine
     public TextStyle? ConsumePendingStyle()
     {
         var style = PendingStyle;
-        SetPendingStyle(null, null);
+        PendingStyle = null;
+        PendingStylePosition = null;
+        _pendingAnchor = null;
         return style;
     }
 
@@ -141,7 +147,7 @@ public class FontFormattingEngine
         {
             DiscardPendingStyleIfMoved(doc, range);
             var baseStyle = PendingStyle ?? DocumentEditor.GetInsertionStyle(doc, range.Start);
-            SetPendingStyle(transform(baseStyle), range.Start);
+            SetPendingStyle(doc, transform(baseStyle), range.Start);
             return;
         }
 

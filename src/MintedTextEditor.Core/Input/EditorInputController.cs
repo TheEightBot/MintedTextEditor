@@ -606,8 +606,8 @@ public class EditorInputController
         _caret.MoveTo(newPos);
 
         // A pending style picked before Enter applies to the text typed in the new paragraph.
-        FormattingEngine?.MovePendingStyleTo(newPos);
-        FontFormattingEngine?.MovePendingStyleTo(newPos);
+        FormattingEngine?.MovePendingStyleTo(document, newPos);
+        FontFormattingEngine?.MovePendingStyleTo(document, newPos);
     }
 
     // ── IME support ───────────────────────────────────────────────────

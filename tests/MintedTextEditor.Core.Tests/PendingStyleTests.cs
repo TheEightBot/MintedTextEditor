@@ -174,6 +174,65 @@ public class PendingStyleTests
         Assert.False(style.IsBold);
     }
 
+    // ── Review regressions ───────────────────────────────────────────
+
+    [Fact]
+    public void PendingBold_PickedWithTextRangeEmpty_AppliesAtInitialCaret()
+    {
+        var e = Setup(null, Para(("Hello", TextStyle.Default)));
+        e.Fmt.ToggleBold(e.Doc, TextRange.Empty);
+        e.FontFmt.ApplyFontSize(e.Doc, TextRange.Empty, 30f);
+
+        e.Ctrl.HandleTextInput("X", e.Doc); // the caret starts at the origin
+
+        var style = RunContaining(e.Doc, "X").Style;
+        Assert.True(style.IsBold);
+        Assert.Equal(30f, style.FontSize);
+    }
+
+    [Fact]
+    public void PendingBold_PickedWithDefaultRange_AppliesAtInitialCaret()
+    {
+        var e = Setup(null, Para(("Hello", TextStyle.Default)));
+        e.Fmt.ToggleBold(e.Doc, default);
+
+        e.Ctrl.HandleTextInput("X", e.Doc);
+
+        Assert.True(RunContaining(e.Doc, "X").Style.IsBold);
+    }
+
+    [Fact]
+    public void PendingBold_InTableCell_DiscardedInAnotherCellAtSameOffset()
+    {
+        var e = Setup(null, new TableBlock(1, 2));
+        var cell0 = new DocumentPosition(0, 0, 0, 0, 0);
+        PlaceCaret(e, cell0);
+        Key(e, EditorKey.B, InputModifiers.Control);
+
+        PlaceCaret(e, new DocumentPosition(0, 0, 0, 0, 1));
+        e.Ctrl.HandleTextInput("X", e.Doc);
+
+        var cell = ((TableBlock)e.Doc.Blocks[0]).GetCell(0, 1)!;
+        var run = ((Paragraph)cell.Blocks[0]).Inlines.OfType<TextRun>().Single();
+        Assert.Equal("X", run.Text);
+        Assert.False(run.Style.IsBold);
+    }
+
+    [Fact]
+    public void PendingBold_BackspaceAtRunEnd_DiscardsPendingStyle()
+    {
+        var e = Setup(null, Para(("Hello", TextStyle.Default)));
+        PlaceCaret(e, new DocumentPosition(0, 0, 5));
+        Key(e, EditorKey.B, InputModifiers.Control);
+
+        Key(e, EditorKey.Backspace);
+        Assert.Null(e.Fmt.PendingStyle);
+        e.Ctrl.HandleTextInput("X", e.Doc);
+
+        Assert.Equal("HellX", e.Doc.GetText());
+        Assert.False(RunContaining(e.Doc, "X").Style.IsBold);
+    }
+
     [Fact]
     public void Toolbar_PendingBold_AfterCaretMoved_ShowsBoldInactive()
     {
