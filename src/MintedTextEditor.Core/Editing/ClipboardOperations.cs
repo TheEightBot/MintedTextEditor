@@ -29,7 +29,8 @@ public static class ClipboardOperations
 
     /// <summary>
     /// Pastes plain text from the clipboard at <paramref name="position"/>.
-    /// Replaces <paramref name="selectionRange"/> if it is not empty.
+    /// Replaces <paramref name="selectionRange"/> if it is not empty. The text gets the style typing
+    /// would inherit there (see <see cref="DocumentEditor.GetInsertionStyle"/>).
     /// Returns the caret position after the paste, or null if the clipboard was empty.
     /// </summary>
     public static async Task<DocumentPosition?> PasteAsync(
@@ -45,6 +46,6 @@ public static class ClipboardOperations
         if (!selectionRange.IsEmpty)
             insertPos = DocumentEditor.DeleteRange(document, selectionRange);
 
-        return DocumentEditor.InsertText(document, insertPos, text);
+        return DocumentEditor.InsertText(document, insertPos, text, DocumentEditor.GetInsertionStyle(document, insertPos));
     }
 }

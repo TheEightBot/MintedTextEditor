@@ -10,9 +10,49 @@ public class FormattingEngine
 {
     /// <summary>
     /// Style to apply on the next text insert when the caret is collapsed and the
-    /// user has toggled a format with no selection.  Consumed after one use.
+    /// user has toggled a format with no selection.  Consumed after one use, and discarded
+    /// when the caret moves away (see <see cref="DiscardPendingStyleIfMoved"/>).
     /// </summary>
     public TextStyle? PendingStyle { get; private set; }
+
+    /// <summary>The caret position where <see cref="PendingStyle"/> was chosen, or null when there is none.</summary>
+    public DocumentPosition? PendingStylePosition { get; private set; }
+
+    /// <summary>
+    /// Discards <see cref="PendingStyle"/> unless <paramref name="selection"/> is still the collapsed
+    /// caret where it was chosen, so a pending style applies only at that caret.
+    /// </summary>
+    /// <param name="doc">The document.</param>
+    /// <param name="selection">The current selection.</param>
+    public void DiscardPendingStyleIfMoved(Document.Document doc, TextRange selection)
+    {
+        if (PendingStyle is not null && !IsCaretAt(doc, selection, PendingStylePosition))
+            SetPendingStyle(null, null);
+    }
+
+    /// <summary>Re-anchors the pending style at <paramref name="position"/> (an edit such as Enter carried it there).</summary>
+    internal void MovePendingStyleTo(DocumentPosition position)
+    {
+        if (PendingStyle is not null) PendingStylePosition = position;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="selection"/> is a collapsed caret at the same spot as <paramref name="position"/>
+    /// (same paragraph and character offset, however the position is split across inlines).
+    /// </summary>
+    internal static bool IsCaretAt(Document.Document doc, TextRange selection, DocumentPosition? position)
+    {
+        if (position is not { } p || !selection.IsEmpty) return false;
+        var caret = selection.Start;
+        return caret.BlockIndex == p.BlockIndex && caret.CellRow == p.CellRow && caret.CellCol == p.CellCol
+            && DocumentEditor.GetAbsoluteCharOffset(doc, caret) == DocumentEditor.GetAbsoluteCharOffset(doc, p);
+    }
+
+    private void SetPendingStyle(TextStyle? style, DocumentPosition? position)
+    {
+        PendingStyle = style;
+        PendingStylePosition = style is null ? null : position;
+    }
 
     // ── Public toggle API ─────────────────────────────────────────────
 
@@ -66,7 +106,7 @@ public class FormattingEngine
     {
         if (range.IsEmpty)
         {
-            PendingStyle = TextStyle.Default;
+            SetPendingStyle(TextStyle.Default, range.Start);
             return;
         }
         DocumentEditor.ApplyTextStyle(doc, range, _ => TextStyle.Default);
@@ -79,7 +119,7 @@ public class FormattingEngine
     public TextStyle? ConsumePendingStyle()
     {
         var style = PendingStyle;
-        PendingStyle = null;
+        SetPendingStyle(null, null);
         return style;
     }
 
@@ -122,8 +162,9 @@ public class FormattingEngine
             // No selection: update pending style so the next typed character picks it up.
             // Start from the style the caret would otherwise type with, so toggling bold off
             // inside bold text really turns it off and other formatting is kept.
+            DiscardPendingStyleIfMoved(doc, range);
             var baseStyle = PendingStyle ?? DocumentEditor.GetInsertionStyle(doc, range.Start);
-            PendingStyle = setter(baseStyle, !getter(baseStyle));
+            SetPendingStyle(setter(baseStyle, !getter(baseStyle)), range.Start);
             return;
         }
 

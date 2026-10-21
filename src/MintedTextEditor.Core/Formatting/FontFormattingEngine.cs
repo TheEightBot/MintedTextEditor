@@ -11,9 +11,37 @@ public class FontFormattingEngine
 {
     /// <summary>
     /// Style to apply on the next text insert when the caret is collapsed and font settings
-    /// are changed with no active selection.
+    /// are changed with no active selection. Discarded when the caret moves away
+    /// (see <see cref="DiscardPendingStyleIfMoved"/>).
     /// </summary>
     public TextStyle? PendingStyle { get; private set; }
+
+    /// <summary>The caret position where <see cref="PendingStyle"/> was chosen, or null when there is none.</summary>
+    public DocumentPosition? PendingStylePosition { get; private set; }
+
+    /// <summary>
+    /// Discards <see cref="PendingStyle"/> unless <paramref name="selection"/> is still the collapsed
+    /// caret where it was chosen, so a pending style applies only at that caret.
+    /// </summary>
+    /// <param name="doc">The document.</param>
+    /// <param name="selection">The current selection.</param>
+    public void DiscardPendingStyleIfMoved(Document.Document doc, TextRange selection)
+    {
+        if (PendingStyle is not null && !FormattingEngine.IsCaretAt(doc, selection, PendingStylePosition))
+            SetPendingStyle(null, null);
+    }
+
+    /// <summary>Re-anchors the pending style at <paramref name="position"/> (an edit such as Enter carried it there).</summary>
+    internal void MovePendingStyleTo(DocumentPosition position)
+    {
+        if (PendingStyle is not null) PendingStylePosition = position;
+    }
+
+    private void SetPendingStyle(TextStyle? style, DocumentPosition? position)
+    {
+        PendingStyle = style;
+        PendingStylePosition = style is null ? null : position;
+    }
 
     // ── Apply API ─────────────────────────────────────────────────────
 
@@ -43,7 +71,7 @@ public class FontFormattingEngine
     public TextStyle? ConsumePendingStyle()
     {
         var style = PendingStyle;
-        PendingStyle = null;
+        SetPendingStyle(null, null);
         return style;
     }
 
@@ -111,8 +139,9 @@ public class FontFormattingEngine
     {
         if (range.IsEmpty)
         {
+            DiscardPendingStyleIfMoved(doc, range);
             var baseStyle = PendingStyle ?? DocumentEditor.GetInsertionStyle(doc, range.Start);
-            PendingStyle = transform(baseStyle);
+            SetPendingStyle(transform(baseStyle), range.Start);
             return;
         }
 
