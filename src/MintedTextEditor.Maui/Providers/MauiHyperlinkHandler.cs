@@ -7,6 +7,11 @@ namespace MintedTextEditor.Maui.Providers;
 /// </summary>
 public sealed class MauiHyperlinkHandler : IHyperlinkHandler
 {
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A URL that is not a valid absolute URI is retried with <c>https://</c> prepended. Blank or unparseable
+    /// URLs and launcher failures are ignored.
+    /// </remarks>
     public async void OpenUrl(string url)
     {
         if (string.IsNullOrWhiteSpace(url)) return;

@@ -4,16 +4,28 @@ using MintedTextEditor.Core.Rendering;
 namespace MintedTextEditor.Core.Toolbar;
 
 /// <summary>Layout behaviour when toolbar items overflow available width.</summary>
-public enum ToolbarLayoutMode { Wrap, Scroll, Overflow }
+public enum ToolbarLayoutMode
+{
+    /// <summary>Wrap items onto additional rows, up to <see cref="ToolbarDefinition.MaxRows"/>.</summary>
+    Wrap,
+    /// <summary>Keep all items on a single row without wrapping.</summary>
+    Scroll,
+    /// <summary>Wrap like <see cref="Wrap"/>; items beyond <see cref="ToolbarDefinition.MaxRows"/> rows move to the overflow (…) panel.</summary>
+    Overflow
+}
 
 // ── Base ─────────────────────────────────────────────────────────────────────
 
 /// <summary>Abstract base for all toolbar elements.</summary>
 public abstract class ToolbarItem
 {
+    /// <summary>Text shown when no icon is drawn; for a dropdown, shown while nothing is selected.</summary>
     public string Label     { get; set; } = "";
+    /// <summary>Icon key (for example "bold") used to look up a vector or image icon.</summary>
     public string Icon      { get; set; } = "";
+    /// <summary>Whether the item is enabled. Disabled items are drawn in the disabled color.</summary>
     public bool   IsEnabled { get; set; } = true;
+    /// <summary>Whether the item is laid out and drawn. Hidden items take no space.</summary>
     public bool   IsVisible { get; set; } = true;
 }
 
@@ -22,6 +34,7 @@ public abstract class ToolbarItem
 /// <summary>A clickable button optionally associated with an <see cref="IEditorCommand"/>.</summary>
 public sealed class ToolbarButton : ToolbarItem
 {
+    /// <summary>Command executed when the button is tapped, or null if none.</summary>
     public IEditorCommand? Command  { get; set; }
     /// <summary>When true the button represents a toggle (e.g. Bold).</summary>
     public bool IsToggle { get; set; }
@@ -35,16 +48,22 @@ public sealed class ToolbarSeparator : ToolbarItem { }
 /// <summary>A drop-down selector (font family, font size, heading level, …).</summary>
 public sealed class ToolbarDropdown : ToolbarItem
 {
+    /// <summary>Options shown in the drop-down list.</summary>
     public IList<string> Items           { get; set; } = new List<string>();
+    /// <summary>Index of the selected option in <see cref="Items"/>, or -1 for none.</summary>
     public int           SelectedIndex   { get; set; } = -1;
+    /// <summary>Called with the new index when the user picks an option.</summary>
     public Action<int>?  OnSelectionChanged { get; set; }
 }
 
 /// <summary>A colour-swatch grid picker (text colour, highlight colour, …).</summary>
 public sealed class ToolbarColorPicker : ToolbarItem
 {
+    /// <summary>Swatches offered by the picker. Defaults to ten basic colors.</summary>
     public IList<EditorColor>   Colors          { get; set; } = CreateDefaultColors();
+    /// <summary>Currently selected color, shown on the picker button.</summary>
     public EditorColor          SelectedColor   { get; set; }
+    /// <summary>Called with the chosen color when the user picks a swatch.</summary>
     public Action<EditorColor>? OnColorSelected { get; set; }
 
     private static List<EditorColor> CreateDefaultColors() => new()
@@ -67,7 +86,9 @@ public sealed class ToolbarColorPicker : ToolbarItem
 /// <summary>Logical grouping of toolbar items rendered together.</summary>
 public sealed class ToolbarGroup
 {
+    /// <summary>Name identifying the group.</summary>
     public string            Name  { get; set; } = "";
+    /// <summary>Items in the group, in display order.</summary>
     public IList<ToolbarItem> Items { get; set; } = new List<ToolbarItem>();
 }
 
@@ -79,7 +100,9 @@ public sealed class ToolbarGroup
 /// </summary>
 public sealed class ToolbarDefinition
 {
+    /// <summary>Groups in display order.</summary>
     public IList<ToolbarGroup> Groups     { get; set; } = new List<ToolbarGroup>();
+    /// <summary>How items are laid out when they exceed the available width. Defaults to <see cref="ToolbarLayoutMode.Wrap"/>.</summary>
     public ToolbarLayoutMode   LayoutMode { get; set; } = ToolbarLayoutMode.Wrap;
 
     /// <summary>

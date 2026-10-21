@@ -29,6 +29,9 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
     // lookup for fonts already seen this frame.
     private readonly Dictionary<SKFont, HarfBuzzTextShaper?> _shaperCache = new();
 
+    /// <summary>Creates a drawing context that draws onto <paramref name="canvas"/>.</summary>
+    /// <param name="canvas">Canvas to draw onto.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="canvas"/> is null.</exception>
     public SkiaDrawingContext(SKCanvas canvas)
     {
         _canvas = canvas ?? throw new ArgumentNullException(nameof(canvas));
@@ -36,24 +39,28 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
     // ── Rectangles ───────────────────────────────────────────────
 
+    /// <inheritdoc/>
     public void DrawRect(EditorRect rect, EditorPaint paint)
     {
         var skPaint = GetOrCreatePaint(paint, SKPaintStyle.Stroke);
         _canvas.DrawRect(ToSKRect(rect), skPaint);
     }
 
+    /// <inheritdoc/>
     public void FillRect(EditorRect rect, EditorPaint paint)
     {
         var skPaint = GetOrCreatePaint(paint, SKPaintStyle.Fill);
         _canvas.DrawRect(ToSKRect(rect), skPaint);
     }
 
+    /// <inheritdoc/>
     public void DrawRoundRect(EditorRect rect, float cornerRadius, EditorPaint paint)
     {
         var skPaint = GetOrCreatePaint(paint, SKPaintStyle.Stroke);
         _canvas.DrawRoundRect(ToSKRect(rect), cornerRadius, cornerRadius, skPaint);
     }
 
+    /// <inheritdoc/>
     public void FillRoundRect(EditorRect rect, float cornerRadius, EditorPaint paint)
     {
         var skPaint = GetOrCreatePaint(paint, SKPaintStyle.Fill);
@@ -62,6 +69,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
     // ── Lines ────────────────────────────────────────────────────
 
+    /// <inheritdoc/>
     public void DrawLine(float x1, float y1, float x2, float y2, EditorPaint paint)
     {
         var skPaint = GetOrCreatePaint(paint, SKPaintStyle.Stroke);
@@ -70,6 +78,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
     // ── Text ─────────────────────────────────────────────────────
 
+    /// <inheritdoc/>
     public void DrawText(string text, float x, float y, EditorPaint paint)
     {
         if (string.IsNullOrEmpty(text)) return;
@@ -79,6 +88,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         DrawSegmented(text, x, y, skFont, skPaint, paint);
     }
 
+    /// <inheritdoc/>
     public void DrawTextInRect(string text, EditorRect rect, EditorPaint paint,
         TextAlignment hAlign = TextAlignment.Left,
         VerticalAlignment vAlign = VerticalAlignment.Center,
@@ -134,6 +144,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
     // ── Text measuring ───────────────────────────────────────────
 
+    /// <inheritdoc/>
     public EditorSize MeasureText(string text, EditorPaint paint)
     {
         if (string.IsNullOrEmpty(text)) return EditorSize.Empty;
@@ -189,6 +200,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         return shaped?.CaretOffset(index) ?? font.MeasureText(StripZeroWidthFormatting(text[..index]), paint);
     }
 
+    /// <inheritdoc/>
     public EditorFontMetrics GetFontMetrics(EditorPaint paint)
     {
         var skFont = GetOrCreateFont(paint);
@@ -198,21 +210,25 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
     // ── Clipping & transforms ────────────────────────────────────
 
+    /// <inheritdoc/>
     public void ClipRect(EditorRect rect)
     {
         _canvas.ClipRect(ToSKRect(rect));
     }
 
+    /// <inheritdoc/>
     public void Save()
     {
         _canvas.Save();
     }
 
+    /// <inheritdoc/>
     public void Restore()
     {
         _canvas.Restore();
     }
 
+    /// <inheritdoc/>
     public void Translate(float dx, float dy)
     {
         _canvas.Translate(dx, dy);
@@ -233,6 +249,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
     // ── Images ───────────────────────────────────────────────────
 
+    /// <inheritdoc/>
     public void DrawImage(object image, EditorRect destRect)
     {
         // Use a high-quality sampling paint so bitmaps are never blurry when the
@@ -817,6 +834,8 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
 
     // ── Disposal ─────────────────────────────────────────────────
 
+    /// <inheritdoc/>
+    /// <remarks>Disposes the paints, fonts and typefaces cached by this context. The canvas is not disposed.</remarks>
     public void Dispose()
     {
         foreach (var paint in _paintCache.Values)

@@ -106,7 +106,7 @@ public class MintedEditorView : ContentView
 
     // ── Bindable Properties ──────────────────────────────────────────────────────
 
-    /// <summary>Visual theme applied to the editor.</summary>
+    /// <summary>Bindable property for <see cref="Theme"/>.</summary>
     public static readonly BindableProperty ThemeProperty =
         BindableProperty.Create(
             nameof(Theme),
@@ -123,7 +123,7 @@ public class MintedEditorView : ContentView
                 v.InvalidateCanvas();
             });
 
-    /// <summary>Selected built-in theme mode used when <see cref="UseSystemTheme"/> is false.</summary>
+    /// <summary>Bindable property for <see cref="ThemeMode"/>.</summary>
     public static readonly BindableProperty ThemeModeProperty =
         BindableProperty.Create(
             nameof(ThemeMode),
@@ -137,9 +137,7 @@ public class MintedEditorView : ContentView
                 v.InvalidateCanvas();
             });
 
-    /// <summary>
-    /// When true, the editor automatically uses light/dark built-in themes based on system app theme.
-    /// </summary>
+    /// <summary>Bindable property for <see cref="UseSystemTheme"/>.</summary>
     public static readonly BindableProperty UseSystemThemeProperty =
         BindableProperty.Create(
             nameof(UseSystemTheme),
@@ -148,7 +146,7 @@ public class MintedEditorView : ContentView
             false,
             propertyChanged: static (b, _, _) => ((MintedEditorView)b).InvalidateCanvas());
 
-    /// <summary>Whether the editor is read-only (disables caret and text input).</summary>
+    /// <summary>Bindable property for <see cref="IsReadOnly"/>.</summary>
     public static readonly BindableProperty IsReadOnlyProperty =
         BindableProperty.Create(
             nameof(IsReadOnly),
@@ -165,7 +163,7 @@ public class MintedEditorView : ContentView
                 v.InvalidateCanvas();
             });
 
-    /// <summary>Placeholder text shown when the document is empty.</summary>
+    /// <summary>Bindable property for <see cref="PlaceholderText"/>.</summary>
     public static readonly BindableProperty PlaceholderTextProperty =
         BindableProperty.Create(
             nameof(PlaceholderText),
@@ -174,37 +172,51 @@ public class MintedEditorView : ContentView
             "Start typing…",
             propertyChanged: static (b, _, _) => ((MintedEditorView)b).InvalidateCanvas());
 
+    /// <summary>
+    /// Visual theme applied to the editor. Defaults to the built-in light theme.
+    /// Assigning a theme sets <see cref="UseSystemTheme"/> to false.
+    /// </summary>
     public EditorStyle Theme
     {
         get => (EditorStyle)GetValue(ThemeProperty);
         set => SetValue(ThemeProperty, value);
     }
 
+    /// <summary>
+    /// Built-in theme mode. Setting it replaces <see cref="Theme"/> with the matching built-in
+    /// theme (which also sets <see cref="UseSystemTheme"/> to false). Defaults to <see cref="EditorThemeMode.Light"/>.
+    /// </summary>
     public EditorThemeMode ThemeMode
     {
         get => (EditorThemeMode)GetValue(ThemeModeProperty);
         set => SetValue(ThemeModeProperty, value);
     }
 
+    /// <summary>
+    /// When true, the editor ignores <see cref="Theme"/> and uses the built-in light or dark theme
+    /// matching the application's requested theme. Defaults to false.
+    /// </summary>
     public bool UseSystemTheme
     {
         get => (bool)GetValue(UseSystemThemeProperty);
         set => SetValue(UseSystemThemeProperty, value);
     }
 
+    /// <summary>Whether the editor is read-only: keyboard and touch input are ignored and the caret is not drawn. Defaults to false.</summary>
     public bool IsReadOnly
     {
         get => (bool)GetValue(IsReadOnlyProperty);
         set => SetValue(IsReadOnlyProperty, value);
     }
 
+    /// <summary>Text shown when the document is a single empty paragraph. Defaults to "Start typing…".</summary>
     public string PlaceholderText
     {
         get => (string)GetValue(PlaceholderTextProperty);
         set => SetValue(PlaceholderTextProperty, value);
     }
 
-    /// <summary>Enables or disables word-wrapping (maps to <see cref="TextLayoutEngine.WordWrap"/>).</summary>
+    /// <summary>Bindable property for <see cref="IsWordWrap"/>.</summary>
     public static readonly BindableProperty IsWordWrapProperty =
         BindableProperty.Create(
             nameof(IsWordWrap),
@@ -219,7 +231,7 @@ public class MintedEditorView : ContentView
                 v.InvalidateCanvas();
             });
 
-    /// <summary>Controls whether line numbers are rendered in the left gutter.</summary>
+    /// <summary>Bindable property for <see cref="ShowLineNumbers"/>.</summary>
     public static readonly BindableProperty ShowLineNumbersProperty =
         BindableProperty.Create(
             nameof(ShowLineNumbers),
@@ -233,7 +245,7 @@ public class MintedEditorView : ContentView
                 v.InvalidateCanvas();
             });
 
-    /// <summary>Controls whether an overlay scrollbar is rendered when content overflows.</summary>
+    /// <summary>Bindable property for <see cref="ShowScrollbar"/>.</summary>
     public static readonly BindableProperty ShowScrollbarProperty =
         BindableProperty.Create(
             nameof(ShowScrollbar),
@@ -247,25 +259,28 @@ public class MintedEditorView : ContentView
                 v.InvalidateCanvas();
             });
 
+    /// <summary>Enables or disables word-wrapping (maps to <see cref="TextLayoutEngine.WordWrap"/>). Defaults to true.</summary>
     public bool IsWordWrap
     {
         get => (bool)GetValue(IsWordWrapProperty);
         set => SetValue(IsWordWrapProperty, value);
     }
 
+    /// <summary>Whether line numbers are rendered in the left gutter. Defaults to false.</summary>
     public bool ShowLineNumbers
     {
         get => (bool)GetValue(ShowLineNumbersProperty);
         set => SetValue(ShowLineNumbersProperty, value);
     }
 
+    /// <summary>Whether an overlay scrollbar is rendered when content overflows. Defaults to true.</summary>
     public bool ShowScrollbar
     {
         get => (bool)GetValue(ShowScrollbarProperty);
         set => SetValue(ShowScrollbarProperty, value);
     }
 
-    /// <summary>Shows or hides the built-in toolbar rendered at the top of the canvas.</summary>
+    /// <summary>Bindable property for <see cref="ShowToolbar"/>.</summary>
     public static readonly BindableProperty ShowToolbarProperty =
         BindableProperty.Create(
             nameof(ShowToolbar),
@@ -274,16 +289,14 @@ public class MintedEditorView : ContentView
             true,
             propertyChanged: static (b, _, _) => ((MintedEditorView)b).InvalidateCanvas());
 
+    /// <summary>Shows or hides the built-in toolbar rendered at the top of the canvas. Defaults to true.</summary>
     public bool ShowToolbar
     {
         get => (bool)GetValue(ShowToolbarProperty);
         set => SetValue(ShowToolbarProperty, value);
     }
 
-    /// <summary>
-    /// Shows a magnifier (loupe) above the finger while the caret is dragged after a long
-    /// press. Touch input only. Default: <c>true</c>.
-    /// </summary>
+    /// <summary>Bindable property for <see cref="IsMagnifierEnabled"/>.</summary>
     public static readonly BindableProperty IsMagnifierEnabledProperty =
         BindableProperty.Create(
             nameof(IsMagnifierEnabled),
@@ -300,18 +313,17 @@ public class MintedEditorView : ContentView
                 }
             });
 
-    /// <inheritdoc cref="IsMagnifierEnabledProperty"/>
+    /// <summary>
+    /// Shows a magnifier (loupe) above the finger while the caret is dragged after a long
+    /// press. Touch input only. Default: <c>true</c>.
+    /// </summary>
     public bool IsMagnifierEnabled
     {
         get => (bool)GetValue(IsMagnifierEnabledProperty);
         set => SetValue(IsMagnifierEnabledProperty, value);
     }
 
-    /// <summary>
-    /// Appearance of the magnifier. Defaults to an approximation of the platform's native
-    /// magnifier (<see cref="MagnifierOptions.Android"/> on Android,
-    /// <see cref="MagnifierOptions.Apple"/> elsewhere).
-    /// </summary>
+    /// <summary>Bindable property for <see cref="MagnifierOptions"/>.</summary>
     public static readonly BindableProperty MagnifierOptionsProperty =
         BindableProperty.Create(
             nameof(MagnifierOptions),
@@ -321,17 +333,18 @@ public class MintedEditorView : ContentView
                 ? MagnifierOptions.Android
                 : MagnifierOptions.Apple);
 
-    /// <inheritdoc cref="MagnifierOptionsProperty"/>
+    /// <summary>
+    /// Appearance of the magnifier. Defaults to an approximation of the platform's native
+    /// magnifier (<see cref="MagnifierOptions.Android"/> on Android,
+    /// <see cref="MagnifierOptions.Apple"/> elsewhere).
+    /// </summary>
     public MagnifierOptions MagnifierOptions
     {
         get => (MagnifierOptions)GetValue(MagnifierOptionsProperty);
         set => SetValue(MagnifierOptionsProperty, value);
     }
 
-    /// <summary>
-    /// Maximum number of toolbar rows to display before remaining items are collapsed
-    /// into an overflow (…) button.  0 means unlimited (show all rows).
-    /// </summary>
+    /// <summary>Bindable property for <see cref="ToolbarMaxRows"/>.</summary>
     public static readonly BindableProperty ToolbarMaxRowsProperty =
         BindableProperty.Create(
             nameof(ToolbarMaxRows),
@@ -345,15 +358,17 @@ public class MintedEditorView : ContentView
                 v.InvalidateCanvas();
             });
 
+    /// <summary>
+    /// Maximum number of toolbar rows to display before remaining items are collapsed
+    /// into an overflow (…) button. 0 (the default) means unlimited.
+    /// </summary>
     public int ToolbarMaxRows
     {
         get => (int)GetValue(ToolbarMaxRowsProperty);
         set => SetValue(ToolbarMaxRowsProperty, value);
     }
 
-    /// <summary>
-    /// Selects the toolbar icon pack style and optional bitmap asset namespace.
-    /// </summary>
+    /// <summary>Bindable property for <see cref="ToolbarIconPack"/>.</summary>
     public static readonly BindableProperty ToolbarIconPackProperty =
         BindableProperty.Create(
             nameof(ToolbarIconPack),
@@ -369,16 +384,17 @@ public class MintedEditorView : ContentView
                 v.InvalidateCanvas();
             });
 
+    /// <summary>
+    /// Style of the built-in toolbar icons. Changing it reloads the icons.
+    /// Defaults to <see cref="Core.Toolbar.ToolbarIconPack.Lucide"/>.
+    /// </summary>
     public ToolbarIconPack ToolbarIconPack
     {
         get => (ToolbarIconPack)GetValue(ToolbarIconPackProperty);
         set => SetValue(ToolbarIconPackProperty, value);
     }
 
-    /// <summary>
-    /// Optional custom <see cref="Core.Toolbar.ToolbarDefinition"/>.
-    /// When <see langword="null"/> the editor uses <see cref="Core.Toolbar.ToolbarDefinition.CreateDefault()"/>.
-    /// </summary>
+    /// <summary>Bindable property for <see cref="ToolbarDefinition"/>.</summary>
     public static readonly BindableProperty ToolbarDefinitionProperty =
         BindableProperty.Create(
             nameof(ToolbarDefinition),
@@ -388,15 +404,18 @@ public class MintedEditorView : ContentView
             propertyChanged: static (b, _, n) =>
                 ((MintedEditorView)b).OnToolbarDefinitionChanged((ToolbarDefinition?)n));
 
+    /// <summary>
+    /// Optional custom <see cref="Core.Toolbar.ToolbarDefinition"/>.
+    /// When <see langword="null"/> the editor uses <see cref="Core.Toolbar.ToolbarDefinition.CreateDefault()"/>.
+    /// Ignored while <see cref="ToolbarItems"/> is non-empty.
+    /// </summary>
     public ToolbarDefinition? ToolbarDefinition
     {
         get => (ToolbarDefinition?)GetValue(ToolbarDefinitionProperty);
         set => SetValue(ToolbarDefinitionProperty, value);
     }
 
-    /// <summary>
-    /// Optional flat toolbar item collection. When set, it takes precedence over <see cref="ToolbarDefinition"/>.
-    /// </summary>
+    /// <summary>Bindable property for <see cref="ToolbarItems"/>.</summary>
     public static readonly BindableProperty ToolbarItemsProperty =
         BindableProperty.Create(
             nameof(ToolbarItems),
@@ -406,6 +425,10 @@ public class MintedEditorView : ContentView
             propertyChanged: static (b, _, n) =>
                 ((MintedEditorView)b).OnToolbarItemsChanged((IList<Core.Toolbar.ToolbarItem>?)n));
 
+    /// <summary>
+    /// Optional flat toolbar item collection, shown as a single group. When non-empty, it takes
+    /// precedence over <see cref="ToolbarDefinition"/>.
+    /// </summary>
     public IList<Core.Toolbar.ToolbarItem>? ToolbarItems
     {
         get => (IList<Core.Toolbar.ToolbarItem>?)GetValue(ToolbarItemsProperty);
@@ -752,6 +775,7 @@ public class MintedEditorView : ContentView
 
     // ── Constructor ──────────────────────────────────────────────────────────────
 
+    /// <summary>Creates an editor with an empty document and the default toolbar.</summary>
     public MintedEditorView()
     {
         _document = new EditorDoc();
@@ -858,6 +882,7 @@ public class MintedEditorView : ContentView
 
     // ── Undo / Redo ──────────────────────────────────────────────────────────────
 
+    /// <summary>Undoes the most recent change, if any, and moves the caret to the restored position.</summary>
     public void Undo()
     {
         if (_undoManager.CanUndo)
@@ -868,6 +893,7 @@ public class MintedEditorView : ContentView
         }
     }
 
+    /// <summary>Redoes the most recently undone change, if any, and moves the caret to the restored position.</summary>
     public void Redo()
     {
         if (_undoManager.CanRedo)
@@ -984,6 +1010,11 @@ public class MintedEditorView : ContentView
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// When a handler is attached, loads the toolbar icons and starts the caret blink timer if the
+    /// editor is focused; when it is removed, stops the blink timer.
+    /// </remarks>
     protected override void OnHandlerChanged()
     {
         base.OnHandlerChanged();

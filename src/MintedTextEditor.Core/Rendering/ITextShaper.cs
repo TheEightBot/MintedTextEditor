@@ -29,6 +29,10 @@ public class ShapedTextResult
     /// </summary>
     public bool IsFullyShaped { get; }
 
+    /// <summary>Creates a shaping result.</summary>
+    /// <param name="text">The original input text.</param>
+    /// <param name="font">The font used for shaping.</param>
+    /// <param name="isFullyShaped">Whether a full shaper produced the result.</param>
     public ShapedTextResult(string text, EditorFont font, bool isFullyShaped)
     {
         Text = text;
@@ -43,8 +47,10 @@ public class ShapedTextResult
 /// </summary>
 public class DefaultTextShaper : ITextShaper
 {
+    /// <summary>Shared instance.</summary>
     public static DefaultTextShaper Instance { get; } = new();
 
+    /// <inheritdoc/>
     public ShapedTextResult Shape(string text, EditorFont font)
         => new(text, font, isFullyShaped: false);
 }

@@ -11,13 +11,21 @@ namespace MintedTextEditor.Core.Toolbar;
 /// </summary>
 public sealed class ToolbarRenderer
 {
+    /// <summary>The toolbar definition being rendered.</summary>
     public ToolbarDefinition Definition    { get; }
+    /// <summary>Width and height of a button, and the height of every toolbar row. Defaults to 36.</summary>
     public float             ButtonSize    { get; set; } = 36f;
+    /// <summary>Padding around the toolbar edges and between adjacent items. Defaults to 5.</summary>
     public float             ButtonPadding { get; set; } = 5f;
+    /// <summary>Horizontal space added between groups. Defaults to 8.</summary>
     public float             GroupSpacing  { get; set; } = 8f;
+    /// <summary>Vertical space between wrapped rows. Defaults to 6.</summary>
     public float             RowSpacing    { get; set; } = 6f;
+    /// <summary>Width of a <see cref="ToolbarDropdown"/> item. Defaults to 128.</summary>
     public float             DropdownWidth { get; set; } = 128f;
+    /// <summary>When true, built-in vector icons are drawn for buttons whose icon <see cref="IconResolver"/> does not resolve.</summary>
     public bool              PreferVectorIcons { get; set; } = true;
+    /// <summary>Style of the built-in vector icons. Defaults to <see cref="ToolbarIconPack.Lucide"/>.</summary>
     public ToolbarIconPack   IconPack { get; set; } = ToolbarIconPack.Lucide;
 
     /// <summary>
@@ -30,10 +38,15 @@ public sealed class ToolbarRenderer
 
     // ── Theme colors (set from EditorStyle before each Render) ───────────────
 
+    /// <summary>Fill color of the toolbar background.</summary>
     public EditorColor BackgroundColor { get; set; } = new EditorColor(245, 245, 245);
+    /// <summary>Color of button icons, labels and drop-down text.</summary>
     public EditorColor ButtonColor     { get; set; } = new EditorColor( 60,  60,  60);
+    /// <summary>Fill color of active toggle buttons and selected overlay entries.</summary>
     public EditorColor ActiveColor     { get; set; } = new EditorColor(190, 210, 240);
+    /// <summary>Color of separators and item borders.</summary>
     public EditorColor SeparatorColor  { get; set; } = new EditorColor(200, 200, 200);
+    /// <summary>Color of icons and labels on disabled items.</summary>
     public EditorColor DisabledColor   { get; set; } = new EditorColor(180, 180, 180);
 
     /// <summary>
@@ -249,6 +262,9 @@ public sealed class ToolbarRenderer
         }
     }
 
+    /// <summary>Creates a renderer for <paramref name="definition"/>.</summary>
+    /// <param name="definition">Toolbar definition to render.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="definition"/> is null.</exception>
     public ToolbarRenderer(ToolbarDefinition definition)
     {
         Definition = definition ?? throw new ArgumentNullException(nameof(definition));
