@@ -17,26 +17,46 @@ internal record ParagraphSnapshot(ParagraphStyle Style, IReadOnlyList<InlineSnap
 /// instead of an (inline index, offset) pair. Run splits and merges from formatting are not
 /// on the undo stack, so inline indices recorded by an action can go stale; paragraph
 /// offsets stay valid and are resolved back to a position when the action replays.
+/// A position that is not in a paragraph (e.g. a table block without cell coordinates)
+/// is kept as is, so it still names its own block rather than the document's last block.
 /// </summary>
 internal readonly struct ParagraphAnchor
 {
     private readonly DocumentPosition _context;
     private readonly int _offset;
+    private readonly bool _inParagraph;
 
     public ParagraphAnchor(Document.Document document, DocumentPosition position)
     {
         _context = position;
-        _offset = DocumentEditor.GetAbsoluteCharOffset(document, position);
+        _inParagraph = IsParagraphPosition(document, position);
+        _offset = _inParagraph ? DocumentEditor.GetAbsoluteCharOffset(document, position) : position.Offset;
     }
 
     public DocumentPosition Resolve(Document.Document document)
-        => DocumentEditor.AbsoluteCharOffsetToPosition(document, _context, _offset);
+        => _inParagraph && IsParagraphPosition(document, _context)
+            ? DocumentEditor.AbsoluteCharOffsetToPosition(document, _context, _offset)
+            : _context;
 
     public bool SameAs(ParagraphAnchor other)
         => _context.BlockIndex == other._context.BlockIndex
            && _context.CellRow == other._context.CellRow
            && _context.CellCol == other._context.CellCol
-           && _offset == other._offset;
+           && _inParagraph == other._inParagraph
+           && (_inParagraph ? _offset == other._offset : _context == other._context);
+
+    // Mirrors DocumentEditor.GetParagraph: a top-level paragraph, or the first paragraph of a table cell.
+    private static bool IsParagraphPosition(Document.Document document, DocumentPosition position)
+    {
+        if (position.BlockIndex < 0 || position.BlockIndex >= document.Blocks.Count)
+            return false;
+        var block = document.Blocks[position.BlockIndex];
+        if (!position.IsInTableCell)
+            return block is Paragraph;
+        return block is TableBlock table
+            && table.GetCell(position.CellRow, position.CellCol) is { Blocks.Count: > 0 } cell
+            && cell.Blocks[0] is Paragraph;
+    }
 }
 
 internal static class SnapshotHelper
@@ -402,6 +422,93 @@ public sealed class ApplyStyleAction : IUndoableAction
 
     /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
+}
+
+// ── ApplyParagraphStyleAction ───────────────────────────────────────────────
+
+/// <summary>
+/// Records a paragraph-level formatting change (alignment, heading, list, indent, line spacing,
+/// block quote, …). Snapshots the <see cref="ParagraphStyle"/> of every paragraph in the range
+/// before and after the change, so undo restores the previous styles and redo reapplies the
+/// recorded result in one step.
+/// </summary>
+public sealed class ApplyParagraphStyleAction : IUndoableAction
+{
+    private readonly Document.Document _document;
+    private TextRange _range;
+    private readonly ParagraphAnchor _startAnchor;
+    private readonly ParagraphAnchor _endAnchor;
+    private readonly Action<Document.Document, TextRange> _apply;
+    private readonly List<(int BlockIndex, ParagraphStyle Before, ParagraphStyle After)> _changes = [];
+
+    /// <summary>
+    /// Creates an action that runs <paramref name="apply"/> over <paramref name="range"/>, for example
+    /// <c>(d, r) =&gt; ParagraphFormattingEngine.SetAlignment(d, r, TextAlignment.Center)</c>.
+    /// </summary>
+    /// <param name="document">The document to modify.</param>
+    /// <param name="range">The range whose paragraphs are formatted.</param>
+    /// <param name="apply">Changes the paragraph styles of the paragraphs in the range. Only the styles of the
+    /// paragraphs from <paramref name="range"/>'s start block to its end block are recorded.</param>
+    /// <param name="description">Human-readable description of the change.</param>
+    public ApplyParagraphStyleAction(
+        Document.Document document,
+        TextRange range,
+        Action<Document.Document, TextRange> apply,
+        string description = "Paragraph Format")
+    {
+        _document = document;
+        _range = range;
+        _startAnchor = new ParagraphAnchor(document, range.Start);
+        _endAnchor = new ParagraphAnchor(document, range.End);
+        _apply = apply;
+        Description = description;
+    }
+
+    /// <inheritdoc/>
+    public string Description { get; }
+
+    /// <inheritdoc/>
+    public DocumentPosition Execute()
+    {
+        _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
+        var before = new List<(int, ParagraphStyle)>();
+        for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
+        {
+            if (_document.Blocks[i] is Paragraph p)
+                before.Add((i, p.Style.Clone()));
+        }
+
+        _apply(_document, _range);
+
+        _changes.Clear();
+        foreach (var (index, style) in before)
+        {
+            if (index < _document.Blocks.Count && _document.Blocks[index] is Paragraph p)
+                _changes.Add((index, style, p.Style.Clone()));
+        }
+        return _range.Start;
+    }
+
+    /// <inheritdoc/>
+    public DocumentPosition Undo() => Restore(after: false);
+
+    /// <inheritdoc/>
+    public DocumentPosition Redo() => Restore(after: true);
+
+    /// <inheritdoc/>
+    public bool MergeWith(IUndoableAction next) => false;
+
+    private DocumentPosition Restore(bool after)
+    {
+        foreach (var (index, before, afterStyle) in _changes)
+        {
+            if (index < _document.Blocks.Count && _document.Blocks[index] is Paragraph p)
+                p.Style = (after ? afterStyle : before).Clone();
+        }
+        _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
+        _document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.StyleChanged, _range));
+        return _range.Start;
+    }
 }
 
 // ── CompositeAction ─────────────────────────────────────────────────────────

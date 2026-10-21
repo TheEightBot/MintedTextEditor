@@ -670,7 +670,7 @@ public class MintedEditorView : ContentView
                         dd.OnSelectionChanged = idx =>
                         {
                             if ((uint)idx < (uint)dd.Items.Count)
-                                ParagraphFormattingEngine.SetHeadingLevel(_document, _inputController.Selection.Range, idx);
+                                new SetHeadingLevelCommand(idx).Execute(GetEditorContext());
                             UpdateFormattingState();
                             InvalidateCanvas();
                         };

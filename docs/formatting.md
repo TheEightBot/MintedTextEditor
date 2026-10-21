@@ -82,6 +82,26 @@ TextStyle? common = FontFormattingEngine.GetTextStyleForRange(doc, range);
 
 Paragraph formatting is stored in `ParagraphStyle` on each `Paragraph` block. `ParagraphFormattingEngine` is a static class; each method applies to every paragraph the range touches.
 
+The toolbar applies paragraph formatting through the paragraph commands (namespace `MintedTextEditor.Core.Commands`): `AlignLeftCommand`, `AlignCenterCommand`, `AlignRightCommand`, `AlignJustifyCommand`, `ToggleBulletListCommand`, `ToggleNumberListCommand`, `IncreaseIndentCommand`, `DecreaseIndentCommand`, `SetHeadingLevelCommand` and `SetParagraphFormatCommand`. These are recorded for undo: each run is one undo step covering every paragraph in the selection. The `ParagraphFormattingEngine` methods below change the document directly and are **not** recorded for undo.
+
+```csharp
+using MintedTextEditor.Core.Commands;
+
+var ctx = new EditorContext(editor.Document, editor.Selection, editor.UndoManager,
+    editor.Formatting, editor.FontFormatting);
+new AlignCenterCommand().Execute(ctx);        // undoable
+new SetHeadingLevelCommand(2).Execute(ctx);   // undoable
+```
+
+To make an engine call (or any other paragraph style change) undoable, wrap it in an `ApplyParagraphStyleAction`. It snapshots the style of each paragraph in the range before and after, so undo restores the old styles and redo reapplies the new ones:
+
+```csharp
+using MintedTextEditor.Core.Editing;
+
+editor.UndoManager.Push(new ApplyParagraphStyleAction(doc, range,
+    (d, r) => ParagraphFormattingEngine.SetLineSpacing(d, r, 1.5f)));
+```
+
 ### Setting Alignment
 
 ```csharp
@@ -138,7 +158,7 @@ DocumentEditor.ApplyParagraphStyle(doc, range, s => s.Direction = TextDirection.
 
 ## Undo / Redo Integration
 
-Typing, deleting, pasting, and the insert commands (hyperlink, image, table, rows and columns) are recorded by the `UndoManager`. The formatting engines are not; use `ApplyStyleAction` (above) when formatting must be undoable.
+Typing, deleting, pasting, the insert commands (hyperlink, image, table, rows and columns) and the paragraph commands (alignment, lists, indent, headings, paragraph format) are recorded by the `UndoManager`. The formatting engines (`FormattingEngine`, `FontFormattingEngine`, `ParagraphFormattingEngine`) are not; push an `ApplyStyleAction` or `ApplyParagraphStyleAction` (above) when formatting from code must be undoable.
 
 ```csharp
 editor.Undo();   // or editor.UndoManager.Undo()

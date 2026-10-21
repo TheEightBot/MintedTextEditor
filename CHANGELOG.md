@@ -37,6 +37,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`ToolbarMaxRows` lost on toolbar rebuild**: assigning a new `ToolbarDefinition`, changing `ToolbarItems` or clearing them no longer drops the row limit set with `MintedEditorView.ToolbarMaxRows`, which previously showed every row again. Once set, `ToolbarMaxRows` now takes precedence over `ToolbarDefinition.MaxRows` (which still applies while `ToolbarMaxRows` is unset; setting or clearing it redraws the toolbar even when the number is unchanged) and is no longer written into the app's definition object. New `ToolbarRenderer.MaxRowsOverride` and `EffectiveMaxRows` expose the same behaviour in Core.
 - **HTML round-trip of colors and table spans**: the HTML importer now reads `rgba(...)` colors (alpha as 0–1 or a percentage), `#rgba`/`#rrggbbaa`, space-separated `rgb(r g b / a)` and percentage channels, so text and highlight colors with transparency survive export and re-import. `colspan`/`rowspan` are read into `TableCell.ColumnSpan`/`RowSpan` with merged placeholder cells, matching `TableEngine.MergeCells`, and rows are padded to the widest row, and a table nested in a cell no longer ends the outer table. The exporter now writes the `rgba` alpha with a `.` decimal separator in every culture.
 
+### Fixed
+- **Undo for paragraph formatting**: the alignment, list, indent, heading and paragraph-format (`Normal`/`Heading1`–`6`/`Quote`) commands, and the toolbar's heading dropdown, are now recorded on the `UndoManager` as one step per command, even across a multi-paragraph selection. Undo restores each paragraph's previous style and redo reapplies it. The new `ApplyParagraphStyleAction` makes other paragraph style changes undoable. The `ParagraphFormattingEngine` documentation no longer claims its methods are undoable; they still change the document directly.
+
 ---
 
 ## [0.3.1] — 2026-10-21
