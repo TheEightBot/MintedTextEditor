@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.
+- `ISpellCheckProvider` (`MTE001`), `IPrintProvider` (`MTE002`) and `ITextShaper` / `ShapedTextResult` / `DefaultTextShaper` (`MTE003`) are now marked `[Experimental]`: the editor does not use them yet, so code that references them now reports the diagnostic and must suppress it. See [Experimental APIs](docs/architecture.md#experimental-apis).
+
+### Removed
+- `SkiaSharpEngine`, a placeholder class whose only member, `IsAvailable`, always returned `true`.
 
 ### Fixed
 - **Typing at a bare caret**: typed text now inherits the formatting of the character before the caret (or after it at the start of a paragraph) instead of falling back to the default style, so typing after a bold word stays bold. A pending style picked from the toolbar or a shortcut still wins, and now starts from the caret's formatting, so toggling Bold inside bold text turns it off. Typing at the start or end of a hyperlink no longer extends the link. New helpers: `DocumentEditor.GetInsertionStyle` and `FormattingEngine.GetEffectiveCaretStyle`.
