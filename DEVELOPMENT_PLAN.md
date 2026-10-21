@@ -6,7 +6,7 @@ Architecture mirrors [KumikoUI](https://github.com/TheEightBot/KumikoUI): platfo
 
 > **Workflow:** Each phase is implemented, reviewed, and committed to git before proceeding to the next.
 
-> **Status (2026-10-21):** this plan drove the initial build-out and is kept for history. Shipped work is recorded in [CHANGELOG.md](CHANGELOG.md); new work is tracked in GitHub issues and pull requests. Items still unchecked below were not done as of 0.3.x: rich sub-document copy and rich (HTML) paste, Ctrl/Cmd+Shift+V plain-text paste, pointer cursor changes, the performance/large-document checks (frame-time profiling, zero-allocation paints, 50,000-paragraph documents, lazy off-screen layout), mouse-wheel/trackpad scrolling, the remaining toolbar icon polish (SVG raster size, proportional vector icons, undo/redo arcs) and the selection-normalisation tests.
+> **Status (2026-10-21):** this plan drove the initial build-out and is kept for history. Shipped work is recorded in [CHANGELOG.md](CHANGELOG.md); new work is tracked in GitHub issues and pull requests. Items still unchecked below were not done as of 0.3.x: rich sub-document copy and rich (HTML) paste, Ctrl/Cmd+Shift+V plain-text paste, pointer cursor changes, the performance/large-document checks (frame-time profiling, zero-allocation paints, 50,000-paragraph documents, lazy off-screen layout), mouse-wheel/trackpad scrolling, the remaining toolbar icon polish (proportional vector icons, undo/redo arcs) and the selection-normalisation tests.
 
 ---
 
@@ -1059,7 +1059,7 @@ Targeted fixes identified during end-to-end QA on mobile (iOS/Android) and deskt
 
 ### Toolbar Icon Rendering
 - [x] Fix blurry/low-resolution toolbar icon rendering — use high-quality `SKPaint` filter when drawing `SKBitmap` icons in `SkiaDrawingContext.DrawImage`
-- [ ] Increase SVG rasterization target size from `max(64, 36×scale)` to `max(96, ButtonSize×2×scale)` so icons are always sharp at HiDPI density
+- [x] Increase SVG rasterization target size from `max(64, 36×scale)` to `max(96, ButtonSize×2×scale)` so icons are always sharp at HiDPI density (`MintedEditorView.LoadToolbarIconsAsync`)
 - [x] Increase bitmap icon draw area from 56 % of button size to 72 % so icons are more legible
 
 ### Toolbar Icon Clipping / Proportional Layout
@@ -1071,13 +1071,13 @@ Targeted fixes identified during end-to-end QA on mobile (iOS/Android) and deskt
 - [x] Add `MaxRows` property to `ToolbarDefinition` (0 = unlimited) and parallel `MaxRows` property on `ToolbarRenderer`
 - [x] When `LayoutMode == Wrap && MaxRows > 0`, items that would start on a row beyond `MaxRows` are collected as overflow items instead of being drawn
 - [x] Reserve a fixed `OverflowButtonWidth` slot at the trailing edge of the last allowed row and render a `…` button there
-- [x] Extend `HitTest` to return the synthetic overflow button; tapping it opens a drop-down panel listing all overflow items
+- [x] Tapping the overflow button opens a drop-down panel listing all overflow items — shipped as a separate `ToolbarRenderer.HandleOverflowButtonTap`, which `MintedEditorView` calls before ordinary `HitTest` (`HitTest` itself does not return the overflow button)
 - [x] Overflow panel items fire their normal commands just like regular toolbar items
 - [x] Expose `ToolbarMaxRows` bindable property on `MintedEditorView` (default 0 = unlimited)
 
 ### Text Selection Stability After Formatting
 - [x] Add `DocumentEditor.NormalizePosition(Document doc, DocumentPosition pos)` — converts a `DocumentPosition` to a canonical `(blockIndex, inlineIndex, offset)` by walking inline lengths so stale inline indices after run-splitting are corrected
-- [x] Call `NormalizePosition` on `Selection.Anchor` and `Selection.Active` inside `MintedEditorView.ExecuteToolbarCommand` after every formatting command that touches the document
+- [x] Keep the selection valid after toolbar commands in `MintedEditorView.ExecuteToolbarCommand` — character-formatting commands go through `DocumentEditor.ApplyCharacterFormatting`, which returns the adjusted selection; other commands normalize `Selection.Anchor` / `Selection.Active` with `NormalizePosition`
 - [x] Guard `SelectionRenderer.Render` with an inline-length bounds check so an out-of-range offset never throws and visually shows the nearest valid position instead
 
 ### Tests
