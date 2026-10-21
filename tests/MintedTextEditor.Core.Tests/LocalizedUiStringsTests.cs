@@ -97,6 +97,69 @@ public class LocalizedUiStringsTests
         }
     }
 
+    private sealed class Listener
+    {
+        public int Count;
+    }
+
+    [Fact]
+    public void SubscribeCurrentChangedWeak_NotifiesTargetUntilDisposed()
+    {
+        var listener = new Listener();
+        var sub = EditorStrings.SubscribeCurrentChangedWeak(listener, static l => l.Count++);
+        try
+        {
+            WithStrings(new SpanishStrings(), () => Assert.Equal(1, listener.Count));
+            Assert.Equal(2, listener.Count); // restored
+
+            sub.Dispose();
+            sub.Dispose(); // idempotent
+            WithStrings(new FrenchStrings(), () => { });
+            Assert.Equal(2, listener.Count);
+        }
+        finally
+        {
+            sub.Dispose();
+        }
+    }
+
+    [Fact]
+    public void SubscribeCurrentChangedWeak_DoesNotKeepTargetAlive()
+    {
+        var (weak, sub) = SubscribeUnreferencedListener();
+        try
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            Assert.False(weak.TryGetTarget(out _));
+            // Raising the event after collection must not throw; the subscription removes itself.
+            WithStrings(new SpanishStrings(), () => { });
+        }
+        finally
+        {
+            sub.Dispose();
+        }
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (WeakReference<Listener> Weak, IDisposable Sub) SubscribeUnreferencedListener()
+    {
+        var listener = new Listener();
+        var sub = EditorStrings.SubscribeCurrentChangedWeak(listener, static l => l.Count++);
+        return (new WeakReference<Listener>(listener), sub);
+    }
+
+    [Fact]
+    public void SubscribeCurrentChangedWeak_RejectsNullArguments()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            EditorStrings.SubscribeCurrentChangedWeak<Listener>(null!, static _ => { }));
+        Assert.Throws<ArgumentNullException>(() =>
+            EditorStrings.SubscribeCurrentChangedWeak(new Listener(), null!));
+    }
+
     // ── Toolbar ──────────────────────────────────────────────────────────────
 
     [Fact]

@@ -87,7 +87,7 @@ The editor reads `EditorStrings.Current` for its own text:
 | `ContextMenuFactory.CreateDefault(ctx)` | Item labels: `Cut`, `SelectAll`, `EditLink`, `InsertRowAbove`, … | Each time the menu is created; `CreateDefault(ctx, strings)` takes the strings explicitly |
 | `MintedEditorView` insert prompts | `HyperlinkDialog*`, `ImageDialog*`, `TableDialog*` | Each time a prompt is shown |
 
-Setting `EditorStrings.Current` raises the static `EditorStrings.CurrentChanged` event; `MintedEditorView` listens to it and redraws, so switching language at runtime updates an editor that is already on screen.
+Setting `EditorStrings.Current` raises the static `EditorStrings.CurrentChanged` event; `MintedEditorView` listens to it while loaded and redraws, so switching language at runtime updates an editor that is already on screen. The event is static, so a subscriber stays alive until it unsubscribes; `EditorStrings.SubscribeCurrentChangedWeak(target, static t => ...)` listens without keeping `target` alive and returns an `IDisposable` that unsubscribes.
 
 Toolbar labels are drawn only when an item has no icon (or for a dropdown with nothing selected), so for icon buttons they mostly serve as names. A built-in item resolves its label through `ToolbarItem.LocalizedLabel` (for example `s => s.Bold`). Assigning `Label` clears `LocalizedLabel` and fixes the text; set `LocalizedLabel` on your own items to make them follow `EditorStrings` too:
 

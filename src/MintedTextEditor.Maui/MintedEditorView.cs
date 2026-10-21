@@ -102,6 +102,8 @@ public class MintedEditorView : ContentView
     private readonly Dictionary<string, SKBitmap> _imageCache = new();
     private const int DefaultSvgRasterSize = 512;
     private int _iconLoadVersion;
+    // Weak, so an editor that is discarded without being unloaded can still be collected.
+    private IDisposable? _stringsSubscription;
 
 
 
@@ -511,15 +513,39 @@ public class MintedEditorView : ContentView
         }
     }
 
-    private void OnEditorStringsChanged(object? sender, EventArgs e)
+    private void OnEditorStringsChanged()
     {
         // EditorStrings.Current may be replaced from any thread.
-        Dispatcher.Dispatch(() =>
-        {
-            ApplyLocalizedDropdownItems(_toolbarRenderer.Definition);
-            InvalidateCanvas();
-        });
+        Dispatcher.Dispatch(RefreshLocalizedStrings);
     }
+
+    private void RefreshLocalizedStrings()
+    {
+        ApplyLocalizedDropdownItems(_toolbarRenderer.Definition);
+        InvalidateCanvas();
+    }
+
+    /// <summary>
+    /// Starts listening for <see cref="EditorStrings.CurrentChanged"/> (if not already) and applies
+    /// strings that were replaced while the editor was not listening.
+    /// </summary>
+    private void SubscribeToEditorStrings()
+    {
+        if (_stringsSubscription is not null) return;
+        _stringsSubscription = EditorStrings.SubscribeCurrentChangedWeak(
+            this, static view => view.OnEditorStringsChanged());
+        RefreshLocalizedStrings();
+    }
+
+    private void UnsubscribeFromEditorStrings()
+    {
+        _stringsSubscription?.Dispose();
+        _stringsSubscription = null;
+    }
+
+    private void OnViewLoaded(object? sender, EventArgs e) => SubscribeToEditorStrings();
+
+    private void OnViewUnloaded(object? sender, EventArgs e) => UnsubscribeFromEditorStrings();
 
     private void WireToolbarCallbacks(ToolbarDefinition def)
     {
@@ -845,6 +871,9 @@ public class MintedEditorView : ContentView
         grid.Add(_canvas);
         grid.Add(_keyboardProxy);
         Content = grid;
+
+        Loaded += OnViewLoaded;
+        Unloaded += OnViewUnloaded;
     }
 
     // ── HTML API ─────────────────────────────────────────────────────────────────
@@ -1040,18 +1069,18 @@ public class MintedEditorView : ContentView
     /// <remarks>
     /// When a handler is attached, loads the toolbar icons, starts the caret blink timer if the
     /// editor is focused, and starts listening for <see cref="EditorStrings.CurrentChanged"/>; when
-    /// it is removed, stops the blink timer and the listener.
+    /// it is removed, stops the blink timer and the listener. The listener is also started on
+    /// <see cref="VisualElement.Loaded"/> and stopped on <see cref="VisualElement.Unloaded"/>, and
+    /// holds the view only weakly, so an editor that is discarded without either can still be
+    /// garbage collected.
     /// </remarks>
     protected override void OnHandlerChanged()
     {
         base.OnHandlerChanged();
-        // Remove first so repeated handler changes never subscribe twice.
-        EditorStrings.CurrentChanged -= OnEditorStringsChanged;
         if (Handler is not null)
         {
-            EditorStrings.CurrentChanged += OnEditorStringsChanged;
-            // Pick up strings replaced while the view had no handler.
-            ApplyLocalizedDropdownItems(_toolbarRenderer.Definition);
+            // Also picks up strings replaced while the view had no handler.
+            SubscribeToEditorStrings();
             // The blink timer is driven by focus (OnNativeFocusChanged), not by the
             // handler lifetime — an idle editor should not repaint 10x per second.
             if (_isEditorFocused)
@@ -1061,6 +1090,7 @@ public class MintedEditorView : ContentView
         else
         {
             StopBlinkTimer();
+            UnsubscribeFromEditorStrings();
         }
     }
 

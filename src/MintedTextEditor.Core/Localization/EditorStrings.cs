@@ -34,6 +34,45 @@ public class EditorStrings
     /// </summary>
     public static event EventHandler? CurrentChanged;
 
+    /// <summary>
+    /// Subscribes to <see cref="CurrentChanged"/> without keeping <paramref name="target"/> alive.
+    /// The static event holds only a weak reference to the target, so a view that is discarded
+    /// without unsubscribing can still be garbage collected; the subscription removes itself the
+    /// next time the event is raised after the target has been collected.
+    /// </summary>
+    /// <typeparam name="TTarget">Type of the object being notified.</typeparam>
+    /// <param name="target">Object to notify. Held weakly.</param>
+    /// <param name="onChanged">
+    /// Called with the target when <see cref="Current"/> changes, on the thread that set it.
+    /// It is held strongly, so it must not capture <paramref name="target"/> (use a static lambda).
+    /// </param>
+    /// <returns>A subscription; dispose it to unsubscribe. Disposing more than once is harmless.</returns>
+    public static IDisposable SubscribeCurrentChangedWeak<TTarget>(TTarget target, Action<TTarget> onChanged)
+        where TTarget : class
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(onChanged);
+        var subscription = new WeakCurrentChangedSubscription<TTarget>(target, onChanged);
+        CurrentChanged += subscription.OnCurrentChanged;
+        return subscription;
+    }
+
+    private sealed class WeakCurrentChangedSubscription<TTarget>(TTarget target, Action<TTarget> onChanged)
+        : IDisposable where TTarget : class
+    {
+        private readonly WeakReference<TTarget> _target = new(target);
+
+        public void OnCurrentChanged(object? sender, EventArgs e)
+        {
+            if (_target.TryGetTarget(out var t))
+                onChanged(t);
+            else
+                Dispose();
+        }
+
+        public void Dispose() => CurrentChanged -= OnCurrentChanged;
+    }
+
     // ── Toolbar ─────────────────────────────────────────────────────────
 
     /// <summary>Toolbar label for the bold command. Default: "Bold"</summary>

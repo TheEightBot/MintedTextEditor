@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
-- `EditorStrings.CurrentChanged` (raised when `EditorStrings.Current` is replaced), `ToolbarItem.LocalizedLabel` for labels that follow `EditorStrings`, a `ContextMenuFactory.CreateDefault(ctx, strings)` overload, and new strings for the remaining built-in text: `Subscript`, `Superscript`, `HeadingLevel`, `EditMenu`, `ObjectMenu`, `TableMenu`, `DefaultFontFamily`, `RemoveImage`, `InsertTableEllipsis`, `HyperlinkDialogMessage`, `HyperlinkDialogInsert`, and the `ImageDialog*` and `TableDialog*` prompt strings.
+- `EditorStrings.CurrentChanged` (raised when `EditorStrings.Current` is replaced) and `EditorStrings.SubscribeCurrentChangedWeak` (listens without keeping the listener alive), `ToolbarItem.LocalizedLabel` for labels that follow `EditorStrings`, a `ContextMenuFactory.CreateDefault(ctx, strings)` overload, and new strings for the remaining built-in text: `Subscript`, `Superscript`, `HeadingLevel`, `EditMenu`, `ObjectMenu`, `TableMenu`, `DefaultFontFamily`, `RemoveImage`, `InsertTableEllipsis`, `HyperlinkDialogMessage`, `HyperlinkDialogInsert`, and the `ImageDialog*` and `TableDialog*` prompt strings.
 
 ### Changed
 - Default English labels of built-in toolbar and context menu items now match the `EditorStrings` defaults (sentence case, e.g. "Font family", "Select all", "Numbered list", "Edit hyperlink…"), and the heading dropdown lists "Normal text" and "Heading 1"–"Heading 6" instead of "Normal" and "H1"–"H6". Code that finds built-in items by `Label` should match on `Icon` instead.
