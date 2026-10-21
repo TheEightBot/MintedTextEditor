@@ -34,10 +34,16 @@ public static class HyperlinkEngine
     /// becomes the link text, or the URL is inserted as the text when the range is empty.
     /// Returns the inserted <see cref="HyperlinkInline"/>.
     /// </summary>
+    /// <remarks>
+    /// The link can be inserted in a table cell. A link stays within one paragraph, so when
+    /// <paramref name="range"/> starts or ends in a table cell and does not lie within that one cell,
+    /// only its part from its start to the end of the start paragraph (or cell) is used.
+    /// </remarks>
     public static HyperlinkInline InsertHyperlink(
         Document.Document doc, TextRange range, string url, string? title, string? displayText)
     {
-        var para = GetParagraph(doc, range.Start.BlockIndex);
+        range = ClampToStartParagraphInTable(doc, range);
+        var para = DocumentEditor.GetParagraph(doc, range.Start);
 
         bool hasDisplayText = !string.IsNullOrWhiteSpace(displayText);
         string linkText;
@@ -58,7 +64,7 @@ public static class HyperlinkEngine
         hyperlink.AddChild(new TextRun(linkText));
 
         // Refresh paragraph reference after deletion
-        para = GetParagraph(doc, insertPos.BlockIndex);
+        para = DocumentEditor.GetParagraph(doc, insertPos);
         InsertHyperlinkInline(para, insertPos, hyperlink);
 
         doc.NotifyChanged(new DocumentChangedEventArgs(
@@ -175,6 +181,23 @@ public static class HyperlinkEngine
     }
 
     // ── Helpers ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// When <paramref name="range"/> starts or ends in a table cell but does not lie within one
+    /// paragraph, returns the range from its start to the end of its start paragraph (or cell).
+    /// Deleting such a range does not join the paragraphs, so the link could not replace it.
+    /// Otherwise returns <paramref name="range"/> unchanged.
+    /// </summary>
+    internal static TextRange ClampToStartParagraphInTable(Document.Document doc, TextRange range)
+    {
+        var start = range.Start;
+        var end = range.End;
+        if (!start.IsInTableCell && !end.IsInTableCell)
+            return range;
+        if (start.BlockIndex == end.BlockIndex && start.CellRow == end.CellRow && start.CellCol == end.CellCol)
+            return range;
+        return new TextRange(start, DocumentEditor.AbsoluteCharOffsetToPosition(doc, start, int.MaxValue));
+    }
 
     private static Paragraph GetParagraph(Document.Document doc, int blockIndex)
     {

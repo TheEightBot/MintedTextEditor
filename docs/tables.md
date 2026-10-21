@@ -136,6 +136,12 @@ When the caret is inside a table cell:
 
 `Enter` does not split a paragraph inside a cell.
 
+## Editing Cell Content
+
+- **Character formatting** (bold, italic, font, colours, clear formatting, …) applies to the selected text in a cell. A selection that spans several cells formats every cell between its start and end cell in reading order (row by row), and a selection that covers a whole table formats all of its cells. Each change is one undo step.
+- **Hyperlinks** can be inserted at the caret or over the selected text in a cell. A link stays within one cell: when the selection runs into another cell, only its part in the start cell is linked.
+- **Deleting a selection** that starts in a paragraph before a table and ends in a paragraph after it deletes the table along with the selected text and joins the two paragraphs. Undo puts the table and the text back.
+
 ## HTML Export
 
 Tables export as standard HTML; each cell's content is written as its paragraphs (line breaks added here for readability):

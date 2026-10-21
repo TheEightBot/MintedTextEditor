@@ -16,6 +16,9 @@ internal record HyperlinkInlineSnapshot(HyperlinkInline Link, string Url, string
 // Inlines without mutable state of their own (LineBreak, and any other inline type).
 internal record OpaqueInlineSnapshot(Inline Inline) : InlineSnapshot(Inline);
 internal record ParagraphSnapshot(Paragraph Paragraph, ParagraphStyle Style, IReadOnlyList<InlineSnapshot> Inlines);
+// A top-level block together with snapshots of the paragraphs in it that an edit may change
+// (the block itself for a paragraph; the cell paragraphs in the edited range for a table).
+internal record BlockSnapshot(Block Block, IReadOnlyList<ParagraphSnapshot> Paragraphs);
 
 /// <summary>
 /// A position stored as a character offset within its paragraph (or table-cell paragraph)
@@ -115,26 +118,57 @@ internal static class SnapshotHelper
     }
 
     /// <summary>
-    /// Restores the paragraphs recorded from consecutive blocks starting at <paramref name="startBlock"/>.
-    /// A recorded paragraph still in the document is restored in place; one that was removed (merged
-    /// away) is reinserted at its original index. Returns whether any paragraph was reinserted, in
-    /// which case later blocks have moved and the caller must report a structural change.
+    /// Records every top-level block from <paramref name="range"/>'s start block to its end block,
+    /// tables included, with snapshots of the paragraphs an edit of the range may change: each
+    /// top-level paragraph, and the cell paragraphs of a table that are in the range.
     /// </summary>
-    internal static bool RestoreBlocks(Document.Document document, int startBlock, IReadOnlyList<ParagraphSnapshot> snapshots)
+    internal static List<BlockSnapshot> CaptureBlocks(Document.Document document, TextRange range)
+    {
+        var cellParagraphs = DocumentEditor.GetParagraphsInRange(document, range)
+            .Select(x => x.Paragraph)
+            .ToHashSet();
+
+        var snapshots = new List<BlockSnapshot>();
+        for (int i = Math.Max(0, range.Start.BlockIndex); i <= range.End.BlockIndex && i < document.Blocks.Count; i++)
+        {
+            var block = document.Blocks[i];
+            IReadOnlyList<ParagraphSnapshot> paragraphs = block switch
+            {
+                Paragraph p => [Capture(p)],
+                TableBlock t => t.Rows
+                    .SelectMany(r => r.Cells)
+                    .SelectMany(c => c.Blocks)
+                    .OfType<Paragraph>()
+                    .Where(cellParagraphs.Contains)
+                    .Select(Capture)
+                    .ToList(),
+                _ => [],
+            };
+            snapshots.Add(new BlockSnapshot(block, paragraphs));
+        }
+        return snapshots;
+    }
+
+    /// <summary>
+    /// Restores the consecutive blocks recorded by <see cref="CaptureBlocks"/> starting at
+    /// <paramref name="startBlock"/>. A recorded block that was removed (merged or deleted away,
+    /// a table included) is reinserted at its original index, and every recorded paragraph is
+    /// restored in place. Returns whether any block was reinserted, in which case later blocks
+    /// have moved and the caller must report a structural change.
+    /// </summary>
+    internal static bool RestoreBlocks(Document.Document document, int startBlock, IReadOnlyList<BlockSnapshot> snapshots)
     {
         bool reinserted = false;
         for (int i = 0; i < snapshots.Count; i++)
         {
-            var p = snapshots[i].Paragraph;
-            if (document.Blocks.Contains(p))
+            var block = snapshots[i].Block;
+            if (!document.Blocks.Contains(block))
             {
-                Restore(p, snapshots[i]);
-            }
-            else
-            {
-                document.InsertBlock(Math.Min(startBlock + i, document.Blocks.Count), CreateParagraph(snapshots[i]));
+                document.InsertBlock(Math.Min(startBlock + i, document.Blocks.Count), block);
                 reinserted = true;
             }
+            foreach (var paragraph in snapshots[i].Paragraphs)
+                Restore(paragraph.Paragraph, paragraph);
         }
         return reinserted;
     }
@@ -244,8 +278,9 @@ public sealed class InsertTextAction : IUndoableAction
 // ── DeleteRangeAction ───────────────────────────────────────────────────────
 
 /// <summary>
-/// Records a range deletion. Snapshots all affected paragraphs before the delete
-/// so they can be fully restored on undo.
+/// Records a range deletion. Snapshots all affected blocks before the delete (paragraphs, the
+/// table-cell paragraphs in the range, and any table between the range's ends, which the delete
+/// removes) so they can be fully restored on undo.
 /// </summary>
 public sealed class DeleteRangeAction : IUndoableAction
 {
@@ -253,7 +288,7 @@ public sealed class DeleteRangeAction : IUndoableAction
     private TextRange _range;
     private readonly ParagraphAnchor _startAnchor;
     private readonly ParagraphAnchor _endAnchor;
-    private List<ParagraphSnapshot> _snapshots = [];
+    private List<BlockSnapshot> _snapshots = [];
 
     /// <summary>Creates an action that deletes <paramref name="range"/> from the document.</summary>
     public DeleteRangeAction(Document.Document document, TextRange range)
@@ -271,12 +306,7 @@ public sealed class DeleteRangeAction : IUndoableAction
     public DocumentPosition Execute()
     {
         _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
-        _snapshots.Clear();
-        for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
-        {
-            if (_document.Blocks[i] is Paragraph p)
-                _snapshots.Add(SnapshotHelper.Capture(p));
-        }
+        _snapshots = SnapshotHelper.CaptureBlocks(_document, _range);
         return DocumentEditor.DeleteRange(_document, _range);
     }
 
@@ -285,8 +315,9 @@ public sealed class DeleteRangeAction : IUndoableAction
     {
         if (_snapshots.Count == 0) return _range.Start;
 
-        // Restore the first paragraph in place and re-insert any merged away by a multi-block range.
-        // Reinserted blocks shift every later block, so report a structural change for them.
+        // Restore the first paragraph in place and re-insert the blocks (paragraphs and tables)
+        // removed by a multi-block range. Reinserted blocks shift every later block, so report a
+        // structural change for them.
         bool reinserted = SnapshotHelper.RestoreBlocks(_document, _range.Start.BlockIndex, _snapshots);
         _document.NotifyChanged(new DocumentChangedEventArgs(
             reinserted ? DocumentChangeType.BlockSplit : DocumentChangeType.TextInserted, _range));
@@ -429,7 +460,7 @@ public sealed class ApplyStyleAction : IUndoableAction
     private readonly ParagraphAnchor _startAnchor;
     private readonly ParagraphAnchor _endAnchor;
     private readonly Action<TextRange> _apply;
-    private readonly List<(int BlockIndex, ParagraphSnapshot Snapshot)> _snapshots = [];
+    private readonly List<ParagraphSnapshot> _snapshots = [];
 
     /// <summary>Creates an action that applies <paramref name="transform"/> to the style of the text in <paramref name="range"/>.</summary>
     public ApplyStyleAction(Document.Document document, TextRange range, Func<TextStyle, TextStyle> transform)
@@ -468,30 +499,22 @@ public sealed class ApplyStyleAction : IUndoableAction
     {
         _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
         _snapshots.Clear();
-        for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
-        {
-            if (_document.Blocks[i] is Paragraph p)
-                _snapshots.Add((i, SnapshotHelper.Capture(p)));
-        }
+        // Top-level paragraphs and the table-cell paragraphs in the range.
+        foreach (var (p, _, _) in DocumentEditor.GetParagraphsInRange(_document, _range))
+            _snapshots.Add(SnapshotHelper.Capture(p));
 
         _apply(_range);
 
-        foreach (var (blockIndex, _) in _snapshots)
-        {
-            if (blockIndex < _document.Blocks.Count && _document.Blocks[blockIndex] is Paragraph p)
-                DocumentEditor.NormalizeInlines(p);
-        }
+        foreach (var snapshot in _snapshots)
+            DocumentEditor.NormalizeInlines(snapshot.Paragraph);
         return _endAnchor.Resolve(_document);
     }
 
     /// <inheritdoc/>
     public DocumentPosition Undo()
     {
-        foreach (var (blockIndex, snapshot) in _snapshots)
-        {
-            if (blockIndex < _document.Blocks.Count && _document.Blocks[blockIndex] is Paragraph p)
-                RestoreInlines(p, snapshot);
-        }
+        foreach (var snapshot in _snapshots)
+            RestoreInlines(snapshot.Paragraph, snapshot);
         _document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.StyleChanged, _range));
         return _endAnchor.Resolve(_document);
     }
@@ -892,7 +915,7 @@ public sealed class InsertHyperlinkAction : IUndoableAction
     private readonly ParagraphAnchor _endAnchor;
     private readonly string _url;
     private readonly string? _displayText;
-    private readonly List<ParagraphSnapshot> _snapshots = [];
+    private List<BlockSnapshot> _snapshots = [];
 
     /// <summary>Creates an action that inserts a hyperlink to <paramref name="url"/> over <paramref name="originalRange"/>.</summary>
     public InsertHyperlinkAction(Document.Document document, TextRange originalRange, string url)
@@ -923,20 +946,12 @@ public sealed class InsertHyperlinkAction : IUndoableAction
     public DocumentPosition Execute()
     {
         _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
-        _snapshots.Clear();
-        for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
-        {
-            if (_document.Blocks[i] is Paragraph p)
-                _snapshots.Add(SnapshotHelper.Capture(p));
-        }
+        _snapshots = SnapshotHelper.CaptureBlocks(_document, _range);
 
         var inserted = HyperlinkEngine.InsertHyperlink(_document, _range, _url, title: null, _displayText);
-        if (inserted.Parent is Paragraph para)
-        {
-            int blockIdx = _document.Blocks.IndexOf(para);
-            int linkIdx = para.Inlines.IndexOf(inserted);
-            return new DocumentPosition(blockIdx, linkIdx, inserted.Length);
-        }
+        // The link is in the range's start paragraph (a top-level paragraph or a table cell's).
+        if (inserted.Parent is Paragraph para && para.Inlines.IndexOf(inserted) is var linkIdx and >= 0)
+            return _range.Start.With(linkIdx, inserted.Length);
         return _range.Start;
     }
 

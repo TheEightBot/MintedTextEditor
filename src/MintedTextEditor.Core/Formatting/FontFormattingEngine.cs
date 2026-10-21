@@ -83,17 +83,13 @@ public class FontFormattingEngine
 
         TextStyle? common = null;
 
-        var start = range.Start;
-        var end   = range.End;
-
-        for (int bi = start.BlockIndex; bi <= end.BlockIndex && bi < doc.Blocks.Count; bi++)
+        // Top-level paragraphs and the paragraphs of the table cells in the range.
+        foreach (var (para, from, to) in DocumentEditor.GetParagraphsInRange(doc, range))
         {
-            if (doc.Blocks[bi] is not Paragraph para) continue;
-
             for (int ii = 0; ii < para.Inlines.Count; ii++)
             {
                 if (para.Inlines[ii] is not TextRun run) continue;
-                if (!IsRunInRange(bi, ii, run, start, end)) continue;
+                if (!FormattingEngine.IsRunInRange(ii, run, from, to)) continue;
 
                 if (common is null)
                     common = run.Style;
@@ -117,17 +113,5 @@ public class FontFormattingEngine
         }
 
         DocumentEditor.ApplyTextStyle(doc, range, transform);
-    }
-
-    private static bool IsRunInRange(
-        int bi, int ii, TextRun run,
-        DocumentPosition start, DocumentPosition end)
-    {
-        if (bi < start.BlockIndex || bi > end.BlockIndex) return false;
-        if (bi == start.BlockIndex && ii < start.InlineIndex) return false;
-        if (bi == end.BlockIndex   && ii > end.InlineIndex)   return false;
-        if (bi == start.BlockIndex && ii == start.InlineIndex && start.Offset >= run.Text.Length) return false;
-        if (bi == end.BlockIndex   && ii == end.InlineIndex   && end.Offset <= 0) return false;
-        return true;
     }
 }

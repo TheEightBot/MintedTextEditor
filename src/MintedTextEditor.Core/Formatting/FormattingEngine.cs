@@ -142,18 +142,15 @@ public class FormattingEngine
     {
         if (range.IsEmpty) return false;
 
-        var start = range.Start;
-        var end   = range.End;
         bool foundAnyRun = false;
 
-        for (int bi = start.BlockIndex; bi <= end.BlockIndex && bi < doc.Blocks.Count; bi++)
+        // Top-level paragraphs and the paragraphs of the table cells in the range.
+        foreach (var (para, from, to) in DocumentEditor.GetParagraphsInRange(doc, range))
         {
-            if (doc.Blocks[bi] is not Paragraph para) continue;
-
             for (int ii = 0; ii < para.Inlines.Count; ii++)
             {
                 if (para.Inlines[ii] is not TextRun run) continue;
-                if (!IsRunInRange(bi, ii, run, start, end)) continue;
+                if (!IsRunInRange(ii, run, from, to)) continue;
 
                 foundAnyRun = true;
                 if (!getter(run.Style))
@@ -164,22 +161,26 @@ public class FormattingEngine
         return foundAnyRun;
     }
 
-    private static bool IsRunInRange(
-        int bi, int ii, TextRun run,
-        DocumentPosition start, DocumentPosition end)
+    /// <summary>
+    /// Whether the run at inline index <paramref name="ii"/> of a paragraph shares text with the part
+    /// of the range in that paragraph, which runs from <paramref name="from"/> to <paramref name="to"/>
+    /// (null: the paragraph's start or end).
+    /// </summary>
+    internal static bool IsRunInRange(int ii, TextRun run, DocumentPosition? from, DocumentPosition? to)
     {
-        if (bi < start.BlockIndex || bi > end.BlockIndex) return false;
+        if (from is { } start)
+        {
+            if (ii < start.InlineIndex) return false;
+            // At the exact first inline: make sure the range doesn't start after the run's text ends
+            if (ii == start.InlineIndex && start.Offset >= run.Text.Length) return false;
+        }
 
-        if (bi == start.BlockIndex && ii < start.InlineIndex) return false;
-        if (bi == end.BlockIndex   && ii > end.InlineIndex)   return false;
-
-        // At the exact first inline: make sure the range doesn't start after the run's text ends
-        if (bi == start.BlockIndex && ii == start.InlineIndex && start.Offset >= run.Text.Length)
-            return false;
-
-        // At the exact last inline: make sure the range doesn't end before the run's text starts
-        if (bi == end.BlockIndex && ii == end.InlineIndex && end.Offset <= 0)
-            return false;
+        if (to is { } end)
+        {
+            if (ii > end.InlineIndex) return false;
+            // At the exact last inline: make sure the range doesn't end before the run's text starts
+            if (ii == end.InlineIndex && end.Offset <= 0) return false;
+        }
 
         return true;
     }
