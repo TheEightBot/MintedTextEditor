@@ -218,7 +218,7 @@ int replaced = Editor.ReplaceAll("draft", "final");   // one undo step
 Editor.FindReplaceCompleted += (_, e) => { /* e.MatchCount, e.CurrentMatchIndex */ };
 ```
 
-There is no built-in find bar; see [docs/commands-events.md](docs/commands-events.md#find-and-replace).
+There is no built-in find bar; see [docs/commands-events.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/commands-events.md#find-and-replace).
 
 ### Events
 
