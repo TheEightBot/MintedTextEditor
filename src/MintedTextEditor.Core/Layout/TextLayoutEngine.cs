@@ -446,14 +446,21 @@ public class TextLayoutEngine
         string text = fragment.Text;
         int charIndex = 0;
 
+        // Grapheme ends are found once per fragment; every line then searches from its own
+        // position, so a long unbroken token is not re-scanned for each line it wraps onto.
+        var boundaries = GraphemeEnds(text);
+        int nextBoundary = 0; // index of the first grapheme end after charIndex
+
         while (charIndex < text.Length)
         {
             // Find how many characters fit on the current line
-            int fitCount = FindCharacterFitCount(text, charIndex, availableWidth - (currentX - indent), paint, context);
+            int fitEnd = FindCharacterFitEnd(text, boundaries, nextBoundary, availableWidth - (currentX - indent), paint, context);
 
-            if (fitCount == 0 && currentLine.Runs.Count == 0)
+            if (fitEnd < 0 && currentLine.Runs.Count == 0)
                 // Always make progress — at least one whole character (grapheme) per line
-                fitCount = Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(text, charIndex));
+                fitEnd = nextBoundary;
+
+            int fitCount = fitEnd < 0 ? 0 : boundaries[fitEnd] - charIndex;
 
             if (fitCount == 0)
             {
@@ -483,6 +490,7 @@ public class TextLayoutEngine
             if (metrics.Leading > maxLeading) maxLeading = metrics.Leading;
 
             charIndex += fitCount;
+            nextBoundary = fitEnd + 1;
 
             // If there's more text, wrap to a new line
             if (charIndex < text.Length)
@@ -499,37 +507,61 @@ public class TextLayoutEngine
     }
 
     /// <summary>
-    /// Finds how many characters from <paramref name="text"/> starting at <paramref name="startIndex"/>
-    /// fit within <paramref name="maxWidth"/>.
+    /// Returns the end index of every grapheme in <paramref name="text"/>, in order.
     /// </summary>
-    private static int FindCharacterFitCount(string text, int startIndex, float maxWidth, EditorPaint paint, IDrawingContext context)
+    internal static List<int> GraphemeEnds(string text)
     {
-        if (maxWidth <= 0) return 0;
-
         // Only break between graphemes: a cut inside an emoji ZWJ sequence or surrogate pair
         // splits a character, and the shaped width of such a partial prefix can even exceed
         // the width of the whole sequence, which would mislead the search.
-        var boundaries = new List<int>();
-        for (int i = startIndex; i < text.Length;)
+        var ends = new List<int>();
+        for (int i = 0; i < text.Length;)
         {
             i += Math.Max(1, System.Globalization.StringInfo.GetNextTextElementLength(text, i));
-            boundaries.Add(i - startIndex);
+            ends.Add(i);
         }
 
-        // Binary search for the most graphemes that fit
-        int lo = -1, hi = boundaries.Count - 1;
+        return ends;
+    }
+
+    /// <summary>
+    /// Finds the last grapheme end in <paramref name="ends"/>, searching from index
+    /// <paramref name="first"/>, such that the text from the start of that grapheme run
+    /// fits within <paramref name="maxWidth"/>. Returns -1 when not even one grapheme fits.
+    /// </summary>
+    private static int FindCharacterFitEnd(string text, List<int> ends, int first, float maxWidth, EditorPaint paint, IDrawingContext context)
+    {
+        if (maxWidth <= 0 || first >= ends.Count) return -1;
+
+        int start = first == 0 ? 0 : ends[first - 1];
+        bool Fits(int i) => context.MeasureText(text[start..ends[i]], paint).Width <= maxWidth;
+
+        // Gallop (1, 2, 4… graphemes) to bracket the line end, then binary search inside the
+        // bracket. Each probe is then at most about twice the line's length, rather than half
+        // of everything left in the token.
+        int lo = first - 1, hi = ends.Count - 1;
+        for (int step = 1; lo < hi; step *= 2)
+        {
+            int probe = Math.Min(first + step - 1, hi);
+            if (!Fits(probe))
+            {
+                hi = probe - 1;
+                break;
+            }
+
+            lo = probe;
+        }
+
         while (lo < hi)
         {
             int mid = (lo + hi + 1) / 2;
-            string segment = text[startIndex..(startIndex + boundaries[mid])];
-            var size = context.MeasureText(segment, paint);
-            if (size.Width <= maxWidth)
+            if (Fits(mid))
                 lo = mid;
             else
                 hi = mid - 1;
         }
 
-        return lo >= 0 ? boundaries[lo] : 0;
+        return lo >= first ? lo : -1;
     }
 
     private static void FinalizeLayoutLine(LayoutLine line, float maxAscent, float maxDescent, float maxLeading, EditorFontMetrics defaultMetrics)
