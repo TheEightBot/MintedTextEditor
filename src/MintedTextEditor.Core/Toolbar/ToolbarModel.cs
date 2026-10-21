@@ -135,6 +135,8 @@ public sealed class ToolbarDefinition
     /// ellipsis (…) button.  0 means unlimited (show all rows).
     /// Only meaningful when <see cref="LayoutMode"/> is <see cref="ToolbarLayoutMode.Wrap"/>
     /// or <see cref="ToolbarLayoutMode.Overflow"/>.
+    /// A non-null <see cref="ToolbarRenderer.MaxRowsOverride"/> takes precedence over this value
+    /// (the MAUI editor sets it from <c>MintedEditorView.ToolbarMaxRows</c> when the app sets that property).
     /// </summary>
     public int MaxRows { get; set; } = 0;
 

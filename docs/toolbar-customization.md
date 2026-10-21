@@ -97,7 +97,19 @@ def.MaxRows = 1;                           // extra items go into an overflow (â
 editor.ToolbarDefinition = def;
 ```
 
-`editor.ToolbarMaxRows` sets `MaxRows` on the toolbar currently shown; set it after assigning a new `ToolbarDefinition`, or set `MaxRows` on the definition as above.
+You can also limit rows on the editor itself:
+
+```csharp
+editor.ToolbarMaxRows = 1;                 // 0 = unlimited
+```
+
+How the two settings combine:
+
+- Once you set `editor.ToolbarMaxRows` (to any value, including `0`), it wins over the definition's `MaxRows`. It stays in effect when you assign a new `ToolbarDefinition`, change `ToolbarItems` or change `ToolbarIconPack`, so you can set it once, in any order.
+- While `ToolbarMaxRows` has never been set (or after `editor.ClearValue(MintedEditorView.ToolbarMaxRowsProperty)`), the current definition's `MaxRows` is used.
+- The editor never writes `ToolbarMaxRows` into your `ToolbarDefinition`, so one definition can be shared between editors with different row limits.
+
+Outside MAUI, `ToolbarRenderer.MaxRowsOverride` does the same: when it is non-null it replaces `Definition.MaxRows`, and `ToolbarRenderer.EffectiveMaxRows` gives the limit actually used.
 
 ## Hiding the Toolbar
 
