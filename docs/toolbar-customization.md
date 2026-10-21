@@ -34,7 +34,7 @@ The toolbar is described by a `ToolbarDefinition` — a list of `ToolbarGroup` e
 | `ToolbarColorPicker` | A color palette with `OnColorSelected` |
 | `ToolbarSeparator` | A visual separator |
 
-Every item has `Label`, `Icon`, `IsEnabled` and `IsVisible`.
+Every item has `Label`, `Icon`, `IsEnabled` and `IsVisible`. Items in the built-in toolbars take their labels from `EditorStrings.Current` through `LocalizedLabel`; set `LocalizedLabel = s => s.Bold` on your own items to localize them as well (see [Localization](accessibility.md#localization)).
 
 ```csharp
 using MintedTextEditor.Core.Commands;
@@ -86,7 +86,7 @@ On a `ToolbarButton`, the `Icon` value selects a built-in icon from the current 
 | `align-left`, `align-center`, `align-right`, `align-justify` | |
 | `bullet-list`, `number-list`, `indent-decrease`, `indent-increase` | |
 | `hyperlink`, `image`, `table` | Prompt for a URL / image source / table size |
-| `font-family`, `font-size`, `heading`, `edit-actions`, `object-actions`, `table-actions` | On a `ToolbarDropdown`, the editor fills in the items and behaviour |
+| `font-family`, `font-size`, `heading`, `edit-actions`, `object-actions`, `table-actions` | On a `ToolbarDropdown`, the editor fills in the items (localized from `EditorStrings`, except font names and sizes) and behaviour |
 | `text-color`, `highlight-color` | On a `ToolbarColorPicker`, the editor applies the chosen color |
 
 ## Toolbar Layout

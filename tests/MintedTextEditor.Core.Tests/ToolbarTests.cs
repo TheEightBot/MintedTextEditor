@@ -52,7 +52,7 @@ public class ToolbarTests
     {
         var toolbar = ToolbarDefinition.CreateDefault();
         var dd = toolbar.AllItems.OfType<ToolbarDropdown>()
-                        .FirstOrDefault(d => d.Label == "Font Family");
+                        .FirstOrDefault(d => d.Label == "Font family");
         Assert.NotNull(dd);
     }
 
@@ -323,5 +323,24 @@ public class ToolbarTests
         var secondRowHit = renderer.HitTest(20f, 50f);
         Assert.NotNull(secondRowHit);
         Assert.IsType<ToolbarButton>(secondRowHit);
+    }
+
+    [Fact]
+    public void DropdownList_WidensToFitLongestOption()
+    {
+        const string longOption = "Insertar columna a la derecha de la celda";
+        var dd = new ToolbarDropdown { Label = "Table", Items = { "Short", longOption } };
+        var renderer = new ToolbarRenderer(ToolbarDefinition.CreateFromItems(new List<ToolbarItem> { dd }));
+
+        var dc = new MockDrawingContext();
+        var bounds = new EditorRect(0, 0, 800, 600);
+        renderer.Render(dc, bounds);
+        renderer.ToggleOverlay(dd);
+        dc.DrawTextInRectCalls.Clear();
+        renderer.RenderOverlay(dc, bounds.Width, bounds.Height);
+
+        var drawn = dc.DrawTextInRectCalls.Single(c => c.Text == longOption);
+        Assert.True(drawn.Rect.Width >= dc.MeasureText(longOption, new EditorPaint()).Width,
+            $"Option rect {drawn.Rect.Width}px is narrower than its text");
     }
 }

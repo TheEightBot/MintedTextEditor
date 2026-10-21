@@ -189,24 +189,28 @@ public sealed class ToolbarRenderer
 
         const int maxVisible = 10;
         int itemCount = Math.Min(dd.Items.Count, maxVisible);
-        float panelW = Math.Max(anchor.Width, 120f);
-        float panelH = itemCount * _overlayItemH + 4f;
-
-        // Position below the dropdown button, clamped inside canvas
-        float panelX = anchor.X;
-        float panelY = anchor.Y + anchor.Height + 2f;
-        if (panelX + panelW > totalWidth)  panelX = totalWidth - panelW;
-        if (panelY + panelH > totalHeight) panelY = anchor.Y - panelH - 2f;
-
-        _overlayRect = new EditorRect(panelX, panelY, panelW, panelH);
-
-        // Panel shadow / background
         var shadowPaint  = new EditorPaint { Color = new EditorColor(0, 0, 0, 40) };
         var bgPaint      = new EditorPaint { Color = EditorColor.White };
         var borderPaint  = new EditorPaint { Color = SeparatorColor };
         var textPaint    = new EditorPaint { Color = ButtonColor };
         var activePaint  = new EditorPaint { Color = ActiveColor };
 
+        // Widen the panel to fit the longest option (localized text is often longer than English).
+        float panelW = Math.Max(anchor.Width, 120f);
+        for (int i = 0; i < itemCount; i++)
+            panelW = Math.Max(panelW, ctx.MeasureText(dd.Items[i], textPaint).Width + 12f);
+        if (totalWidth > 0f) panelW = Math.Min(panelW, totalWidth);
+        float panelH = itemCount * _overlayItemH + 4f;
+
+        // Position below the dropdown button, clamped inside canvas
+        float panelX = anchor.X;
+        float panelY = anchor.Y + anchor.Height + 2f;
+        if (panelX + panelW > totalWidth)  panelX = Math.Max(0f, totalWidth - panelW);
+        if (panelY + panelH > totalHeight) panelY = anchor.Y - panelH - 2f;
+
+        _overlayRect = new EditorRect(panelX, panelY, panelW, panelH);
+
+        // Panel shadow / background
         ctx.FillRoundRect(_overlayRect.Inflate(2, 2), 5f, shadowPaint);
         ctx.FillRoundRect(_overlayRect, 4f, bgPaint);
         ctx.DrawRoundRect(_overlayRect, 4f, borderPaint);
