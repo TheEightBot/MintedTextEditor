@@ -471,7 +471,9 @@ public static class DocumentEditor
     /// range starts before the table) to its end cell (or the last cell when it ends after it).
     /// <c>From</c> and <c>To</c> are the range's endpoints when they lie in that paragraph, and null
     /// when the paragraph is covered from its start or to its end. A position in a cell refers to the
-    /// cell's first paragraph, so later paragraphs of the end cell are not included.
+    /// cell's first paragraph, so later paragraphs of the end cell are not included. Slots covered by a
+    /// merged cell's <see cref="TableCell.RowSpan"/> / <see cref="TableCell.ColumnSpan"/> are hidden, so
+    /// their cells are skipped (unless the range starts or ends in one).
     /// </summary>
     internal static List<(Paragraph Paragraph, DocumentPosition? From, DocumentPosition? To)> GetParagraphsInRange(
         Document document, TextRange range)
@@ -493,6 +495,8 @@ public static class DocumentEditor
                 case TableBlock table:
                     bool startsInTable = bi == start.BlockIndex && start.IsInTableCell;
                     bool endsInTable = bi == end.BlockIndex && end.IsInTableCell;
+                    // Slots covered by another cell's span are hidden (layout skips them too).
+                    var owners = table.BuildSpanOwners();
                     for (int r = 0; r < table.Rows.Count; r++)
                     {
                         for (int c = 0; c < table.Rows[r].Cells.Count; c++)
@@ -501,6 +505,8 @@ public static class DocumentEditor
                             if (endsInTable && (r, c).CompareTo((end.CellRow, end.CellCol)) > 0) continue;
                             bool isStartCell = startsInTable && r == start.CellRow && c == start.CellCol;
                             bool isEndCell = endsInTable && r == end.CellRow && c == end.CellCol;
+                            bool covered = r < owners.Length && c < owners[r].Length && owners[r][c] != (r, c);
+                            if (covered && !isStartCell && !isEndCell) continue;
 
                             var blocks = table.Rows[r].Cells[c].Blocks;
                             for (int k = 0; k < blocks.Count; k++)

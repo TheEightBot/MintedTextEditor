@@ -241,6 +241,51 @@ public class TableEditingFixesTests
         Assert.Equal("ABDC\nE", ((TableBlock)doc.Blocks[0]).GetCell(0, 0)!.GetText());
     }
 
+    // ── Merged cells: covered slots are hidden and not part of a selection ────
+
+    /// <summary>The <see cref="Table"/> with its top row merged into one cell; (0,1) keeps its hidden "B1".</summary>
+    private static TableBlock TableWithMergedTopRow()
+    {
+        var table = Table();
+        TableEngine.MergeCells(table, 0, 0, 1, 2);
+        return table;
+    }
+
+    [Fact]
+    public void GetSelectedText_AcrossMergedCell_SkipsCoveredSlot()
+    {
+        var doc = new EditorDocument([TableWithMergedTopRow()]);
+
+        Assert.Equal("1\nA", DocumentEditor.GetSelectedText(doc, new TextRange(Cell(0, 0, 0, 0, 1), Cell(0, 1, 0, 0, 1))));
+    }
+
+    [Fact]
+    public void ApplyTextStyle_AcrossMergedCell_LeavesCoveredSlotUnchanged()
+    {
+        var table = TableWithMergedTopRow();
+        var doc = new EditorDocument([table]);
+        var range = new TextRange(Cell(0, 0, 0, 0, 0), Cell(0, 1, 0, 0, 2));
+
+        DocumentEditor.ApplyTextStyle(doc, range, s => s.WithBold(true));
+
+        Assert.Equal("T['A1'b/'B1';'A2'b/'B2']", Dump(doc));
+        Assert.True(FormattingEngine.IsAppliedToEntireRange(doc, range, s => s.IsBold));
+    }
+
+    [Fact]
+    public void FormattingState_AcrossMergedCell_IgnoresCoveredSlot()
+    {
+        var table = TableWithMergedTopRow();
+        CellParagraph(table, 0, 0).Inlines.OfType<TextRun>().Single().Style = Bold;
+        CellParagraph(table, 1, 0).Inlines.OfType<TextRun>().Single().Style = Bold;
+        var doc = new EditorDocument([table]);
+
+        // The hidden, non-bold "B1" must not make the visible all-bold selection look mixed.
+        var state = FormattingState.Compute(doc, new TextRange(Cell(0, 0, 0, 0, 0), Cell(0, 1, 0, 0, 2)));
+
+        Assert.True(state.IsBold);
+    }
+
     // ── 3. Character formatting in table cells ────────────────────────────────
 
     [Fact]
