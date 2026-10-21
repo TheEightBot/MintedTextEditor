@@ -15,6 +15,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 - `ContextMenuRenderer` arrow-key navigation skips disabled items, Enter never returns a disabled item and `HitTest` does not focus one, and the default colors follow the light theme (pale-blue highlight with normal text instead of cornflower blue with white text).
 - `ContextMenuFactory.CreateDefault` shows Edit/Remove/Open Hyperlink when the caret is on a link, not only when a selection starts on one, matching where the hyperlink commands act.
+- `ISpellCheckProvider` (`MTE001`), `IPrintProvider` (`MTE002`) and `ITextShaper` / `ShapedTextResult` / `DefaultTextShaper` (`MTE003`) are now marked `[Experimental]`: the editor does not use them yet, so code that references them now reports the diagnostic and must suppress it. See [Experimental APIs](docs/architecture.md#experimental-apis).
+- The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.
+
+### Removed
+- `SkiaSharpEngine`, a placeholder class whose only member, `IsAvailable`, always returned `true`.
 
 ---
 

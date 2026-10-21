@@ -8,7 +8,6 @@
 
     <!-- NuGet Package Metadata (Authors, License, URLs inherited from Directory.Build.props) -->
     <PackageId>MintedTextEditor.SkiaSharp</PackageId>
-    <Version>1.0.0</Version>
     <Description>SkiaSharp rendering engine for the MintedTextEditor control. Provides cross-platform rich text painting including text layout, formatting, selection, caret, and inline content — all rendered via SkiaSharp.</Description>
     <PackageTags>maui;richtexteditor;skiasharp;rendering;text;editor</PackageTags>
   </PropertyGroup>
