@@ -91,14 +91,27 @@ How the control uses it:
 
 ### Inserting a Hyperlink
 
-The toolbar's hyperlink button prompts for a URL. From code, use the undoable `InsertHyperlinkCommand`; selected text becomes the link text, otherwise the URL is inserted as the text:
+The toolbar's hyperlink button prompts for a URL and links the selected text (or inserts the URL as the text). From code, use the undoable `InsertHyperlinkCommand`. Its optional `DisplayText` sets the text shown for the link:
+
+| `DisplayText` | No selection | With a selection |
+|---|---|---|
+| Empty (default) | Inserts the URL as the link text at the caret | Links the selected text |
+| Set | Inserts `DisplayText` as the link text at the caret | Replaces the selected text with `DisplayText` and links it |
+
+A `DisplayText` that is only whitespace counts as empty. Either way the insertion is a single undo step (undo restores any replaced text with its formatting, and leaves other images, links and line breaks in the paragraph untouched) and the caret is left at the end of the link.
 
 ```csharp
 // ctx: an EditorContext built as shown under "Inserting an Image"
 new InsertHyperlinkCommand { Url = "https://github.com/TheEightBot/MintedTextEditor" }.Execute(ctx);
+
+new InsertHyperlinkCommand
+{
+    Url = "https://github.com/TheEightBot/MintedTextEditor",
+    DisplayText = "MintedTextEditor on GitHub",
+}.Execute(ctx);
 ```
 
-`HyperlinkEngine.InsertHyperlink(doc, range, url, title)` does the same directly on the model, without undo.
+`HyperlinkEngine.InsertHyperlink(doc, range, url, title)` and `HyperlinkEngine.InsertHyperlink(doc, range, url, title, displayText)` do the same directly on the model, without undo.
 
 ### HyperlinkInline Model
 
