@@ -1,4 +1,5 @@
 using MintedTextEditor.Core.Commands;
+using MintedTextEditor.Core.ContextMenu;
 using MintedTextEditor.Core.Document;
 using MintedTextEditor.Core.Editing;
 using MintedTextEditor.Core.Events;
@@ -82,9 +83,25 @@ public class MintedEditorView : ContentView
     private IDispatcherTimer? _longPressTimer;
     private bool _isCaretDragging;
     private long _gestureTouchId = -1; // the finger that owns the long press / caret drag
-    // Fingers that went down during a caret drag: ignored until they lift, even if the drag
-    // ends first, so they can never move the caret, select or tap a link.
+    // Fingers that went down during a caret drag, or whose long press opened the context menu:
+    // ignored until they lift, even if the drag ends or the menu closes first, so they can
+    // never move the caret, select or tap a link.
     private readonly HashSet<long> _ignoredTouchIds = new();
+    // Whether the finger moved (beyond the long-press slop) during the current caret drag;
+    // a drag that ends where it started opens the context menu instead.
+    private bool _caretDragMoved;
+    private float _caretDragStartX;
+    private float _caretDragStartY;
+    // A touch press that landed inside the selection keeps the selection until we know whether
+    // it is a long press (opens the context menu for it) or a tap/drag (collapses to here).
+    private DocumentPosition? _deferredTapPosition;
+
+    // ── Context menu ─────────────────────────────────────────────────────────────
+    private readonly ContextMenuRenderer _contextMenu = new();
+    private long _contextMenuPressId = -1; // a press that started inside the open menu
+    // Set when the canvas handled a right-click itself, so the secondary-tap recognizer skips
+    // the same click (Windows can report it both ways).
+    private bool _skipNextSecondaryTap;
     private readonly Magnifier _magnifier = new();
     private readonly MagnifierRenderer _magnifierRenderer = new();
     private int _resizingRowIndex = -1;
@@ -159,7 +176,10 @@ public class MintedEditorView : ContentView
                 v._caret.BlinkEnabled = !(bool)nv;
                 // Touch is ignored while read-only, so a release could never end the gesture.
                 if ((bool)nv)
+                {
                     v.CancelCaretGesture();
+                    v.CloseContextMenu();
+                }
                 v.InvalidateCanvas();
             });
 
@@ -342,6 +362,33 @@ public class MintedEditorView : ContentView
     {
         get => (MagnifierOptions)GetValue(MagnifierOptionsProperty);
         set => SetValue(MagnifierOptionsProperty, value);
+    }
+
+    /// <summary>Bindable property for <see cref="IsContextMenuEnabled"/>.</summary>
+    public static readonly BindableProperty IsContextMenuEnabledProperty =
+        BindableProperty.Create(
+            nameof(IsContextMenuEnabled),
+            typeof(bool),
+            typeof(MintedEditorView),
+            true,
+            propertyChanged: static (b, _, nv) =>
+            {
+                if (!(bool)nv)
+                    ((MintedEditorView)b).CloseContextMenu();
+            });
+
+    /// <summary>
+    /// Shows the built-in context menu (Cut, Copy, Paste, Select All, hyperlink, image and table
+    /// actions), drawn on the canvas with the theme's context-menu colours. It opens on a
+    /// right-click (secondary click) and, on touch screens, on a long press that is not used to
+    /// drag the caret: a long press on the selection, or a long press released without moving.
+    /// Customise the items with <see cref="ContextMenuItemsRequested"/>. Not shown while
+    /// <see cref="IsReadOnly"/> is true. Default: <c>true</c>.
+    /// </summary>
+    public bool IsContextMenuEnabled
+    {
+        get => (bool)GetValue(IsContextMenuEnabledProperty);
+        set => SetValue(IsContextMenuEnabledProperty, value);
     }
 
     /// <summary>Bindable property for <see cref="ToolbarMaxRows"/>.</summary>
@@ -767,6 +814,14 @@ public class MintedEditorView : ContentView
     /// <summary>Raised when image insertion is requested so hosts can provide a source.</summary>
     public event EventHandler<ImageRequestedEventArgs>? ImageRequested;
 
+    /// <summary>
+    /// Raised each time the context menu is about to open. Add, remove or change items in
+    /// <see cref="ContextMenuItemsRequestedEventArgs.Definition"/>; a custom item runs its
+    /// <see cref="ContextMenuItem.Command"/> when chosen. The menu is not shown when no visible
+    /// items remain.
+    /// </summary>
+    public event EventHandler<ContextMenuItemsRequestedEventArgs>? ContextMenuItemsRequested;
+
     /// <summary>Platform handler used to open hyperlinks when activation is not cancelled.</summary>
     public IHyperlinkHandler HyperlinkHandler { get; set; } = new MauiHyperlinkHandler();
 
@@ -793,6 +848,17 @@ public class MintedEditorView : ContentView
         _canvas = new SKCanvasView { EnableTouchEvents = true };
         _canvas.PaintSurface += OnPaintSurface;
         _canvas.Touch += OnCanvasTouch;
+
+        // Right-click on desktop. Mac Catalyst does not report secondary clicks as canvas
+        // touches, so a secondary-button tap recognizer opens the menu there (and on Windows,
+        // where it backs up the canvas's right-button press). It is not added on Android/iOS,
+        // where a platform gesture recognizer could compete with the canvas for touches.
+        if (DeviceInfo.Platform == DevicePlatform.WinUI || DeviceInfo.Platform == DevicePlatform.MacCatalyst)
+        {
+            var secondaryTap = new TapGestureRecognizer { Buttons = ButtonsMask.Secondary };
+            secondaryTap.Tapped += OnSecondaryTapped;
+            _canvas.GestureRecognizers.Add(secondaryTap);
+        }
 
         _keyboardProxy = new KeyboardProxy
         {
@@ -1003,6 +1069,7 @@ public class MintedEditorView : ContentView
     /// <summary>Scrolls the viewport to the given document Y offset.</summary>
     public void ScrollTo(float y)
     {
+        CloseContextMenu();
         _scrollOffset = Math.Max(0f, y);
         _renderer.ScrollOffset = _scrollOffset;
         InvalidateCanvas();
@@ -1029,6 +1096,7 @@ public class MintedEditorView : ContentView
         else
         {
             StopBlinkTimer();
+            CloseContextMenu();
         }
     }
 
@@ -1262,6 +1330,13 @@ public class MintedEditorView : ContentView
         if (ShowToolbar && _toolbarRenderer.IsOverflowPanelOpen)
             _toolbarRenderer.RenderOverflowPanel(dc, logicalW, logicalH);
 
+        // Context menu above the document and toolbar overlays.
+        if (_contextMenu.IsOpen)
+        {
+            _contextMenu.ApplyStyle(theme);
+            _contextMenu.Render(dc);
+        }
+
         // Magnifier last, above everything: the document drawn again, zoomed, in a lens.
         _magnifierRenderer.Render(dc, _magnifier, new EditorRect(0, 0, logicalW, logicalH),
             theme.Background, ctx => RenderDocumentLayer(ctx, viewport));
@@ -1310,6 +1385,14 @@ public class MintedEditorView : ContentView
         {
             if (e.ActionType is SKTouchAction.Released or SKTouchAction.Cancelled)
                 _ignoredTouchIds.Remove(e.Id);
+            e.Handled = true;
+            return;
+        }
+
+        // While the context menu is open it receives every pointer event.
+        if (_contextMenu.IsOpen)
+        {
+            HandleContextMenuTouch(e, rawX, rawY, toolbarH);
             e.Handled = true;
             return;
         }
@@ -1381,6 +1464,14 @@ public class MintedEditorView : ContentView
             {
                 StopInertiaTimer();
 
+                if (IsSecondaryClick(e) && IsContextMenuEnabled)
+                {
+                    _skipNextSecondaryTap = true;
+                    OpenContextMenuAtClick(rawX, rawY);
+                    e.Handled = true;
+                    return;
+                }
+
                 if (TryBeginImageResize(x, y) || TryBeginTableColumnResize(x, y) || TryBeginTableRowResize(x, y))
                 {
                     _keyboardProxy.Focus();
@@ -1403,18 +1494,35 @@ public class MintedEditorView : ContentView
                 {
                     _selectedImage = null;
                 }
-                _caret.Position = hitPosition;
-                _caret.ResetBlink();
-                _inputController.Selection.CollapseTo(hitPosition);
+
+                // A finger on the selection keeps it for now: holding still opens the context
+                // menu for it, while lifting or moving collapses it here as an ordinary tap.
+                var selection = _inputController.Selection;
+                _deferredTapPosition = IsContextMenuEnabled
+                                       && e.DeviceType == SKTouchDeviceType.Touch
+                                       && !selection.IsEmpty
+                                       && selection.Range.Contains(hitPosition)
+                    ? hitPosition
+                    : null;
+
+                if (_deferredTapPosition is null)
+                {
+                    _caret.Position = hitPosition;
+                    _caret.ResetBlink();
+                    _inputController.Selection.CollapseTo(hitPosition);
+                }
                 _keyboardProxy.Focus();
                 // Bring up the soft keyboard on tap. ShowKeyboard() re-shows it even when
                 // the proxy already holds focus (e.g. dismissed via the back button).
                 _keyboardProxy.ShowKeyboard();
-                // Notify the IME of the new selection position so it stops composing
-                // against a stale cursor offset.
-                NotifyImeSelectionChanged();
+                if (_deferredTapPosition is null)
+                {
+                    // Notify the IME of the new selection position so it stops composing
+                    // against a stale cursor offset.
+                    NotifyImeSelectionChanged();
+                    RaiseSelectionChanged();
+                }
                 InvalidateCanvas();
-                RaiseSelectionChanged();
 
                 // Holding still starts a caret drag (with the magnifier), as on iOS/Android.
                 if (e.DeviceType == SKTouchDeviceType.Touch)
@@ -1426,12 +1534,28 @@ public class MintedEditorView : ContentView
                 if (_isCaretDragging)
                 {
                     if (e.Id == _gestureTouchId)
+                    {
+                        float dx = rawX - _caretDragStartX;
+                        float dy = rawY - _caretDragStartY;
+                        if (dx * dx + dy * dy > _longPress.Slop * _longPress.Slop)
+                            _caretDragMoved = true;
                         UpdateCaretDrag(rawX, rawY);
+                    }
                     break;
                 }
 
                 if (e.Id == _gestureTouchId)
                     _longPress.Move(rawX, rawY);
+
+                if (_deferredTapPosition is { } deferredPosition && e.Id == _gestureTouchId)
+                {
+                    // Still holding still on the selection: wait for the long press.
+                    if (_longPress.IsTracking)
+                        break;
+                    // Moved away: from here on it is an ordinary press at that point.
+                    _deferredTapPosition = null;
+                    MoveCaretTo(deferredPosition);
+                }
 
                 if (_isResizingImage)
                 {
@@ -1480,10 +1604,23 @@ public class MintedEditorView : ContentView
                     _longPress.Cancel();
                 if (_isCaretDragging)
                 {
-                    // Only the finger that owns the drag ends it.
+                    // Only the finger that owns the drag ends it. A long press released
+                    // without dragging opens the context menu (Paste, Select All, …).
                     if (e.Id == _gestureTouchId)
+                    {
+                        bool openMenu = !_caretDragMoved;
                         EndCaretDrag();
+                        if (openMenu)
+                            OpenContextMenu(rawX, rawY);
+                    }
                     break;
+                }
+
+                if (_deferredTapPosition is { } deferredPosition && e.Id == _gestureTouchId)
+                {
+                    // A tap on the selection: collapse it to the tapped point.
+                    _deferredTapPosition = null;
+                    MoveCaretTo(deferredPosition);
                 }
 
                 if (_isResizingImage)
@@ -1547,6 +1684,292 @@ public class MintedEditorView : ContentView
         e.Handled = true;
     }
 
+    // ── Context menu ─────────────────────────────────────────────────────────────
+
+    private static bool IsSecondaryClick(SKTouchEventArgs e) =>
+        e.DeviceType == SKTouchDeviceType.Mouse && e.MouseButton == SKMouseButton.Right;
+
+    /// <summary>Routes a pointer event to the open context menu.</summary>
+    private void HandleContextMenuTouch(SKTouchEventArgs e, float rawX, float rawY, float toolbarH)
+    {
+        switch (e.ActionType)
+        {
+            case SKTouchAction.Pressed:
+                if (IsSecondaryClick(e))
+                    _skipNextSecondaryTap = true;
+
+                if (_contextMenu.IsClickOutside(rawX, rawY))
+                {
+                    // A press outside only dismisses the menu; a right-click below the toolbar
+                    // opens a new one there.
+                    CloseContextMenu();
+                    if (IsSecondaryClick(e) && !(ShowToolbar && rawY < toolbarH))
+                        OpenContextMenuAtClick(rawX, rawY);
+                    _keyboardProxy.Focus();
+                }
+                else
+                {
+                    _contextMenuPressId = e.Id;
+                    _contextMenu.HitTest(rawX, rawY);
+                    InvalidateCanvas();
+                }
+                break;
+
+            case SKTouchAction.Moved:
+                // Mouse hover, or a finger/button held down after pressing inside the menu.
+                if (!e.InContact || e.Id == _contextMenuPressId)
+                {
+                    int focused = _contextMenu.FocusedIndex;
+                    _contextMenu.HitTest(rawX, rawY);
+                    if (focused != _contextMenu.FocusedIndex)
+                        InvalidateCanvas();
+                }
+                break;
+
+            case SKTouchAction.Released:
+                // Only a press that started inside the menu chooses an item; the release of the
+                // click or touch that opened the menu is ignored.
+                if (e.Id == _contextMenuPressId)
+                {
+                    _contextMenuPressId = -1;
+                    if (_contextMenu.HitTest(rawX, rawY) is { IsEnabled: true } item)
+                        _ = ExecuteContextMenuItemAsync(item);
+                    else
+                        InvalidateCanvas();
+                }
+                break;
+
+            case SKTouchAction.Cancelled:
+                if (e.Id == _contextMenuPressId)
+                    _contextMenuPressId = -1;
+                break;
+
+            case SKTouchAction.WheelChanged:
+                CloseContextMenu();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Secondary-button tap from the gesture recognizer (Windows, Mac Catalyst). Ignored when the
+    /// canvas already handled the same click.
+    /// </summary>
+    private void OnSecondaryTapped(object? sender, TappedEventArgs e)
+    {
+        if (_skipNextSecondaryTap)
+        {
+            _skipNextSecondaryTap = false;
+            return;
+        }
+        if (IsReadOnly || !IsContextMenuEnabled)
+            return;
+        if (e.GetPosition(_canvas) is not { } point)
+            return;
+
+        float rawX = (float)point.X;
+        float rawY = (float)point.Y;
+        if (ShowToolbar && (rawY < _toolbarRenderer.ToolbarHeight
+                            || _toolbarRenderer.HasOpenOverlay || _toolbarRenderer.IsOverflowPanelOpen))
+            return;
+
+        CloseContextMenu();
+        OpenContextMenuAtClick(rawX, rawY);
+    }
+
+    /// <summary>
+    /// Opens the context menu for a right-click at a point in view coordinates. Like desktop
+    /// editors, a click inside the selection keeps it; elsewhere the caret moves to the click.
+    /// </summary>
+    private void OpenContextMenuAtClick(float rawX, float rawY)
+    {
+        float toolbarH = ShowToolbar ? _toolbarRenderer.ToolbarHeight : 0f;
+        var hit = DocumentHitTester.HitTest(rawX, rawY - toolbarH + _scrollOffset, _lastLayout, _document, GetMeasureContext());
+        var position = NormalizeTapPosition(hit.Position, hit.IsAfterLastBlock);
+
+        var selection = _inputController.Selection;
+        if (selection.IsEmpty || !selection.Range.Contains(position))
+        {
+            _selectedImage = null;
+            MoveCaretTo(position);
+        }
+
+        _keyboardProxy.Focus();
+        OpenContextMenu(rawX, rawY);
+    }
+
+    /// <summary>Collapses the selection to <paramref name="position"/>, as a tap there does.</summary>
+    private void MoveCaretTo(DocumentPosition position)
+    {
+        _caret.Position = position;
+        _caret.ResetBlink();
+        _inputController.Selection.CollapseTo(position);
+        NotifyImeSelectionChanged();
+        RaiseSelectionChanged();
+        InvalidateCanvas();
+    }
+
+    /// <summary>
+    /// Builds the menu for the current selection, lets the host customise it through
+    /// <see cref="ContextMenuItemsRequested"/>, and opens it at a point in view coordinates.
+    /// </summary>
+    private void OpenContextMenu(float rawX, float rawY)
+    {
+        if (!IsContextMenuEnabled || IsReadOnly)
+            return;
+
+        _longPress.Cancel();
+        _deferredTapPosition = null;
+        StopInertiaTimer();
+        if (_toolbarRenderer.HasOpenOverlay)
+            _toolbarRenderer.CloseOverlay();
+
+        var ctx = GetEditorContext();
+        var definition = ContextMenuFactory.CreateDefault(ctx);
+        ContextMenuItemsRequested?.Invoke(this, new ContextMenuItemsRequestedEventArgs(definition, ctx));
+        if (!definition.VisibleItems.Any())
+        {
+            CloseContextMenu();
+            return;
+        }
+
+        float width  = Width  > 0 ? (float)Width  : 400f;
+        float height = Height > 0 ? (float)Height : 400f;
+        _contextMenu.Open(definition, rawX, rawY, new EditorRect(0, 0, width, height));
+        _contextMenuPressId = -1;
+        InvalidateCanvas();
+    }
+
+    private void CloseContextMenu()
+    {
+        _contextMenuPressId = -1;
+        if (!_contextMenu.IsOpen)
+            return;
+        _contextMenu.Close();
+        InvalidateCanvas();
+    }
+
+    /// <summary>
+    /// Handles a key while the context menu is open: Up/Down move the highlight, Enter runs the
+    /// highlighted item, Escape closes the menu. Any other key closes the menu and returns false
+    /// so the editor handles it as usual.
+    /// </summary>
+    private bool HandleContextMenuKey(EditorKeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case EditorKey.Escape:
+                CloseContextMenu();
+                return true;
+            case EditorKey.Up:
+                _contextMenu.HandleKey(ConsoleKey.UpArrow);
+                InvalidateCanvas();
+                return true;
+            case EditorKey.Down:
+                _contextMenu.HandleKey(ConsoleKey.DownArrow);
+                InvalidateCanvas();
+                return true;
+            case EditorKey.Enter:
+                ActivateFocusedContextMenuItem();
+                return true;
+            default:
+                CloseContextMenu();
+                return false;
+        }
+    }
+
+    private void ActivateFocusedContextMenuItem()
+    {
+        if (_contextMenu.HandleKey(ConsoleKey.Enter) is { } item)
+            _ = ExecuteContextMenuItemAsync(item);
+        else
+            CloseContextMenu();
+    }
+
+    /// <summary>
+    /// Closes the menu and runs <paramref name="item"/>. The built-in items go through the same
+    /// paths as the toolbar: clipboard items use the input controller (so Cut is undoable), insert
+    /// items prompt for their URL, source or size, and Open Hyperlink uses <see cref="HyperlinkHandler"/>.
+    /// Any other item runs its <see cref="ContextMenuItem.Command"/>.
+    /// </summary>
+    private async Task ExecuteContextMenuItemAsync(ContextMenuItem item)
+    {
+        CloseContextMenu();
+        if (!item.IsEnabled)
+            return;
+
+        try
+        {
+            switch (item.Command)
+            {
+                case CutCommand:
+                    await _inputController.HandleCutAsync(_document);
+                    break;
+                case CopyCommand:
+                    await _inputController.HandleCopyAsync(_document);
+                    break;
+                case null when item.Icon == "paste":
+                    await _inputController.HandlePasteAsync(_document);
+                    break;
+                case InsertHyperlinkCommand { Url: "" } when item.Icon == "hyperlink-edit":
+                    await HandleEditHyperlinkAsync();
+                    return;
+                case InsertHyperlinkCommand { Url: "" }:
+                    await HandleInsertHyperlinkAsync();
+                    return;
+                case InsertImageCommand { Source: "" }:
+                    await HandleInsertImageAsync();
+                    return;
+                case InsertTableCommand when item.Icon == "table":
+                    await HandleInsertTableAsync();
+                    return;
+                case OpenHyperlinkCommand open:
+                    open.OnOpen ??= url => HyperlinkHandler.OpenUrl(url);
+                    ExecuteToolbarCommand(open);
+                    return;
+                case { } command:
+                    ExecuteToolbarCommand(command);
+                    return;
+                default:
+                    return;
+            }
+        }
+        catch (Exception)
+        {
+            // Clipboard access can fail (e.g. permission denied); the menu is already closed.
+            return;
+        }
+
+        // Clipboard operations: refresh like a handled key.
+        _caret.MoveTo(_inputController.Selection.Active);
+        ScrollCaretIntoView();
+        NotifyImeSelectionChanged();
+        InvalidateCanvas();
+        RaiseSelectionChanged();
+        _keyboardProxy.Focus();
+    }
+
+    /// <summary>Prompts for a new URL for the hyperlink at the caret.</summary>
+    private async Task HandleEditHyperlinkAsync()
+    {
+        var link = HyperlinkEngine.GetHyperlinkAtPosition(_document, _inputController.Selection.Active);
+        var page = GetHostPage();
+        if (link is null || page is null) return;
+
+        string? url = await page.DisplayPromptAsync(
+            "Edit Hyperlink",
+            "Enter URL:",
+            accept: "Save",
+            cancel: "Cancel",
+            initialValue: link.Url,
+            keyboard: Keyboard.Url);
+
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        HyperlinkEngine.EditHyperlink(_document, link, url, link.Title);
+        InvalidateCanvas();
+        _keyboardProxy.Focus();
+    }
+
     // ── Long-press caret drag & magnifier ────────────────────────────────────────
 
     private void StartLongPress(long touchId, float rawX, float rawY)
@@ -1582,7 +2005,20 @@ public class MintedEditorView : ContentView
             return;
         }
 
+        // A long press on the selection opens the context menu for it instead of dragging the
+        // caret. The finger stays down; ignore it until it lifts so its release is not a tap.
+        if (_deferredTapPosition is not null)
+        {
+            _deferredTapPosition = null;
+            _ignoredTouchIds.Add(_gestureTouchId);
+            OpenContextMenu(_longPress.X, _longPress.Y);
+            return;
+        }
+
         _isCaretDragging = true;
+        _caretDragMoved = false;
+        _caretDragStartX = _longPress.X;
+        _caretDragStartY = _longPress.Y;
         _inertialScroller.Stop();
         _selectedImage = null;
         UpdateCaretDrag(_longPress.X, _longPress.Y);
@@ -1630,6 +2066,7 @@ public class MintedEditorView : ContentView
     private void CancelCaretGesture()
     {
         _longPress.Cancel();
+        _deferredTapPosition = null;
         _ignoredTouchIds.Clear();
         if (_isCaretDragging)
             EndCaretDrag();
@@ -1732,9 +2169,14 @@ public class MintedEditorView : ContentView
 
         _caret.IsFocused = isFocused;
         if (isFocused)
+        {
             StartBlinkTimer();
+        }
         else
+        {
             StopBlinkTimer();
+            CloseContextMenu();
+        }
 
         InvalidateCanvas();
         EditorFocusChanged?.Invoke(this, new FocusChangedEventArgs(isFocused));
@@ -1744,6 +2186,8 @@ public class MintedEditorView : ContentView
 
     private void OnDocumentChanged(object? sender, DocumentChangedEventArgs e)
     {
+        // The open menu was built for the old content; its items may no longer apply.
+        CloseContextMenu();
         _layoutCache.OnDocumentChanged(_document, e);
         TextChanged?.Invoke(this, new EditorTextChangedEventArgs(e.AffectedRange));
         InvalidateCanvas();
@@ -2108,6 +2552,8 @@ public class MintedEditorView : ContentView
     {
         if (IsReadOnly) return;
         _lastKeyboardModifiers = e.Modifiers;
+        if (_contextMenu.IsOpen && e.IsKeyDown && HandleContextMenuKey(e))
+            return;
         bool handled = _inputController.HandleKeyDown(e, _document, _lastLayout, GetMeasureContext());
         if (handled)
         {
@@ -2140,8 +2586,16 @@ public class MintedEditorView : ContentView
         public void SetSelection(int start, int end) =>
             Apply(() => editor._inputController.SetImeSelection(start, end, editor._document));
 
-        public void Enter() =>
+        public void Enter()
+        {
+            // The soft keyboard's Enter chooses the highlighted context-menu item.
+            if (editor._contextMenu.IsOpen && !editor.IsReadOnly)
+            {
+                editor.ActivateFocusedContextMenuItem();
+                return;
+            }
             Apply(() => editor._inputController.HandleTextInput("\n", editor._document));
+        }
 
         private void Apply(Action edit)
         {

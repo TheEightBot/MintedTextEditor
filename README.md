@@ -38,6 +38,7 @@ MintedTextEditor is organized into three packages:
 - Inline content: hyperlinks, images, tables.
 - Editing primitives: caret navigation, selection, clipboard, undo/redo.
 - Touch caret drag with a native-style magnifier (loupe), configurable or switchable off.
+- Themed, canvas-drawn context menu (cut, copy, paste, select all, hyperlink, image and table actions) on right-click or long press, with keyboard navigation and customizable items.
 - Text shaped with HarfBuzz (kerning, ligatures, complex scripts); emoji, ZWJ sequences and flags draw as one glyph and are never split by the caret, Backspace, wrapping or hit-testing.
 - Android soft-keyboard and IME support (composition, suggestions, dead keys on hardware keyboards).
 - Toolbar and command architecture with customizable item sets.
@@ -197,6 +198,16 @@ using MintedTextEditor.Core.Editing;
 Editor.IsMagnifierEnabled = false;                      // turn it off
 Editor.MagnifierOptions = MagnifierOptions.Android;     // or customise size, zoom, border, shadow
 ```
+
+### Context menu
+
+Right-click, long-press the selection, or long-press without dragging to open the context menu. Customize its items with `ContextMenuItemsRequested`, or turn it off:
+
+```csharp
+Editor.IsContextMenuEnabled = false;
+```
+
+See [docs/commands-events.md](docs/commands-events.md#context-menu).
 
 ### Focus
 

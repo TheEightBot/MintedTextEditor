@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Context menu**: `MintedEditorView` now shows the built-in context menu, drawn on the canvas in the theme's context-menu colors. It opens on a right-click and, on touch screens, on a long press on the selection or a long press released without dragging (long press then drag still moves the caret with the magnifier). Tap or click an item, or use Up/Down/Enter; Escape, a press outside, scrolling or focus loss close it. Cut/Copy/Paste use the keyboard-shortcut clipboard path, and Insert/Edit Hyperlink, Insert Image and Insert Table prompt like the toolbar. New `IsContextMenuEnabled` property (default `true`) and `ContextMenuItemsRequested` event to customize the items.
+- `ContextMenuRenderer` color properties (`BackgroundColor`, `BorderColor`, `SeparatorColor`, `TextColor`, `DisabledTextColor`, `HoverColor`), `ApplyStyle(EditorStyle)` and `Bounds`.
+
+### Changed
+- `ContextMenuRenderer` arrow-key navigation skips disabled items, Enter never returns a disabled item and `HitTest` does not focus one, and the default colors follow the light theme (pale-blue highlight with normal text instead of cornflower blue with white text).
+- `ContextMenuFactory.CreateDefault` shows Edit/Remove/Open Hyperlink when the caret is on a link, not only when a selection starts on one, matching where the hyperlink commands act.
+
 ---
 
 ## [0.3.1] — 2026-10-21

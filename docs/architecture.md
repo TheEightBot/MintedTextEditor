@@ -106,9 +106,11 @@ This layer provides the `IDrawingContext` implementation backed by SkiaSharp. It
 
 The MAUI layer hosts the core and the Skia renderer in a MAUI control. It targets `net10.0-android`, `net10.0-ios` and `net10.0-maccatalyst`, plus `net10.0-windows10.0.19041.0` when built on Windows.
 
-**MintedEditorView** is the public `ContentView`. It owns the `Document`, `UndoManager`, formatting engines, `EditorInputController`, `LayoutCache` and renderers. It exposes bindable properties (`Theme`, `ThemeMode`, `UseSystemTheme`, `IsReadOnly`, `PlaceholderText`, `IsWordWrap`, `ShowLineNumbers`, `ShowScrollbar`, `ShowToolbar`, `ToolbarDefinition`, `ToolbarItems`, `ToolbarIconPack`, `ToolbarMaxRows`, `IsMagnifierEnabled`, `MagnifierOptions`) and events (`TextChanged`, `SelectionChanged`, `HyperlinkClicked`, `IsHyperlinkSelectedChanged`, `EditorFocusChanged`, `ImageRequested`).
+**MintedEditorView** is the public `ContentView`. It owns the `Document`, `UndoManager`, formatting engines, `EditorInputController`, `LayoutCache` and renderers. It exposes bindable properties (`Theme`, `ThemeMode`, `UseSystemTheme`, `IsReadOnly`, `PlaceholderText`, `IsWordWrap`, `ShowLineNumbers`, `ShowScrollbar`, `ShowToolbar`, `ToolbarDefinition`, `ToolbarItems`, `ToolbarIconPack`, `ToolbarMaxRows`, `IsMagnifierEnabled`, `MagnifierOptions`, `IsContextMenuEnabled`) and events (`TextChanged`, `SelectionChanged`, `HyperlinkClicked`, `IsHyperlinkSelectedChanged`, `EditorFocusChanged`, `ImageRequested`, `ContextMenuItemsRequested`).
 
 On touch screens a long press picks up the caret (`LongPressDetector`) and dragging moves it; `MagnifierRenderer` draws the document again, zoomed, inside the lens.
+
+A right-click, or a long press that does not drag the caret, opens the context menu: `ContextMenuFactory` builds the items for the current selection, `ContextMenuItemsRequested` lets the host change them, and `ContextMenuRenderer` draws the popup on the canvas and hit-tests it.
 
 **KeyboardProxy** is a hidden 1×1 view whose `KeyboardProxyHandler` creates a native input view: a `View` with an `InputConnection` on Android (`KeyboardProxyHandler.Android.cs`), a `UIKeyInput` view on iOS and Mac Catalyst (`KeyboardProxyHandler.Apple.cs`), and a `TextBox` on Windows (`KeyboardProxyHandler.Windows.cs`). The csproj compiles each file only for its platforms. The proxy raises key, text and IME events that the view forwards to `EditorInputController`, and reports native focus changes, which drive `IsEditorFocused` and `EditorFocusChanged`.
 
@@ -119,7 +121,7 @@ User input
   ├─► KeyboardProxy (native key / text / IME events)
   │     └─► EditorInputController.HandleKeyDown / HandleTextInput / IME edits
   ├─► SKCanvasView touch
-  │     └─► hit-test, selection, caret drag, image/table resize, link taps
+  │     └─► hit-test, selection, caret drag, image/table resize, link taps, context menu
   └─► Toolbar tap
         └─► IEditorCommand.Execute(EditorContext)
 
@@ -131,7 +133,7 @@ Edits
               └─► SKCanvasView.InvalidateSurface()
                     └─► PaintSurface
                           └─► LayoutCache.GetLayout(…)
-                                └─► DocumentRenderer / ToolbarRenderer / MagnifierRenderer
+                                └─► DocumentRenderer / ToolbarRenderer / ContextMenuRenderer / MagnifierRenderer
                                       └─► SkiaDrawingContext → SKCanvas
 ```
 
@@ -145,6 +147,7 @@ Edits
 | Custom clipboard | `IClipboardProvider` | Integrate with a custom clipboard (core `EditorInputController`) |
 | HTML / Markdown output | `HtmlExportOptions`, `MarkdownExportOptions` | Configure export |
 | Custom toolbar | `ToolbarDefinition`, `ToolbarItems` | Choose and arrange toolbar items |
+| Custom context menu | `MintedEditorView.ContextMenuItemsRequested` | Add, remove or change context-menu items |
 | Custom string localization | `EditorStrings` | Replace UI strings |
 | Custom command | `IEditorCommand` | Add new operations (e.g. as toolbar buttons) |
 | Text shaping mode | `SkiaDrawingContext.ShapeAllText` | Trade shaping quality for speed |

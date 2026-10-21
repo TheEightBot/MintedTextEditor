@@ -4,6 +4,7 @@ using MintedTextEditor.Core.Document;
 using MintedTextEditor.Core.Editing;
 using MintedTextEditor.Core.Formatting;
 using MintedTextEditor.Core.Rendering;
+using MintedTextEditor.Core.Theming;
 
 namespace MintedTextEditor.Core.Tests;
 
@@ -16,6 +17,13 @@ public class ContextMenuTests
         doc ??= MakeDoc();
         return new EditorContext(doc, sel ?? new Selection(), new UndoManager(),
             new FormattingEngine(), new FontFormattingEngine());
+    }
+
+    private static EditorContext MakeCtxWithSelection()
+    {
+        var sel = new Selection();
+        sel.Set(new DocumentPosition(0, 0, 0), new DocumentPosition(0, 0, 5));
+        return MakeCtx(MakeDoc(), sel);
     }
 
     private static EditorDocument MakeDoc(string text = "Hello world")
@@ -250,7 +258,7 @@ public class ContextMenuTests
     [Fact]
     public void Renderer_HandleKey_DownArrow_AdvancesFocusedIndex()
     {
-        var ctx      = MakeCtx();
+        var ctx      = MakeCtxWithSelection(); // Cut and Copy enabled
         var def      = ContextMenuFactory.CreateDefault(ctx);
         var renderer = new ContextMenuRenderer();
         renderer.Open(def, 100, 100, new EditorRect(0, 0, 800, 600));
@@ -265,7 +273,7 @@ public class ContextMenuTests
     [Fact]
     public void Renderer_HandleKey_EnterReturnsSelectedItem()
     {
-        var ctx      = MakeCtx();
+        var ctx      = MakeCtxWithSelection();
         var def      = ContextMenuFactory.CreateDefault(ctx);
         var renderer = new ContextMenuRenderer();
         renderer.Open(def, 100, 100, new EditorRect(0, 0, 800, 600));
@@ -289,5 +297,258 @@ public class ContextMenuTests
         var mock = new MockDrawingContext();
         var ex   = Record.Exception(() => renderer.Render(mock));
         Assert.Null(ex);
+    }
+
+    // ── ContextMenuFactory – selection state ─────────────────────────────────
+
+    [Fact]
+    public void CreateDefault_CaretOnHyperlink_ShowsHyperlinkEditItems()
+    {
+        var doc = MakeDoc("Visit example.com today");
+        HyperlinkEngine.InsertHyperlink(doc,
+            new TextRange(new DocumentPosition(0, 0, 6), new DocumentPosition(0, 0, 17)),
+            "https://example.com");
+        var para = (Paragraph)doc.Blocks[0];
+        int linkIndex = para.Inlines.ToList().FindIndex(i => i is HyperlinkInline);
+
+        // A tap or long press on link text leaves a collapsed caret inside the link.
+        var sel = new Selection();
+        sel.CollapseTo(new DocumentPosition(0, linkIndex, 3));
+        var def = ContextMenuFactory.CreateDefault(MakeCtx(doc, sel));
+
+        Assert.Contains(def.Items, i => i.Label == "Remove Hyperlink");
+        Assert.Contains(def.Items, i => i.Label == "Open Hyperlink");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Insert Hyperlink");
+    }
+
+    [Fact]
+    public void CreateDefault_CaretOnPlainText_ShowsInsertHyperlinkOnly()
+    {
+        var sel = new Selection();
+        sel.CollapseTo(new DocumentPosition(0, 0, 3));
+        var def = ContextMenuFactory.CreateDefault(MakeCtx(MakeDoc(), sel));
+
+        Assert.Contains(def.Items, i => i.Label == "Insert Hyperlink");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Remove Hyperlink");
+    }
+
+    [Fact]
+    public void CreateDefault_ClipboardAndSelectAllItems_HaveExpectedCommands()
+    {
+        var def = ContextMenuFactory.CreateDefault(MakeCtxWithSelection());
+
+        Assert.IsType<CutCommand>(def.Items.First(i => i.Label == "Cut").Command);
+        Assert.IsType<CopyCommand>(def.Items.First(i => i.Label == "Copy").Command);
+        Assert.IsType<SelectAllCommand>(def.Items.First(i => i.Label == "Select All").Command);
+        // Paste reads the clipboard asynchronously, so the host runs it.
+        var paste = def.Items.First(i => i.Label == "Paste");
+        Assert.Null(paste.Command);
+        Assert.Equal("paste", paste.Icon);
+        Assert.True(paste.IsEnabled);
+    }
+
+    [Fact]
+    public void CreateDefault_OutsideTable_HasNoTableEditingItems()
+    {
+        var def = ContextMenuFactory.CreateDefault(MakeCtx());
+
+        Assert.DoesNotContain(def.Items, i => i.Label == "Delete Row");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Delete Table");
+    }
+
+    [Fact]
+    public void CreateDefault_InSingleRowTableCell_AddsTableItems_DeleteRowDisabled()
+    {
+        var doc = new EditorDocument();
+        doc.Blocks.Clear();
+        doc.AddBlock(new TableBlock(1, 2));
+        var sel = new Selection();
+        sel.CollapseTo(new DocumentPosition(0, 0, 0, 0, 0));
+
+        var def = ContextMenuFactory.CreateDefault(MakeCtx(doc, sel));
+
+        Assert.Contains(def.Items, i => i.Label == "Insert Row Above");
+        Assert.Contains(def.Items, i => i.Label == "Delete Table");
+        Assert.False(def.Items.First(i => i.Label == "Delete Row").IsEnabled);
+        Assert.True(def.Items.First(i => i.Label == "Delete Column").IsEnabled);
+    }
+
+    // ── ContextMenuRenderer – hit testing ────────────────────────────────────
+
+    private static (ContextMenuRenderer Renderer, ContextMenuDefinition Def) OpenAndRender(
+        EditorContext ctx, float x = 0, float y = 0)
+    {
+        var def      = ContextMenuFactory.CreateDefault(ctx);
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(def, x, y, new EditorRect(0, 0, 800, 600));
+        renderer.Render(new MockDrawingContext());
+        return (renderer, def);
+    }
+
+    [Fact]
+    public void Renderer_HitTest_BeforeRender_ReturnsNull()
+    {
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(ContextMenuFactory.CreateDefault(MakeCtx()), 0, 0, new EditorRect(0, 0, 800, 600));
+
+        Assert.Null(renderer.HitTest(renderer.Padding + 10, renderer.Padding + 10));
+    }
+
+    [Fact]
+    public void Renderer_HitTest_AccountsForSeparators()
+    {
+        var (renderer, _) = OpenAndRender(MakeCtxWithSelection(), 50, 40);
+
+        // Cut, Copy, Paste, [separator], Select All
+        float selectAllMidY = 40 + renderer.Padding + 3 * renderer.ItemHeight
+                              + renderer.SeparatorHeight + renderer.ItemHeight / 2f;
+        var hit = renderer.HitTest(50 + renderer.MinWidth / 2f, selectAllMidY);
+
+        Assert.Equal("Select All", hit?.Label);
+        Assert.Equal(3, renderer.FocusedIndex);
+    }
+
+    [Fact]
+    public void Renderer_HitTest_OnSeparatorGap_ReturnsNullButIsInsidePopup()
+    {
+        var (renderer, _) = OpenAndRender(MakeCtxWithSelection());
+
+        float gapY = renderer.Padding + 3 * renderer.ItemHeight + renderer.SeparatorHeight / 2f;
+        Assert.Null(renderer.HitTest(renderer.MinWidth / 2f, gapY));
+        Assert.False(renderer.IsClickOutside(renderer.MinWidth / 2f, gapY));
+    }
+
+    [Fact]
+    public void Renderer_HitTest_DisabledItem_ReturnsItemWithoutFocusingIt()
+    {
+        var (renderer, _) = OpenAndRender(MakeCtx()); // no selection: Cut disabled
+        renderer.HandleKey(ConsoleKey.DownArrow);
+
+        var hit = renderer.HitTest(renderer.MinWidth / 2f, renderer.Padding + renderer.ItemHeight / 2f);
+
+        Assert.Equal("Cut", hit?.Label);
+        Assert.False(hit!.IsEnabled);
+        Assert.Equal(-1, renderer.FocusedIndex);
+    }
+
+    [Fact]
+    public void Renderer_HitTest_OutsideItems_ClearsFocus()
+    {
+        var (renderer, _) = OpenAndRender(MakeCtxWithSelection());
+        renderer.HandleKey(ConsoleKey.DownArrow);
+
+        Assert.Null(renderer.HitTest(700, 500));
+        Assert.Equal(-1, renderer.FocusedIndex);
+    }
+
+    [Fact]
+    public void Renderer_Bounds_MatchesOpenPositionAndIsEmptyWhenClosed()
+    {
+        var renderer = new ContextMenuRenderer();
+        Assert.Equal(default, renderer.Bounds);
+
+        renderer.Open(ContextMenuFactory.CreateDefault(MakeCtx()), 120, 80, new EditorRect(0, 0, 800, 600));
+
+        Assert.Equal(120, renderer.Bounds.X);
+        Assert.Equal(80, renderer.Bounds.Y);
+        Assert.Equal(renderer.MinWidth, renderer.Bounds.Width);
+        Assert.True(renderer.IsClickOutside(119, 81));
+        Assert.False(renderer.IsClickOutside(121, 81));
+    }
+
+    [Fact]
+    public void Renderer_Open_ClampsInsideViewportEdges()
+    {
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(ContextMenuFactory.CreateDefault(MakeCtx()), 790, 590, new EditorRect(0, 0, 800, 600));
+
+        Assert.Equal(800 - renderer.MinWidth, renderer.X);
+        Assert.Equal(600 - renderer.Bounds.Height, renderer.Y);
+    }
+
+    // ── ContextMenuRenderer – keyboard ───────────────────────────────────────
+
+    [Fact]
+    public void Renderer_HandleKey_DownArrow_SkipsDisabledItems()
+    {
+        var (renderer, def) = OpenAndRender(MakeCtx()); // Cut and Copy disabled
+
+        renderer.HandleKey(ConsoleKey.DownArrow);
+
+        Assert.Equal("Paste", def.VisibleItems.ElementAt(renderer.FocusedIndex).Label);
+    }
+
+    [Fact]
+    public void Renderer_HandleKey_UpArrow_FromNoFocus_WrapsToLastEnabledItem()
+    {
+        var (renderer, def) = OpenAndRender(MakeCtx());
+
+        renderer.HandleKey(ConsoleKey.UpArrow);
+
+        Assert.Equal(def.VisibleItems.Count() - 1, renderer.FocusedIndex);
+        renderer.HandleKey(ConsoleKey.DownArrow); // wraps past disabled Cut and Copy
+        Assert.Equal("Paste", def.VisibleItems.ElementAt(renderer.FocusedIndex).Label);
+    }
+
+    [Fact]
+    public void Renderer_HandleKey_AllItemsDisabled_KeepsNoFocus()
+    {
+        var def = new ContextMenuDefinition();
+        def.Items.Add(new ContextMenuItem { Label = "A", IsEnabled = false });
+        def.Items.Add(new ContextMenuItem { Label = "B", IsEnabled = false });
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(def, 0, 0, new EditorRect(0, 0, 800, 600));
+
+        renderer.HandleKey(ConsoleKey.DownArrow);
+
+        Assert.Equal(-1, renderer.FocusedIndex);
+        Assert.Null(renderer.HandleKey(ConsoleKey.Enter));
+    }
+
+    [Fact]
+    public void Renderer_HandleKey_EnterWithoutFocus_ReturnsNullAndStaysOpen()
+    {
+        var (renderer, _) = OpenAndRender(MakeCtx());
+
+        Assert.Null(renderer.HandleKey(ConsoleKey.Enter));
+        Assert.True(renderer.IsOpen);
+    }
+
+    // ── ContextMenuRenderer – theming ────────────────────────────────────────
+
+    [Fact]
+    public void Renderer_ApplyStyle_UsesThemeContextMenuColours()
+    {
+        var theme    = EditorTheme.CreateDark();
+        var renderer = new ContextMenuRenderer();
+
+        renderer.ApplyStyle(theme);
+
+        Assert.Equal(theme.ContextMenuBackground, renderer.BackgroundColor);
+        Assert.Equal(theme.ContextMenuTextColor, renderer.TextColor);
+        Assert.Equal(theme.ContextMenuHoverColor, renderer.HoverColor);
+        Assert.Equal(theme.ToolbarSeparatorColor, renderer.BorderColor);
+        Assert.Equal(theme.ToolbarSeparatorColor, renderer.SeparatorColor);
+        Assert.NotEqual(renderer.TextColor, renderer.DisabledTextColor);
+        Assert.NotEqual(renderer.BackgroundColor, renderer.DisabledTextColor);
+    }
+
+    [Fact]
+    public void Renderer_Render_DrawsWithConfiguredColours()
+    {
+        var theme    = EditorTheme.CreateDark();
+        var def      = ContextMenuFactory.CreateDefault(MakeCtx()); // Cut disabled
+        var renderer = new ContextMenuRenderer();
+        renderer.ApplyStyle(theme);
+        renderer.Open(def, 0, 0, new EditorRect(0, 0, 800, 600));
+        renderer.HandleKey(ConsoleKey.DownArrow); // focus Paste
+
+        var mock = new MockDrawingContext();
+        renderer.Render(mock);
+
+        Assert.Contains(mock.FillRoundRectCalls, c => c.Paint.Color == theme.ContextMenuBackground);
+        Assert.Contains(mock.FillRoundRectCalls, c => c.Paint.Color == theme.ContextMenuHoverColor);
+        Assert.Equal(renderer.DisabledTextColor, mock.DrawTextInRectCalls.First(c => c.Text == "Cut").Paint.Color);
+        Assert.Equal(theme.ContextMenuTextColor, mock.DrawTextInRectCalls.First(c => c.Text == "Paste").Paint.Color);
     }
 }

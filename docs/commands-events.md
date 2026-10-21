@@ -91,6 +91,53 @@ Default bindings (`Ctrl` and `Cmd` are interchangeable):
 
 Table shortcuts are listed in [Tables](tables.md#keyboard-navigation).
 
+---
+
+## Context Menu
+
+`MintedEditorView` has a built-in context menu, drawn on the canvas in the theme's `ContextMenuBackground`, `ContextMenuTextColor` and `ContextMenuHoverColor` (see [Theming](theming.md)). Turn it off with `IsContextMenuEnabled = false`. It is never shown while `IsReadOnly` is true.
+
+**Opening it**
+
+| Input | Behavior |
+|---|---|
+| Right-click (secondary click) | Opens at the pointer. A click inside the selection keeps it; elsewhere the caret moves to the click first. |
+| Long press on the selection (touch) | Opens at the finger and keeps the selection. The caret is not picked up. |
+| Long press released without moving (touch) | Opens where the finger lifted, at the caret placed by the long press (e.g. to paste). |
+| Long press, then drag (touch) | Drags the caret with the magnifier as before; no menu. |
+
+A tap (or a drag) that starts on the selection still collapses it to that point, as before.
+
+**Using it**
+
+- Tap or click an item to run it. Disabled items are dimmed and do nothing.
+- `Up`/`Down` highlight the previous/next enabled item, `Enter` runs the highlighted item, `Escape` closes the menu. Any other key closes the menu and is handled as usual.
+- A press outside the menu, a mouse-wheel scroll, a document change, `ScrollTo` and focus loss close it. The press that closes it does not move the caret.
+
+**Default items** (from `ContextMenuFactory.CreateDefault`): Cut and Copy (enabled with a selection), Paste, Select All; Insert Hyperlink, or Edit / Remove / Open Hyperlink when the caret is on a link; Insert Image and Insert Table; and, in a table cell, Insert Row Above/Below, Delete Row, Insert Column Left/Right, Delete Column and Delete Table. Cut, Copy and Paste use the same clipboard path as the keyboard shortcuts (Cut can be undone). Insert and Edit items prompt for a URL, image source or table size like the toolbar does, and Open Hyperlink opens the URL through `HyperlinkHandler`.
+
+**Customizing it**: handle `ContextMenuItemsRequested` (below). Every visible item you add runs its `Command` when chosen.
+
+```csharp
+using MintedTextEditor.Core.Commands;
+using MintedTextEditor.Core.ContextMenu;
+
+editor.ContextMenuItemsRequested += (sender, e) =>
+{
+    // Remove the insert items…
+    foreach (var item in e.Definition.Items.Where(i => i.Icon is "image" or "table").ToList())
+        e.Definition.Items.Remove(item);
+
+    // …and add a custom command, enabled only with a selection.
+    e.Definition.Items.Add(new ContextMenuItem
+    {
+        Label     = "Clear Formatting",
+        Command   = new ClearFormattingCommand(),
+        IsEnabled = !e.Context.Selection.IsEmpty,
+    });
+};
+```
+
 ### Adding Custom Key Bindings
 
 `EditorInputController.KeyBindings` holds `EditorKeyBinding` entries that are checked before the defaults. The MAUI control does not expose its input controller, so custom bindings apply when you host `EditorInputController` yourself:
@@ -170,6 +217,10 @@ editor.ImageRequested += (sender, e) =>
     e.Handled = true;
 };
 ```
+
+### ContextMenuItemsRequested
+
+Raised each time the context menu is about to open, with the menu (`e.Definition`) and the editor state (`e.Context`). Add, remove or change items to customize it; the menu is not shown if no visible items remain. See [Context Menu](#context-menu).
 
 ### UndoStackChanged
 
