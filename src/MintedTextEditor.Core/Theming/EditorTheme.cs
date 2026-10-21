@@ -67,7 +67,7 @@ public static class EditorTheme
         FocusRingColor = new EditorColor(0, 120, 215),
 
         // Spacing
-        LineSpacing      = 2f,
+        LineSpacing      = 0f,
         ParagraphSpacing = 8f,
 
         // Padding
@@ -125,7 +125,7 @@ public static class EditorTheme
         FocusRingColor = new EditorColor(0, 120, 215),
 
         // Spacing
-        LineSpacing      = 2f,
+        LineSpacing      = 0f,
         ParagraphSpacing = 8f,
 
         // Padding
@@ -183,7 +183,7 @@ public static class EditorTheme
         FocusRingColor = EditorColor.Yellow,
 
         // Spacing
-        LineSpacing      = 2f,
+        LineSpacing      = 0f,
         ParagraphSpacing = 8f,
 
         // Padding
