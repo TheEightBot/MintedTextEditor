@@ -278,9 +278,8 @@ public class HtmlImporter
         private readonly Stack<List<Block>> _blocksStack = new();
         private readonly Stack<HyperlinkInline> _anchorStack = new();
 
-        // Current table-building state
-        private TableBlock? _currentTable;
-        private TableRow? _currentRow;
+        // Table-building state; a stack so a table nested in a cell doesn't end the outer one
+        private readonly Stack<TableState> _tableStack = new();
 
         private int _skipDepth;
         private int _blockquoteDepth;
@@ -299,6 +298,10 @@ public class HtmlImporter
         {
             foreach (var token in _tokens)
                 ProcessToken(token);
+
+            // Tables left open by truncated HTML still get their rows and spans completed.
+            while (_tableStack.TryPop(out var table))
+                table.Finish();
 
             if (_doc.Blocks.Count == 0)
                 _doc.Blocks.Add(new Paragraph());
@@ -438,28 +441,26 @@ public class HtmlImporter
                 case "table":
                 {
                     FlushParagraph();
-                    _currentTable = new TableBlock(0, 0);
-                    _currentBlocks.Add(_currentTable);
+                    var table = new TableBlock(0, 0);
+                    _currentBlocks.Add(table);
+                    _tableStack.Push(new TableState(table));
                     return;
                 }
                 case "tr":
                 {
-                    if (_currentTable != null)
-                    {
-                        _currentRow = new TableRow { Parent = _currentTable };
-                        _currentTable.Rows.Add(_currentRow);
-                    }
+                    if (_tableStack.TryPeek(out var state))
+                        state.StartRow();
                     return;
                 }
                 case "td":
                 case "th":
                 {
-                    if (_currentRow != null)
+                    if (_tableStack.TryPeek(out var state) && state.Row != null)
                     {
-                        var cell = new TableCell();
-                        cell.Parent = _currentRow;
+                        var cell = state.AddCell(
+                            ParseSpan(attrs, "colspan", MaxColSpan),
+                            ParseSpan(attrs, "rowspan", MaxRowSpan));
                         cell.Blocks.Clear();
-                        _currentRow.Cells.Add(cell);
                         _blocksStack.Push(_currentBlocks);
                         _currentBlocks = cell.Blocks;
                         FlushParagraph();
@@ -579,12 +580,13 @@ public class HtmlImporter
                     return;
 
                 case "table":
-                    _currentTable = null;
-                    _currentRow = null;
+                    if (_tableStack.TryPop(out var table))
+                        table.Finish();
                     return;
 
                 case "tr":
-                    _currentRow = null;
+                    if (_tableStack.TryPeek(out var state))
+                        state.EndRow();
                     return;
 
                 case "td":
@@ -692,9 +694,9 @@ public class HtmlImporter
                     "font-family" => style.WithFontFamily(ParseFontFamily(val)),
                     "font-size" => TryParseFontSize(val, out var fs)
                         ? style.WithFontSize(fs) : style,
-                    "color" => TryParseColor(val, out var tc)
+                    "color" => TryParseCssColor(val, out var tc)
                         ? style.WithTextColor(tc) : style,
-                    "background-color" => TryParseColor(val, out var bg)
+                    "background-color" => TryParseCssColor(val, out var bg)
                         ? style.WithHighlightColor(bg) : style,
                     _ => style
                 };
@@ -735,66 +737,250 @@ public class HtmlImporter
             return false;
         }
 
-        private static bool TryParseColor(string value, out EditorColor color)
+        private static int ParseSpan(IReadOnlyDictionary<string, string> attrs, string name, int max)
         {
-            var v = value.Trim().ToLowerInvariant();
-
-            color = v switch
-            {
-                "black" => EditorColor.Black,
-                "white" => EditorColor.White,
-                "red" => EditorColor.Red,
-                "blue" => EditorColor.Blue,
-                "green" => EditorColor.Green,
-                "gray" or "grey" => EditorColor.Gray,
-                "lightgray" or "lightgrey" or "silver" => EditorColor.LightGray,
-                "darkgray" or "darkgrey" => EditorColor.DarkGray,
-                "yellow" => EditorColor.Yellow,
-                "transparent" => EditorColor.Transparent,
-                _ => default
-            };
-
-            // Named color matched
-            if (v is "black" or "white" or "red" or "blue" or "green"
-                or "gray" or "grey" or "lightgray" or "lightgrey"
-                or "silver" or "darkgray" or "darkgrey" or "yellow" or "transparent")
-                return true;
-
-            // Hex: #RGB or #RRGGBB
-            if (v.StartsWith('#'))
-            {
-                var hex = v[1..];
-                if (hex.Length == 3)
-                    hex = $"{hex[0]}{hex[0]}{hex[1]}{hex[1]}{hex[2]}{hex[2]}";
-                if (hex.Length == 6)
-                {
-                    try
-                    {
-                        byte r = Convert.ToByte(hex[..2], 16);
-                        byte g = Convert.ToByte(hex[2..4], 16);
-                        byte b = Convert.ToByte(hex[4..6], 16);
-                        color = EditorColor.FromRgb(r, g, b);
-                        return true;
-                    }
-                    catch { }
-                }
-            }
-
-            // rgb(r, g, b)
-            if (v.StartsWith("rgb(") && v.EndsWith(")"))
-            {
-                var parts = v[4..^1].Split(',');
-                if (parts.Length >= 3
-                    && byte.TryParse(parts[0].Trim(), out byte r)
-                    && byte.TryParse(parts[1].Trim(), out byte g)
-                    && byte.TryParse(parts[2].Trim(), out byte b))
-                {
-                    color = EditorColor.FromRgb(r, g, b);
-                    return true;
-                }
-            }
-
-            return false;
+            // Missing, invalid or < 1 means 1; rowspan="0" ("to the end of the table") is
+            // given the maximum and clamped to the remaining rows when the table ends.
+            if (!attrs.TryGetValue(name, out var s)
+                || !int.TryParse(s.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n))
+                return 1;
+            if (n == 0 && name == "rowspan") return max;
+            return Math.Clamp(n, 1, max);
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Table grid
+    // ──────────────────────────────────────────────────────────────────
+
+    // HTML caps spans at these values.
+    private const int MaxColSpan = 1000;
+    private const int MaxRowSpan = 65534;
+
+    /// <summary>
+    /// Builds one table, mapping colspan/rowspan onto the cell grid the way
+    /// <c>TableEngine.MergeCells</c> does: the spanning cell keeps its position and
+    /// <see cref="TableCell.ColumnSpan"/>/<see cref="TableCell.RowSpan"/>, and every other
+    /// grid slot it covers holds a placeholder cell with <see cref="TableCell.IsMerged"/> set.
+    /// </summary>
+    private sealed class TableState
+    {
+        private readonly TableBlock _table;
+        // Per column: rows still covered by a rowspan from above, and the cell that spans them.
+        private readonly List<int> _covered = new();
+        private readonly List<TableCell?> _coveredBy = new();
+        private int _col;
+
+        public TableState(TableBlock table) => _table = table;
+
+        public TableRow? Row { get; private set; }
+
+        public void StartRow()
+        {
+            EndRow();
+            Row = new TableRow { Parent = _table };
+            _table.Rows.Add(Row);
+            _col = 0;
+        }
+
+        public TableCell AddCell(int colSpan, int rowSpan)
+        {
+            SkipCoveredColumns();
+            var cell = new TableCell { Parent = Row, ColumnSpan = colSpan, RowSpan = rowSpan };
+            Row!.Cells.Add(cell);
+            for (int i = 0; i < colSpan; i++)
+            {
+                if (i > 0) AddPlaceholder();
+                SetCoverage(_col + i, rowSpan - 1, cell);
+            }
+            _col += colSpan;
+            return cell;
+        }
+
+        /// <summary>Fills the rest of the row's grid slots that a rowspan from above covers.</summary>
+        public void EndRow()
+        {
+            if (Row == null) return;
+            int last = _covered.FindLastIndex(n => n > 0);
+            while (_col <= last)
+            {
+                if (_covered[_col] > 0)
+                {
+                    AddPlaceholder();
+                    _covered[_col]--;
+                }
+                else
+                {
+                    Row.Cells.Add(new TableCell { Parent = Row });
+                }
+                _col++;
+            }
+            Row = null;
+        }
+
+        /// <summary>Ends the table, shortening rowspans that run past its last row.</summary>
+        public void Finish()
+        {
+            EndRow();
+            var clamped = new HashSet<TableCell>();
+            for (int c = 0; c < _covered.Count; c++)
+            {
+                if (_covered[c] > 0 && _coveredBy[c] is { } anchor && clamped.Add(anchor))
+                    anchor.RowSpan -= _covered[c];
+            }
+        }
+
+        private void SkipCoveredColumns()
+        {
+            while (_col < _covered.Count && _covered[_col] > 0)
+            {
+                AddPlaceholder();
+                _covered[_col]--;
+                _col++;
+            }
+        }
+
+        private void AddPlaceholder()
+            => Row!.Cells.Add(new TableCell { Parent = Row, IsMerged = true });
+
+        private void SetCoverage(int col, int rows, TableCell anchor)
+        {
+            while (_covered.Count <= col)
+            {
+                _covered.Add(0);
+                _coveredBy.Add(null);
+            }
+            _covered[col] = rows;
+            _coveredBy[col] = anchor;
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // CSS colours
+    // ──────────────────────────────────────────────────────────────────
+
+    private static readonly Dictionary<string, EditorColor> NamedColors = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["black"] = EditorColor.Black,
+        ["white"] = EditorColor.White,
+        ["red"] = EditorColor.Red,
+        ["blue"] = EditorColor.Blue,
+        ["green"] = EditorColor.Green,
+        ["gray"] = EditorColor.Gray,
+        ["grey"] = EditorColor.Gray,
+        ["lightgray"] = EditorColor.LightGray,
+        ["lightgrey"] = EditorColor.LightGray,
+        ["silver"] = EditorColor.LightGray,
+        ["darkgray"] = EditorColor.DarkGray,
+        ["darkgrey"] = EditorColor.DarkGray,
+        ["yellow"] = EditorColor.Yellow,
+        ["transparent"] = EditorColor.Transparent,
+    };
+
+    /// <summary>
+    /// Parses a CSS colour: a named colour from <see cref="NamedColors"/>, <c>#rgb</c>,
+    /// <c>#rgba</c>, <c>#rrggbb</c>, <c>#rrggbbaa</c>, or <c>rgb()</c>/<c>rgba()</c> with
+    /// comma- or space-separated channels (0–255 or a percentage) and an optional alpha
+    /// (0–1 or a percentage).
+    /// </summary>
+    internal static bool TryParseCssColor(string value, out EditorColor color)
+    {
+        color = default;
+        var v = value.Trim();
+        if (v.EndsWith("!important", StringComparison.OrdinalIgnoreCase))
+            v = v[..^"!important".Length].TrimEnd();
+
+        if (NamedColors.TryGetValue(v, out color))
+            return true;
+
+        if (v.StartsWith('#'))
+            return TryParseHexColor(v[1..], out color);
+
+        int open = v.IndexOf('(');
+        if (open < 0 || !v.EndsWith(')')) return false;
+        var fn = v[..open].Trim().ToLowerInvariant();
+        if (fn is not ("rgb" or "rgba")) return false;
+
+        // rgb(r, g, b[, a]) or rgb(r g b[ / a]); rgb and rgba take the same arguments.
+        var args = v[(open + 1)..^1];
+        string[] parts;
+        if (args.Contains(','))
+        {
+            parts = args.Split(',');
+        }
+        else
+        {
+            var slash = args.Split('/');
+            if (slash.Length > 2) return false;
+            var channels = slash[0].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            parts = slash.Length == 2 ? [.. channels, slash[1]] : channels;
+        }
+
+        if (parts.Length is not (3 or 4)) return false;
+
+        if (!TryParseChannel(parts[0], out byte r)
+            || !TryParseChannel(parts[1], out byte g)
+            || !TryParseChannel(parts[2], out byte b))
+            return false;
+
+        byte a = 255;
+        if (parts.Length == 4 && !TryParseAlpha(parts[3], out a))
+            return false;
+
+        color = new EditorColor(r, g, b, a);
+        return true;
+    }
+
+    private static bool TryParseHexColor(string hex, out EditorColor color)
+    {
+        color = default;
+        if (hex.Length is 3 or 4)
+        {
+            var sb = new StringBuilder(8);
+            foreach (char ch in hex) sb.Append(ch).Append(ch);
+            hex = sb.ToString();
+        }
+        if (hex.Length is not (6 or 8)) return false;
+
+        Span<byte> bytes = stackalloc byte[4];
+        bytes[3] = 255;
+        for (int i = 0; i < hex.Length / 2; i++)
+        {
+            if (!byte.TryParse(hex.AsSpan(i * 2, 2), NumberStyles.AllowHexSpecifier,
+                    CultureInfo.InvariantCulture, out bytes[i]))
+                return false;
+        }
+        color = new EditorColor(bytes[0], bytes[1], bytes[2], bytes[3]);
+        return true;
+    }
+
+    /// <summary>A colour channel: a number 0–255 or a percentage, clamped and rounded.</summary>
+    private static bool TryParseChannel(string s, out byte value)
+        => TryParseUnit(s, 255.0, out value);
+
+    /// <summary>An alpha value: a number 0–1 or a percentage, scaled to 0–255.</summary>
+    private static bool TryParseAlpha(string s, out byte value)
+        => TryParseUnit(s, 1.0, out value);
+
+    private static bool TryParseUnit(string s, double numberScale, out byte value)
+    {
+        value = 0;
+        s = s.Trim();
+        double fraction;
+        if (s.EndsWith('%'))
+        {
+            if (!double.TryParse(s[..^1], NumberStyles.Float, CultureInfo.InvariantCulture, out double pct))
+                return false;
+            fraction = pct / 100.0;
+        }
+        else
+        {
+            if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out double n))
+                return false;
+            fraction = n / numberScale;
+        }
+        if (double.IsNaN(fraction)) return false;
+        value = (byte)Math.Round(Math.Clamp(fraction, 0.0, 1.0) * 255.0, MidpointRounding.AwayFromZero);
+        return true;
     }
 }
