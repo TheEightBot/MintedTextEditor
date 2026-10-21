@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # NuGet packages for the libraries, tests and sample. Related packages are
+  # grouped so SkiaSharp/HarfBuzzSharp and the test stack move together.
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      skiasharp:
+        patterns: ["SkiaSharp*", "HarfBuzzSharp*", "Svg.Skia"]
+      test-stack:
+        patterns: ["xunit*", "Microsoft.NET.Test.Sdk", "coverlet*"]
+    labels: ["dependencies", "skip-changelog"]
+
+  # GitHub Actions used by the workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: ["dependencies", "skip-changelog"]
