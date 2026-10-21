@@ -275,10 +275,24 @@ public sealed class ToolbarRenderer
     /// <summary>
     /// Reads the current selection from <paramref name="ctx"/> and updates each
     /// toggle button's <see cref="ToolbarButton.IsActive"/> flag accordingly.
+    /// With a selection, a format is active when it covers the whole selection; at a
+    /// collapsed caret, it reflects the style the next typed text would get (the pending
+    /// style when one is set, otherwise the style inherited from the text at the caret).
     /// </summary>
     public void UpdateToggleStates(EditorContext ctx)
     {
         var range = ctx.Selection.Range;
+        var caretStyle = range.IsEmpty
+            ? FormattingEngine.GetEffectiveCaretStyle(
+                ctx.Document,
+                range.Start,
+                ctx.FormattingEngine.PendingStyle,
+                ctx.FontFormattingEngine.PendingStyle)
+            : null;
+
+        bool IsActive(Func<TextStyle, bool> getter) => caretStyle is not null
+            ? getter(caretStyle)
+            : FormattingEngine.IsAppliedToEntireRange(ctx.Document, range, getter);
 
         foreach (var group in Definition.Groups)
         {
@@ -289,12 +303,12 @@ public sealed class ToolbarRenderer
 
                 btn.IsActive = btn.Command?.Name switch
                 {
-                    "ToggleBold"          => FormattingEngine.IsAppliedToEntireRange(ctx.Document, range, s => s.IsBold),
-                    "ToggleItalic"        => FormattingEngine.IsAppliedToEntireRange(ctx.Document, range, s => s.IsItalic),
-                    "ToggleUnderline"     => FormattingEngine.IsAppliedToEntireRange(ctx.Document, range, s => s.IsUnderline),
-                    "ToggleStrikethrough" => FormattingEngine.IsAppliedToEntireRange(ctx.Document, range, s => s.IsStrikethrough),
-                    "ToggleSubscript"     => FormattingEngine.IsAppliedToEntireRange(ctx.Document, range, s => s.IsSubscript),
-                    "ToggleSuperscript"   => FormattingEngine.IsAppliedToEntireRange(ctx.Document, range, s => s.IsSuperscript),
+                    "ToggleBold"          => IsActive(s => s.IsBold),
+                    "ToggleItalic"        => IsActive(s => s.IsItalic),
+                    "ToggleUnderline"     => IsActive(s => s.IsUnderline),
+                    "ToggleStrikethrough" => IsActive(s => s.IsStrikethrough),
+                    "ToggleSubscript"     => IsActive(s => s.IsSubscript),
+                    "ToggleSuperscript"   => IsActive(s => s.IsSuperscript),
                     _                    => btn.IsActive,
                 };
             }

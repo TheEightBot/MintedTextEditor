@@ -83,6 +83,32 @@ public class FormattingEngine
         return style;
     }
 
+    /// <summary>
+    /// Returns the style that text typed at a collapsed caret at <paramref name="caret"/> receives:
+    /// the pending styles when set (font-level properties taken from <paramref name="pendingFontStyle"/>),
+    /// otherwise the style inherited from the surrounding text (see <see cref="DocumentEditor.GetInsertionStyle"/>).
+    /// </summary>
+    /// <param name="doc">The document.</param>
+    /// <param name="caret">The caret position.</param>
+    /// <param name="pendingStyle">The pending character style (from <see cref="PendingStyle"/>), or null.</param>
+    /// <param name="pendingFontStyle">The pending font style (from <see cref="FontFormattingEngine.PendingStyle"/>), or null.</param>
+    public static TextStyle GetEffectiveCaretStyle(
+        Document.Document doc,
+        DocumentPosition caret,
+        TextStyle? pendingStyle,
+        TextStyle? pendingFontStyle)
+    {
+        if (pendingStyle is null && pendingFontStyle is null)
+            return DocumentEditor.GetInsertionStyle(doc, caret);
+        if (pendingStyle is null) return pendingFontStyle!;
+        if (pendingFontStyle is null) return pendingStyle;
+        return pendingStyle
+            .WithFontFamily(pendingFontStyle.FontFamily)
+            .WithFontSize(pendingFontStyle.FontSize)
+            .WithTextColor(pendingFontStyle.TextColor)
+            .WithHighlightColor(pendingFontStyle.HighlightColor);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────
 
     private void Toggle(
@@ -93,8 +119,10 @@ public class FormattingEngine
     {
         if (range.IsEmpty)
         {
-            // No selection: update pending style so the next typed character picks it up
-            var baseStyle = PendingStyle ?? TextStyle.Default;
+            // No selection: update pending style so the next typed character picks it up.
+            // Start from the style the caret would otherwise type with, so toggling bold off
+            // inside bold text really turns it off and other formatting is kept.
+            var baseStyle = PendingStyle ?? DocumentEditor.GetInsertionStyle(doc, range.Start);
             PendingStyle = setter(baseStyle, !getter(baseStyle));
             return;
         }

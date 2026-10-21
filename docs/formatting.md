@@ -33,7 +33,9 @@ fmt.ToggleSuperscript(doc, range);
 fmt.ClearFormatting(doc, range);
 ```
 
-With an empty range (a collapsed caret), toggles set a pending style that is applied to the next text the user types.
+With an empty range (a collapsed caret), toggles set a pending style that is applied to the next text the user types. The pending style starts from the formatting at the caret, so toggling Bold inside bold text turns bold off for the next text and keeps the other formatting.
+
+Without a pending style, typed text inherits the formatting of the character before the caret (or the character after it at the start of a paragraph; an empty paragraph uses `TextStyle.Default`). Typing at the start or end of a hyperlink adds plain text next to it rather than extending the link. `DocumentEditor.GetInsertionStyle(doc, position)` returns that inherited style, and `FormattingEngine.GetEffectiveCaretStyle(doc, position, editor.Formatting.PendingStyle, editor.FontFormatting.PendingStyle)` returns the style the next typed text will get. The toolbar's Bold, Italic, Underline, Strikethrough, Subscript and Superscript buttons show that style when nothing is selected.
 
 ### Setting Font Properties
 
@@ -145,7 +147,7 @@ editor.Undo();   // or editor.UndoManager.Undo()
 editor.Redo();
 ```
 
-`editor.Undo()`/`Redo()` also move the caret to the restored position.
+`editor.Undo()`/`Redo()` also move the caret to the restored position and raise `SelectionChanged` when it moves.
 
 ---
 

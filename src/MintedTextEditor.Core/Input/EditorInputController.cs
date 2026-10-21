@@ -273,10 +273,13 @@ public class EditorInputController
             _selection.CollapseTo(insertPos);
         }
 
-        var style = FormattingEngine?.ConsumePendingStyle();
-        var pendingFontStyle = FontFormattingEngine?.ConsumePendingStyle();
-        if (pendingFontStyle is not null)
-            style = style is null ? pendingFontStyle : MergeStyles(style, pendingFontStyle);
+        // Pending styles (picked with no selection) win; otherwise the text inherits the
+        // style of the character before the caret (or after it at a paragraph start).
+        var style = Formatting.FormattingEngine.GetEffectiveCaretStyle(
+            document,
+            insertPos,
+            FormattingEngine?.ConsumePendingStyle(),
+            FontFormattingEngine?.ConsumePendingStyle());
         var newPos = PushOrExecute(new InsertTextAction(document, insertPos, text, style));
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
@@ -324,15 +327,6 @@ public class EditorInputController
         }
         segments.Add(text.Substring(start));
         return segments;
-    }
-
-    private static TextStyle MergeStyles(TextStyle primary, TextStyle overlay)
-    {
-        return primary
-            .WithFontFamily(overlay.FontFamily)
-            .WithFontSize(overlay.FontSize)
-            .WithTextColor(overlay.TextColor)
-            .WithHighlightColor(overlay.HighlightColor);
     }
 
     // ── Undo helper ─────────────────────────────────────────────────

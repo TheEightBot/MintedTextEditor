@@ -57,6 +57,25 @@ public static class DocumentEditor
                 return newPos;
             }
         }
+        else if (inline is HyperlinkInline boundaryLink && boundaryLink.Length > 0
+                 && (position.Offset <= 0 || position.Offset >= boundaryLink.Length))
+        {
+            // At a link boundary the text goes outside the link, so typing right after
+            // (or right before) a hyperlink does not extend it.
+            bool atEnd = position.Offset >= boundaryLink.Length;
+            int neighborIndex = atEnd ? inlineIndex + 1 : inlineIndex - 1;
+            if (neighborIndex >= 0 && neighborIndex < paragraph.Inlines.Count
+                && paragraph.Inlines[neighborIndex] is TextRun neighbor)
+            {
+                return InsertText(document, position.With(neighborIndex, atEnd ? 0 : neighbor.Length), text, style);
+            }
+
+            int insertIndex = atEnd ? inlineIndex + 1 : inlineIndex;
+            paragraph.InsertInline(insertIndex, new TextRun(text, style));
+            var newPos = position.With(insertIndex, text.Length);
+            NotifyTextInserted(document, position, newPos);
+            return newPos;
+        }
         else if (inline is HyperlinkInline hyperlink)
         {
             // Insert text into the appropriate child run, keeping the caret inside the hyperlink.
@@ -122,6 +141,73 @@ public static class DocumentEditor
             NotifyTextInserted(document, position, newPos);
             return newPos;
         }
+    }
+
+    /// <summary>
+    /// Returns the character style that text typed at a collapsed caret at <paramref name="position"/>
+    /// inherits: the style of the character before the caret, or of the character after it when the
+    /// caret is at the start of the paragraph. Non-text inlines (images, line breaks) are skipped.
+    /// Falls back to the style of an empty run in the paragraph, then to <see cref="TextStyle.Default"/>.
+    /// </summary>
+    public static TextStyle GetInsertionStyle(Document document, DocumentPosition position)
+    {
+        Paragraph paragraph;
+        try
+        {
+            paragraph = GetParagraph(document, position);
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+        {
+            return TextStyle.Default;
+        }
+
+        // Flatten the paragraph into text-bearing segments: (absolute start, length, style).
+        var segments = new List<(int Start, int Length, TextStyle? Style)>();
+        TextStyle? emptyRunStyle = null;
+        int abs = 0, caret = -1;
+        for (int i = 0; i < paragraph.Inlines.Count; i++)
+        {
+            if (i == position.InlineIndex)
+                caret = abs + Math.Clamp(position.Offset, 0, paragraph.Inlines[i].Length);
+
+            switch (paragraph.Inlines[i])
+            {
+                case TextRun run:
+                    if (run.Length == 0) emptyRunStyle ??= run.Style;
+                    segments.Add((abs, run.Length, run.Style));
+                    break;
+                case HyperlinkInline link:
+                    int childStart = abs;
+                    foreach (var child in link.Children)
+                    {
+                        segments.Add((childStart, child.Length, (child as TextRun)?.Style));
+                        childStart += child.Length;
+                    }
+                    break;
+                default:
+                    segments.Add((abs, paragraph.Inlines[i].Length, null));
+                    break;
+            }
+            abs += paragraph.Inlines[i].Length;
+        }
+        if (caret < 0) caret = abs; // inline index past the end: caret at paragraph end
+
+        // Character before the caret, scanning backwards past non-text characters.
+        for (int s = segments.Count - 1; s >= 0; s--)
+        {
+            var seg = segments[s];
+            if (seg.Length > 0 && seg.Start < caret && seg.Style is not null)
+                return seg.Style;
+        }
+
+        // Paragraph start (or only non-text before the caret): character after it.
+        foreach (var seg in segments)
+        {
+            if (seg.Length > 0 && seg.Start + seg.Length > caret && seg.Style is not null)
+                return seg.Style;
+        }
+
+        return emptyRunStyle ?? TextStyle.Default;
     }
 
     /// <summary>

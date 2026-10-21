@@ -11,6 +11,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 - The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.
 
+### Fixed
+- **Typing at a bare caret**: typed text now inherits the formatting of the character before the caret (or after it at the start of a paragraph) instead of falling back to the default style, so typing after a bold word stays bold. A pending style picked from the toolbar or a shortcut still wins, and now starts from the caret's formatting, so toggling Bold inside bold text turns it off. Typing at the start or end of a hyperlink no longer extends the link. New helpers: `DocumentEditor.GetInsertionStyle` and `FormattingEngine.GetEffectiveCaretStyle`.
+- **Toolbar state at a bare caret**: the Bold, Italic, Underline, Strikethrough, Subscript and Superscript buttons now show the formatting the next typed text will get (the pending style, or the formatting at the caret) when nothing is selected, instead of always showing inactive.
+- **`SelectionChanged` after undo, redo and loading**: `MintedEditorView.Undo()` and `Redo()` raise `SelectionChanged` when they move the caret, and `LoadHtml`/`LoadMarkdown` raise it after resetting the caret.
+
 ---
 
 ## [0.3.1] — 2026-10-21

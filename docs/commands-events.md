@@ -128,7 +128,7 @@ editor.TextChanged += (sender, e) =>
 
 ### SelectionChanged
 
-Raised when the caret moves or the selection range changes.
+Raised when the caret moves or the selection range changes, including when `Undo()`/`Redo()` move the caret and after `LoadHtml`/`LoadMarkdown` reset it.
 
 ```csharp
 editor.SelectionChanged += (sender, e) =>
