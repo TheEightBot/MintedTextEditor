@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.
+- `ISpellCheckProvider` (`MTE001`), `IPrintProvider` (`MTE002`) and `ITextShaper` / `ShapedTextResult` / `DefaultTextShaper` (`MTE003`) are now marked `[Experimental]`: the editor does not use them yet, so code that references them now reports the diagnostic and must suppress it. See [Experimental APIs](docs/architecture.md#experimental-apis).
+
+### Removed
+- `SkiaSharpEngine`, a placeholder class whose only member, `IsAvailable`, always returned `true`.
 
 ### Fixed
 - **Undo for character formatting**: bold, italic, underline, strikethrough, subscript, superscript and clear formatting (toolbar, Ctrl+B/I/U and commands), the font family and size dropdowns, and the text and highlight colour pickers now record one undo step each. Undo restores the previous runs with their exact styles and redo reapplies the change. Toggling with a collapsed caret still only sets the pending style and is not recorded. `ApplyStyleAction` gains a constructor that wraps any formatting operation, and its undo no longer resets the paragraph style or restores the wrong paragraph when a table lies inside the range.
