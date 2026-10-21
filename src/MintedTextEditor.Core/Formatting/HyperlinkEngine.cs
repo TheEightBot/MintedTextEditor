@@ -23,20 +23,34 @@ public static class HyperlinkEngine
     /// </summary>
     public static HyperlinkInline InsertHyperlink(
         Document.Document doc, TextRange range, string url, string? title = null)
+        => InsertHyperlink(doc, range, url, title, displayText: null);
+
+    /// <summary>
+    /// Inserts a new <see cref="HyperlinkInline"/> to <paramref name="url"/> over
+    /// <paramref name="range"/>, using <paramref name="displayText"/> as the link text.
+    /// When <paramref name="displayText"/> is non-empty (not null or whitespace) it becomes the link
+    /// text and replaces any text covered by <paramref name="range"/>. Otherwise this behaves like
+    /// <see cref="InsertHyperlink(Document.Document, TextRange, string, string?)"/>: the covered text
+    /// becomes the link text, or the URL is inserted as the text when the range is empty.
+    /// Returns the inserted <see cref="HyperlinkInline"/>.
+    /// </summary>
+    public static HyperlinkInline InsertHyperlink(
+        Document.Document doc, TextRange range, string url, string? title, string? displayText)
     {
         var para = GetParagraph(doc, range.Start.BlockIndex);
 
+        bool hasDisplayText = !string.IsNullOrWhiteSpace(displayText);
         string linkText;
         DocumentPosition insertPos;
 
         if (range.IsEmpty)
         {
-            linkText  = url;
+            linkText  = hasDisplayText ? displayText! : url;
             insertPos = range.Start;
         }
         else
         {
-            linkText  = DocumentEditor.GetSelectedText(doc, range);
+            linkText  = hasDisplayText ? displayText! : DocumentEditor.GetSelectedText(doc, range);
             insertPos = DocumentEditor.DeleteRange(doc, range);
         }
 

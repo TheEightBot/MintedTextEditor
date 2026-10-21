@@ -337,6 +337,132 @@ public class CommandTests
         Assert.Contains(para.Inlines, i => i is HyperlinkInline);
     }
 
+    private static EditorContext MakeLinkCtx(EditorDocument doc, int selStart, int selEnd, UndoManager undo)
+    {
+        var sel = new Selection();
+        sel.Set(new DocumentPosition(0, 0, selStart), new DocumentPosition(0, 0, selEnd));
+        return MakeCtx(doc, sel, undo);
+    }
+
+    private static HyperlinkInline SingleLink(EditorDocument doc)
+        => Assert.Single(((Paragraph)doc.Blocks[0]).Inlines.OfType<HyperlinkInline>());
+
+    private static void AssertCaretAtEndOfLink(EditorContext ctx, HyperlinkInline link)
+    {
+        var para = (Paragraph)ctx.Document.Blocks[0];
+        Assert.True(ctx.Selection.IsEmpty);
+        Assert.Equal(new DocumentPosition(0, para.Inlines.IndexOf(link), link.Length), ctx.Selection.Active);
+    }
+
+    [Fact]
+    public void InsertHyperlinkCommand_DisplayText_NoSelection_InsertsLinkWithDisplayTextAtCaret()
+    {
+        var doc  = MakeDoc("Hello world");
+        var undo = new UndoManager();
+        var ctx  = MakeLinkCtx(doc, 6, 6, undo);
+
+        new InsertHyperlinkCommand { Url = "https://example.com", DisplayText = "Example" }.Execute(ctx);
+
+        var link = SingleLink(doc);
+        Assert.Equal("https://example.com", link.Url);
+        Assert.Equal("Example", link.GetText());
+        Assert.Equal("Hello Exampleworld", doc.Blocks[0].GetText());
+        AssertCaretAtEndOfLink(ctx, link);
+
+        Assert.True(undo.CanUndo);
+        undo.Undo();
+        Assert.Equal("Hello world", doc.Blocks[0].GetText());
+        Assert.Empty(((Paragraph)doc.Blocks[0]).Inlines.OfType<HyperlinkInline>());
+        Assert.False(undo.CanUndo);
+    }
+
+    [Fact]
+    public void InsertHyperlinkCommand_DisplayText_WithSelection_ReplacesSelectedText()
+    {
+        var doc  = MakeDoc("Click here now");
+        var undo = new UndoManager();
+        var ctx  = MakeLinkCtx(doc, 6, 10, undo);
+
+        new InsertHyperlinkCommand { Url = "https://example.com", DisplayText = "this link" }.Execute(ctx);
+
+        var link = SingleLink(doc);
+        Assert.Equal("this link", link.GetText());
+        Assert.Equal("Click this link now", doc.Blocks[0].GetText());
+        AssertCaretAtEndOfLink(ctx, link);
+
+        undo.Undo();
+        Assert.Equal("Click here now", doc.Blocks[0].GetText());
+        Assert.Empty(((Paragraph)doc.Blocks[0]).Inlines.OfType<HyperlinkInline>());
+        Assert.False(undo.CanUndo);
+
+        undo.Redo();
+        Assert.Equal("Click this link now", doc.Blocks[0].GetText());
+        Assert.Equal("this link", SingleLink(doc).GetText());
+    }
+
+    [Fact]
+    public void InsertHyperlinkCommand_NoDisplayText_WithSelection_LinksSelectedText()
+    {
+        var doc  = MakeDoc("Click here now");
+        var undo = new UndoManager();
+        var ctx  = MakeLinkCtx(doc, 6, 10, undo);
+
+        new InsertHyperlinkCommand { Url = "https://example.com" }.Execute(ctx);
+
+        var link = SingleLink(doc);
+        Assert.Equal("here", link.GetText());
+        Assert.Equal("Click here now", doc.Blocks[0].GetText());
+        AssertCaretAtEndOfLink(ctx, link);
+
+        undo.Undo();
+        Assert.Equal("Click here now", doc.Blocks[0].GetText());
+        Assert.Empty(((Paragraph)doc.Blocks[0]).Inlines.OfType<HyperlinkInline>());
+        Assert.False(undo.CanUndo);
+    }
+
+    [Fact]
+    public void InsertHyperlinkCommand_DisplayText_Undo_RestoresFormattingOfReplacedText()
+    {
+        var doc  = new EditorDocument();
+        var para = (Paragraph)doc.Blocks[0];
+        para.AppendRun("Click ");
+        para.AppendRun("here", TextStyle.Default.WithBold(true));
+        para.AppendRun(" now");
+        var undo = new UndoManager();
+        var sel  = new Selection();
+        sel.Set(new DocumentPosition(0, 1, 0), new DocumentPosition(0, 1, 4));
+        var ctx  = MakeCtx(doc, sel, undo);
+
+        new InsertHyperlinkCommand { Url = "https://example.com", DisplayText = "docs" }.Execute(ctx);
+        Assert.Equal("Click docs now", para.GetText());
+
+        undo.Undo();
+        Assert.Equal("Click here now", para.GetText());
+        var restored = Assert.Single(para.Inlines.OfType<TextRun>(), r => r.Text == "here");
+        Assert.True(restored.Style.IsBold);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void InsertHyperlinkCommand_NoDisplayText_NoSelection_InsertsUrlAsText(string displayText)
+    {
+        var doc  = MakeDoc("Hello world");
+        var undo = new UndoManager();
+        var ctx  = MakeLinkCtx(doc, 6, 6, undo);
+
+        new InsertHyperlinkCommand { Url = "https://example.com", DisplayText = displayText }.Execute(ctx);
+
+        var link = SingleLink(doc);
+        Assert.Equal("https://example.com", link.GetText());
+        Assert.Equal("Hello https://example.comworld", doc.Blocks[0].GetText());
+        AssertCaretAtEndOfLink(ctx, link);
+
+        undo.Undo();
+        Assert.Equal("Hello world", doc.Blocks[0].GetText());
+        Assert.False(undo.CanUndo);
+    }
+
     // ── TableCommands ─────────────────────────────────────────────────────────
 
     [Fact]

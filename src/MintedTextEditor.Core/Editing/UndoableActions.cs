@@ -518,22 +518,39 @@ public sealed class InsertImageAction : IUndoableAction
 // ── InsertHyperlinkAction ───────────────────────────────────────────────────
 
 /// <summary>
-/// Records a hyperlink insertion so it can be undone by removing the inserted hyperlink.
+/// Records a hyperlink insertion. Snapshots the affected paragraphs before inserting so undo
+/// restores the original text and formatting exactly, and redo can replay the insertion.
 /// </summary>
 public sealed class InsertHyperlinkAction : IUndoableAction
 {
     private readonly Document.Document _document;
-    private readonly TextRange _originalRange;
+    private TextRange _range;
+    private readonly ParagraphAnchor _startAnchor;
+    private readonly ParagraphAnchor _endAnchor;
     private readonly string _url;
-    private HyperlinkInline? _inserted;
-    private DocumentPosition _resultPosition;
+    private readonly string? _displayText;
+    private readonly List<ParagraphSnapshot> _snapshots = [];
 
     /// <summary>Creates an action that inserts a hyperlink to <paramref name="url"/> over <paramref name="originalRange"/>.</summary>
     public InsertHyperlinkAction(Document.Document document, TextRange originalRange, string url)
+        : this(document, originalRange, url, displayText: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates an action that inserts a hyperlink to <paramref name="url"/> over <paramref name="originalRange"/>
+    /// with <paramref name="displayText"/> as its text. When <paramref name="displayText"/> is non-empty (not null
+    /// or whitespace) it replaces the text in <paramref name="originalRange"/>; otherwise the text in the range is
+    /// linked, or the URL is inserted as the text when the range is empty. Undo restores the original text.
+    /// </summary>
+    public InsertHyperlinkAction(Document.Document document, TextRange originalRange, string url, string? displayText)
     {
         _document = document;
-        _originalRange = originalRange;
+        _range = originalRange;
+        _startAnchor = new ParagraphAnchor(document, originalRange.Start);
+        _endAnchor = new ParagraphAnchor(document, originalRange.End);
         _url = url;
+        _displayText = displayText;
     }
 
     /// <inheritdoc/>
@@ -542,40 +559,42 @@ public sealed class InsertHyperlinkAction : IUndoableAction
     /// <inheritdoc/>
     public DocumentPosition Execute()
     {
-        _inserted = HyperlinkEngine.InsertHyperlink(_document, _originalRange, _url);
-        if (_inserted.Parent is Paragraph para)
+        _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
+        _snapshots.Clear();
+        for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
+        {
+            if (_document.Blocks[i] is Paragraph p)
+                _snapshots.Add(SnapshotHelper.Capture(p));
+        }
+
+        var inserted = HyperlinkEngine.InsertHyperlink(_document, _range, _url, title: null, _displayText);
+        if (inserted.Parent is Paragraph para)
         {
             int blockIdx = _document.Blocks.IndexOf(para);
-            int linkIdx = para.Inlines.IndexOf(_inserted);
-            _resultPosition = new DocumentPosition(blockIdx, linkIdx, _inserted.Length);
+            int linkIdx = para.Inlines.IndexOf(inserted);
+            return new DocumentPosition(blockIdx, linkIdx, inserted.Length);
         }
-        else
-        {
-            _resultPosition = _originalRange.Start;
-        }
-        return _resultPosition;
+        return _range.Start;
     }
 
     /// <inheritdoc/>
     public DocumentPosition Undo()
     {
-        if (_inserted is null || _inserted.Parent is not Paragraph para)
-            return _originalRange.Start;
+        if (_snapshots.Count == 0) return _range.Start;
 
-        int blockIdx = _document.Blocks.IndexOf(para);
-        int linkIdx = para.Inlines.IndexOf(_inserted);
-        if (blockIdx < 0 || linkIdx < 0) return _originalRange.Start;
+        // Restore the first (possibly only) paragraph in place
+        if (_range.Start.BlockIndex < _document.Blocks.Count &&
+            _document.Blocks[_range.Start.BlockIndex] is Paragraph first)
+        {
+            SnapshotHelper.Restore(first, _snapshots[0]);
+        }
 
-        // Remove hyperlink and restore plain text if the range was non-empty
-        para.RemoveInline(linkIdx);
-        if (!_originalRange.IsEmpty)
-            para.InsertInline(linkIdx, new TextRun(_inserted.GetText()) { Parent = para });
+        // Re-insert paragraphs merged away by a multi-block selection
+        for (int i = 1; i < _snapshots.Count; i++)
+            _document.InsertBlock(_range.Start.BlockIndex + i, SnapshotHelper.CreateParagraph(_snapshots[i]));
 
-        _document.NotifyChanged(new DocumentChangedEventArgs(
-            DocumentChangeType.TextDeleted,
-            new TextRange(_originalRange.Start, _originalRange.Start)));
-
-        return _originalRange.Start;
+        _document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.TextDeleted, _range));
+        return _startAnchor.Resolve(_document);
     }
 
     /// <inheritdoc/>

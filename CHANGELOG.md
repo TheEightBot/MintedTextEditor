@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **`InsertHyperlinkCommand.DisplayText`** is now used: when set, the link is inserted with that text at the caret, or replaces the selected text. Undoing a hyperlink insertion now restores the original text with its formatting (previously it came back unformatted), and redoing a link made from a selection no longer throws.
+
 ---
 
 ## [0.3.1] — 2026-10-21
