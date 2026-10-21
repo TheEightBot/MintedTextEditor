@@ -28,17 +28,16 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 ```bash
 git clone https://github.com/TheEightBot/MintedTextEditor.git
 cd MintedTextEditor
-dotnet build src/MintedTextEditor.SkiaSharp/   # also builds Core
+dotnet build MintedTextEditor.Core.slnf        # Core, SkiaSharp and their tests; any OS
 dotnet build src/MintedTextEditor.Maui/        # needs the MAUI workload
 ```
 
-`dotnet build` at the root builds `MintedTextEditor.slnx`, which includes the MAUI library and the sample app, so it needs the MAUI workload too.
+`MintedTextEditor.Core.slnf` is a solution filter over `MintedTextEditor.slnx` with only the platform-independent projects; open it in Visual Studio or Rider when you don't have the MAUI workload. A plain `dotnet build` at the root builds the whole `MintedTextEditor.slnx`, which includes the MAUI library and the sample app, so it needs the MAUI workload.
 
 ### Running the Tests
 
 ```bash
-dotnet test tests/MintedTextEditor.Core.Tests/
-dotnet test tests/MintedTextEditor.SkiaSharp.Tests/
+dotnet test MintedTextEditor.Core.slnf
 ```
 
 The SkiaSharp tests draw text and emoji with real fonts. Install a color emoji font first, or the emoji tests return early without checking anything; on Debian/Ubuntu: `sudo apt-get install fonts-noto-color-emoji`. On Linux the test project brings in the SkiaSharp and HarfBuzzSharp native assets itself.
