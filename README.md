@@ -46,6 +46,7 @@ MintedTextEditor is organized into three packages:
 - HTML and Markdown import/export pipelines, including support for GitHub Flavored Markdown (GFM).
 - Theming support (light, dark, high contrast, and custom styles).
 - Right-to-left paragraphs and replaceable UI strings (`EditorStrings`).
+- Basic screen-reader support: the editor is announced as one element with a localizable description and hint (read-only state, placeholder); document content and the canvas-drawn toolbar are not exposed yet ([details](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/accessibility.md)).
 
 ## Package Layout
 

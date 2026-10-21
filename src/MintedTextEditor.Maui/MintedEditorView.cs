@@ -1,3 +1,4 @@
+using MintedTextEditor.Core.Accessibility;
 using MintedTextEditor.Core.Commands;
 using MintedTextEditor.Core.Document;
 using MintedTextEditor.Core.Editing;
@@ -111,6 +112,16 @@ public class MintedEditorView : ContentView
     // Weak, so an editor that is discarded without being unloaded can still be collected.
     private IDisposable? _stringsSubscription;
 
+    // ── Accessibility ────────────────────────────────────────────────────────────
+    // Last SemanticProperties values this view applied to itself. A different current value
+    // means the app set its own, which is then left alone.
+    private string? _appliedSemanticDescription;
+    private string? _appliedSemanticHint;
+
+    // Whether the keyboard-capture view is the editor's accessible element (Windows; see the
+    // constructor).
+    private static bool ProxyCarriesSemantics => DeviceInfo.Platform == DevicePlatform.WinUI;
+
 
 
     // ── Bindable Properties ──────────────────────────────────────────────────────
@@ -173,6 +184,7 @@ public class MintedEditorView : ContentView
                     // Pointer moves are ignored while read-only, so hover could never clear.
                     v.ClearPointerHover();
                 }
+                v.UpdateSemantics(announce: true);
                 v.InvalidateCanvas();
                 v.IsReadOnlyChanged?.Invoke(v, new IsReadOnlyChangedEventArgs((bool)nv));
             });
@@ -184,7 +196,12 @@ public class MintedEditorView : ContentView
             typeof(string),
             typeof(MintedEditorView),
             "Start typing…",
-            propertyChanged: static (b, _, _) => ((MintedEditorView)b).InvalidateCanvas());
+            propertyChanged: static (b, _, _) =>
+            {
+                var v = (MintedEditorView)b;
+                v.UpdateSemantics();
+                v.InvalidateCanvas();
+            });
 
     /// <summary>
     /// Visual theme applied to the editor. Defaults to the built-in light theme.
@@ -1002,6 +1019,16 @@ public class MintedEditorView : ContentView
         _formattingStateTracker = new FormattingStateTracker(ComputeFormattingState());
         _imageTracker.Reset(_document);
 
+        // The editor is announced as one element; the canvas would otherwise show up as an
+        // unlabeled node. On Android and iOS that element is this view: double-tapping it makes
+        // the screen reader tap its centre, which lands on the canvas and focuses the editor, so
+        // the hidden keyboard-capture view is excluded too. Windows has no such fallback, so there
+        // the capture view (a TextBox, which Narrator can focus and the user can Tab to) stays in
+        // the tree and gets the editor's description and hint (see UpdateSemantics).
+        AutomationProperties.SetIsInAccessibleTree(_canvas, false);
+        if (!ProxyCarriesSemantics)
+            AutomationProperties.SetIsInAccessibleTree(_keyboardProxy, false);
+
         var grid = new Grid();
         grid.Add(_canvas);
         grid.Add(_keyboardProxy);
@@ -1009,6 +1036,7 @@ public class MintedEditorView : ContentView
 
         Loaded += OnViewLoaded;
         Unloaded += OnViewUnloaded;
+        UpdateSemantics();
     }
 
     // ── HTML API ─────────────────────────────────────────────────────────────────
@@ -1315,6 +1343,8 @@ public class MintedEditorView : ContentView
             // handler lifetime — an idle editor should not repaint 10x per second.
             if (_isEditorFocused)
                 StartBlinkTimer();
+            // Picks up an EditorStrings.Current assigned after construction.
+            UpdateSemantics();
             _ = LoadToolbarIconsAsync();
         }
         else
@@ -1564,8 +1594,7 @@ public class MintedEditorView : ContentView
         RenderDocumentLayer(dc, viewport);
 
         // Placeholder — shown only when the document is an empty single paragraph
-        if (_document.Blocks.Count == 1
-            && _document.Blocks[0] is Paragraph p && p.Inlines.Count == 0
+        if (EditorAccessibility.IsEmpty(_document)
             && !string.IsNullOrEmpty(PlaceholderText))
         {
             var placeholder = new EditorPaint
@@ -2165,7 +2194,74 @@ public class MintedEditorView : ContentView
         _layoutCache.OnDocumentChanged(_document, e);
         TextChanged?.Invoke(this, new EditorTextChangedEventArgs(e.AffectedRange));
         ScheduleDocumentStateUpdate();
+        UpdateSemantics();
         InvalidateCanvas();
+    }
+
+    // ── Accessibility ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Applies the editor's screen-reader description and hint (see
+    /// <see cref="EditorAccessibility.ForEditor"/>) to this view's <see cref="SemanticProperties"/>,
+    /// unless the app has set its own value. With <paramref name="announce"/> (used when
+    /// <see cref="IsReadOnly"/> toggles), the new state is announced, also when the app owns the
+    /// description: then the app's description followed by the read-only state.
+    /// </summary>
+    private void UpdateSemantics(bool announce = false)
+    {
+        bool isEmpty = EditorAccessibility.IsEmpty(_document);
+        var props = EditorAccessibility.ForEditor(IsReadOnly, isEmpty, PlaceholderText);
+        string? description = string.IsNullOrEmpty(props.Label) ? null : props.Label;
+        string? hint = string.IsNullOrEmpty(props.Hint) ? null : props.Hint;
+
+        bool ownsDescription = SemanticProperties.GetDescription(this) == _appliedSemanticDescription;
+        if (ownsDescription && description != _appliedSemanticDescription)
+        {
+            _appliedSemanticDescription = description;
+            SemanticProperties.SetDescription(this, description);
+        }
+
+        if (SemanticProperties.GetHint(this) == _appliedSemanticHint
+            && hint != _appliedSemanticHint)
+        {
+            _appliedSemanticHint = hint;
+            SemanticProperties.SetHint(this, hint);
+        }
+
+        if (announce && Handler is not null)
+        {
+            string announcement = ownsDescription
+                ? description ?? string.Empty
+                : EditorAccessibility.ForEditor(IsReadOnly, isEmpty, PlaceholderText,
+                    label: SemanticProperties.GetDescription(this)).Label;
+            if (announcement.Length > 0)
+                Microsoft.Maui.Accessibility.SemanticScreenReader.Default.Announce(announcement);
+        }
+
+        SyncProxySemantics();
+    }
+
+    /// <summary>
+    /// On Windows, copies this view's current description and hint (the editor's or the app's)
+    /// to the keyboard-capture view, which is the element Narrator reads and focuses there.
+    /// </summary>
+    private void SyncProxySemantics()
+    {
+        if (!ProxyCarriesSemantics) return;
+        SemanticProperties.SetDescription(_keyboardProxy, SemanticProperties.GetDescription(this));
+        SemanticProperties.SetHint(_keyboardProxy, SemanticProperties.GetHint(this));
+    }
+
+    /// <inheritdoc/>
+    protected override void OnPropertyChanged([System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
+    {
+        base.OnPropertyChanged(propertyName);
+        // An app-set description or hint must reach the Windows keyboard-capture view too.
+        // _keyboardProxy is null while the base constructor sets properties.
+        if (_keyboardProxy is not null
+            && (propertyName == SemanticProperties.DescriptionProperty.PropertyName
+                || propertyName == SemanticProperties.HintProperty.PropertyName))
+            SyncProxySemantics();
     }
 
     private void RaiseSelectionChanged()
