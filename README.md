@@ -36,7 +36,7 @@ MintedTextEditor is organized into three packages:
 - Character formatting: bold, italic, underline, strikethrough, subscript, superscript, font family/size, text color, highlight.
 - Paragraph formatting: alignment, indentation, line spacing, headings, lists, block quote.
 - Inline content: hyperlinks, images, tables.
-- Editing primitives: caret navigation, selection, clipboard, undo/redo.
+- Editing primitives: caret navigation, selection, clipboard, undo/redo, find and replace.
 - Touch caret drag with a native-style magnifier (loupe), configurable or switchable off.
 - Text shaped with HarfBuzz (kerning, ligatures, complex scripts); emoji, ZWJ sequences and flags draw as one glyph and are never split by the caret, Backspace, wrapping or hit-testing.
 - Android soft-keyboard and IME support (composition, suggestions, dead keys on hardware keyboards).
@@ -207,6 +207,18 @@ Editor.EditorFocusChanged += (_, e) => { /* e.IsFocused */ };
 ```
 
 `EditorFocusChanged` fires once per real native focus change, including a tap into the editor or focus moving to another control. The editor starts unfocused.
+
+### Find and replace
+
+```csharp
+Editor.FindNext("draft");                       // select and scroll to the next match (wraps)
+Editor.FindPrevious("draft", matchCase: true);
+Editor.Replace("draft", "final");               // replace the selected match, select the next
+int replaced = Editor.ReplaceAll("draft", "final");   // one undo step
+Editor.FindReplaceCompleted += (_, e) => { /* e.MatchCount, e.CurrentMatchIndex */ };
+```
+
+There is no built-in find bar; see [docs/commands-events.md](docs/commands-events.md#find-and-replace).
 
 ### Events
 

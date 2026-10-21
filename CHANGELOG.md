@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Find and replace on `MintedEditorView`**: `FindNext`, `FindPrevious`, `Replace` and `ReplaceAll` select and scroll to matches (wrapping by default, with match-case and whole-word options), and a `FindReplaceCompleted` event reports the match count and current match. Each `Replace`/`ReplaceAll` call is a single undo step and keeps the match's formatting. The logic lives in the new Core class `EditorFindReplace`. There is no built-in find UI.
+
+### Fixed
+- `FindReplaceEngine` no longer returns bogus matches at the start of a table block when a table's text contains the query; only top-level paragraphs are searched.
+
 ---
 
 ## [0.3.1] — 2026-10-21
