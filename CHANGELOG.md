@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+---
+
+## [0.4.0] — 2026-10-21
+
+This release includes the changes prepared as 0.3.1, which was never published.
+
 ### Added
 - **Context menu**: `MintedEditorView` now shows the built-in context menu, drawn on the canvas in the theme's context-menu colors. It opens on a right-click and, on touch screens, on a long press on the selection or a long press released without dragging (long press then drag still moves the caret with the magnifier). Tap or click an item, or use Up/Down/Enter; Escape, a press outside, scrolling outside it or focus loss close it. The menu is as wide as its longest label and stays inside the editor; a menu taller than the editor scrolls (finger drag, mouse wheel or arrow keys). Cut/Copy/Paste use the keyboard-shortcut clipboard path, and Insert/Edit Hyperlink, Insert Image and Insert Table prompt like the toolbar (editing a link can be undone; an `InsertTableCommand` added by the host runs without prompting). New `IsContextMenuEnabled` property (default `true`) and `ContextMenuItemsRequested` event to customize the items. Item labels and prompts come from `EditorStrings.Current` (new `EditHyperlinkDialogTitle` and `EditHyperlinkDialogSave` strings for the edit-link prompt); an open menu closes when `EditorStrings.Current` is replaced.
 - `ContextMenuRenderer` color properties (`BackgroundColor`, `BorderColor`, `SeparatorColor`, `TextColor`, `DisabledTextColor`, `HoverColor`), `ApplyStyle(EditorStyle)` and `Bounds`; an `Open` overload that sizes the popup to its labels; `FontSize` and `TrailingPadding`; and `ScrollOffset`, `MaxScrollOffset` and `ScrollBy` for menus taller than the viewport, which `Open` now shrinks to fit (and `HitTest` and arrow-key navigation follow the scroll).
@@ -22,6 +28,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Find and replace on `MintedEditorView`**: `FindNext`, `FindPrevious`, `Replace` and `ReplaceAll` select and scroll to matches (wrapping by default, with match-case and whole-word options), and a `FindReplaceCompleted` event reports the match count and current match. Each `Replace`/`ReplaceAll` call is a single undo step and keeps the match's formatting. The logic lives in the new Core class `EditorFindReplace`. There is no built-in find UI.
 - **Table styling is rendered**: `TableStyle.BorderWidth`, `BorderColor`, `CellPadding`, `HasHeaderRow` and `HeaderBackground`, plus `TableCell.Background` and `TableCell.Border`, now affect layout and drawing (borders collapse: the wider side of a shared edge is drawn, and wide outer borders are drawn inside the table's bounds). `TableLayoutBlock` exposes `BorderWidth`, `BorderColor`, `CellInfo`, `GetCellBounds`, `GetOwningCell`, `GetColumnX` and `GetRowY`.
 - **Merged table cells are laid out**: a cell with `ColumnSpan`/`RowSpan` occupies the combined area of the slots it covers, a tall spanning cell grows the last row it covers, and taps in that area hit it. Covered cells are not drawn, `Tab`/`Shift+Tab` skip them, the caret (from `Ctrl+End`, arrows, `Tab` or a tap) always lands in the spanning cell so typing edits the visible cell, and border drags ignore grid lines hidden inside a merged cell. `TableBlock.GetSpanAnchor` returns the cell occupying a slot; `TableLayoutBlock.FindColumnResizeBoundary` / `FindRowResizeBoundary` find the grid line a pointer can drag.
+- XML documentation for every public type and member in `MintedTextEditor.Core`, `MintedTextEditor.SkiaSharp` and `MintedTextEditor.Maui`, so IntelliSense describes the whole API and the build is free of documentation warnings.
+- A CI check that fails a pull request changing `src/` without an entry under `[Unreleased]` in this file (add the `skip-changelog` label when no entry is needed).
 
 ### Changed
 - `ContextMenuRenderer` arrow-key navigation skips disabled items, Enter never returns a disabled item and `HitTest` does not focus one, and the default colors follow the light theme (pale-blue highlight with normal text instead of cornflower blue with white text).
@@ -32,6 +40,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The built-in themes' `LineSpacing` is now 0 (was 2, unused), and `EditorStyle.ParagraphSpacing` defaults to 8, so existing documents lay out exactly as before.
 - Default English labels of built-in toolbar and context menu items now match the `EditorStrings` defaults (sentence case, e.g. "Font family", "Select all", "Numbered list", "Edit hyperlink…"), and the heading dropdown lists "Normal text" and "Heading 1"–"Heading 6" instead of "Normal" and "H1"–"H6". Code that finds built-in items by `Label` should match on `Icon` instead.
 - `TableStyle.BorderColor` defaults to grey (160,160,160), the colour tables have always been drawn with, instead of black, so existing tables look the same now that the property is used.
+- README, CONTRIBUTING and every page under `docs/` checked against the current API and corrected: many code samples used type and member names that don't exist (e.g. `RichTextEditor`, `ImportHtml`, `EditorTheme.Dark`, `ToolbarItemKind`) and are now rewritten to compile. Added the 0.2–0.3 features (caret magnifier, focus events, Markdown, text shaping, emoji handling) and the features in this release, and stated plainly what is not supported yet.
+- This changelog now covers every release, including 0.1.1, and the initial release is correctly listed as 0.1.0.
 
 ### Removed
 - `SkiaSharpEngine`, a placeholder class whose only member, `IsAvailable`, always returned `true`.
@@ -56,20 +66,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`ToolbarMaxRows` lost on toolbar rebuild**: assigning a new `ToolbarDefinition`, changing `ToolbarItems` or clearing them no longer drops the row limit set with `MintedEditorView.ToolbarMaxRows`, which previously showed every row again. Once set, `ToolbarMaxRows` now takes precedence over `ToolbarDefinition.MaxRows` (which still applies while `ToolbarMaxRows` is unset; setting or clearing it redraws the toolbar even when the number is unchanged) and is no longer written into the app's definition object. New `ToolbarRenderer.MaxRowsOverride` and `EffectiveMaxRows` expose the same behaviour in Core.
 - **HTML round-trip of colors and table spans**: the HTML importer now reads `rgba(...)` colors (alpha as 0–1 or a percentage), `#rgba`/`#rrggbbaa`, space-separated `rgb(r g b / a)` and percentage channels, so text and highlight colors with transparency survive export and re-import. `colspan`/`rowspan` are read into `TableCell.ColumnSpan`/`RowSpan` with merged placeholder cells, matching `TableEngine.MergeCells`, and rows are padded to the widest row, and a table nested in a cell no longer ends the outer table. The exporter now writes the `rgba` alpha with a `.` decimal separator in every culture.
 - **Undo for paragraph formatting**: the alignment, list, indent, heading and paragraph-format (`Normal`/`Heading1`–`6`/`Quote`) commands, and the toolbar's heading dropdown, are now recorded on the `UndoManager` as one step per command, even across a multi-paragraph selection. Undo restores each paragraph's previous style and redo reapplies it. The new `ApplyParagraphStyleAction` makes other paragraph style changes undoable. The `ParagraphFormattingEngine` documentation no longer claims its methods are undoable; they still change the document directly.
-
----
-
-## [0.3.1] — 2026-10-21
-
-### Added
-- XML documentation for every public type and member in `MintedTextEditor.Core`, `MintedTextEditor.SkiaSharp` and `MintedTextEditor.Maui`, so IntelliSense describes the whole API and the build is free of documentation warnings.
-- A CI check that fails a pull request changing `src/` without an entry under `[Unreleased]` in this file (add the `skip-changelog` label when no entry is needed).
-
-### Changed
-- README, CONTRIBUTING and every page under `docs/` checked against the current API and corrected: many code samples used type and member names that don't exist (e.g. `RichTextEditor`, `ImportHtml`, `EditorTheme.Dark`, `ToolbarItemKind`) and are now rewritten to compile. Added the 0.2–0.3 features (caret magnifier, focus events, Markdown, text shaping, emoji handling), and stated plainly what is not supported yet (screen readers, some theme and table properties).
-- This changelog now covers every release, including 0.1.1, and the initial release is correctly listed as 0.1.0.
-
-### Fixed
 - **Images from a custom `ImageProvider`**: a bitmap returned by `ImageProvider` is no longer replaced (and leaked) by decoding the image name as an app-package asset, or lost when that asset decode fails.
 - **Wrapping very long unbroken text**: character wrapping finds grapheme boundaries once per text fragment and searches each line from its own position, measuring only text near the line end. A 20,000-character token with no spaces now lays out in linear rather than quadratic time. Lines still always take at least one whole grapheme.
 - **Hit-testing long unwrapped lines**: caret offsets within a shaped run are found by binary search over its glyph clusters instead of a scan from the start, so tapping in a line thousands of characters long no longer takes quadratic time.
@@ -160,8 +156,8 @@ Initial release.
 
 ---
 
-[Unreleased]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.3.1...HEAD
-[0.3.1]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.3.0...v0.3.1
+[Unreleased]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/TheEightBot/MintedTextEditor/compare/v0.1.0...v0.1.1
