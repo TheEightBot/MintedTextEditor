@@ -238,7 +238,7 @@ public sealed record FormattingState
     /// <summary>
     /// Returns the style of the hyperlink child at <paramref name="offset"/> (counted over the
     /// children's cumulative lengths). At a boundary between two children the earlier one is used,
-    /// as <see cref="DocumentEditor.InsertText"/> does when typing there.
+    /// as <see cref="DocumentEditor.InsertText(MintedTextEditor.Core.Document.Document, DocumentPosition, string, TextStyle?)"/> does when typing there.
     /// </summary>
     private static TextStyle GetHyperlinkChildStyle(HyperlinkInline link, int offset)
     {
