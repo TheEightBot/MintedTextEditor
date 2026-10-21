@@ -303,12 +303,12 @@ public class MintedEditorView : ContentView
             nameof(ShowFocusRing),
             typeof(bool),
             typeof(MintedEditorView),
-            true,
+            false,
             propertyChanged: static (b, _, _) => ((MintedEditorView)b).InvalidateCanvas());
 
     /// <summary>
     /// Whether a thin ring in the theme's <see cref="EditorStyle.FocusRingColor"/> is drawn around
-    /// the editor while it has keyboard focus. Defaults to true. A <c>Transparent</c>
+    /// the editor while it has keyboard focus. Defaults to false (opt in), so existing layouts gain no new visual. A <c>Transparent</c>
     /// <see cref="EditorStyle.FocusRingColor"/> also hides it.
     /// </summary>
     public bool ShowFocusRing

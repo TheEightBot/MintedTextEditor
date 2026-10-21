@@ -91,7 +91,7 @@ Content = editor;
 | `IsWordWrap` | `true` | Wrap lines at the view width |
 | `ShowLineNumbers` | `false` | Show a line-number gutter |
 | `ShowScrollbar` | `true` | Show the vertical scrollbar |
-| `ShowFocusRing` | `true` | Draw a ring in the theme's `FocusRingColor` around the editor while it has focus |
+| `ShowFocusRing` | `false` | Draw a ring in the theme's `FocusRingColor` around the editor while it has focus |
 | `IsMagnifierEnabled` | `true` | Show the magnifier while dragging the caret |
 
 See [Theming](theming.md) and [Toolbar Customization](toolbar-customization.md) for the rest.

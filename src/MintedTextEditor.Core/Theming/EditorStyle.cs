@@ -111,7 +111,7 @@ public sealed record EditorStyle
 
     /// <summary>
     /// Color of the focus ring drawn around the editor while it has keyboard focus, or
-    /// <c>Transparent</c> for no ring. The MAUI control's <c>ShowFocusRing</c> also turns it off.
+    /// <c>Transparent</c> for no ring. The MAUI control only draws it when <c>ShowFocusRing</c> is true (off by default).
     /// </summary>
     public EditorColor FocusRingColor { get; init; }
 

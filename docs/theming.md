@@ -125,7 +125,7 @@ Properties the MAUI control currently uses:
 | `ToolbarSeparatorColor` | Toolbar group separator and disabled items |
 | `ScrollbarTrackColor` / `ScrollbarThumbColor` / `ScrollbarWidth` | Scrollbar |
 | `LineNumbersGutterColor` / `LineNumbersTextColor` / `LineNumbersGutterWidth` | Line-number gutter (`ShowLineNumbers`) |
-| `FocusRingColor` | Thin ring around the editor while it has keyboard focus; `Transparent`, or `ShowFocusRing = false` on the view, hides it |
+| `FocusRingColor` | Thin ring around the editor while it has keyboard focus, when the view sets `ShowFocusRing = true`; `Transparent` hides it |
 | `LineSpacing` | Extra pixels between the lines of a paragraph (default 0) |
 | `ParagraphSpacing` | Pixels below each paragraph (default 8) |
 

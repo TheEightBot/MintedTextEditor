@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
-- `MintedEditorView.ShowFocusRing` (default `true`): a thin ring in the theme's `FocusRingColor` around the editor while it has keyboard focus.
+- `MintedEditorView.ShowFocusRing` (default `false`): a thin ring in the theme's `FocusRingColor` around the editor while it has keyboard focus.
 - `DocumentRenderer.SelectionTextColor` / `SelectionRects`, `DocumentRenderer.HoveredHyperlink` / `HyperlinkHoverColor`, `SelectionRenderer.GetSelectionRects`, `DocumentHitTester.HitTestHyperlink`, `ToolbarRenderer.HoverColor` / `HoveredItem` / `UpdateHover` / `ClearHover`, `TextLayoutEngine.DefaultLineSpacing` / `DefaultParagraphSpacing`, and `ParagraphStyle.IsLineSpacingSet` / `IsSpaceAfterSet`.
 
 ### Changed
