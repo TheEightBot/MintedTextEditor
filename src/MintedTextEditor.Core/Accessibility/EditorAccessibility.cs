@@ -16,8 +16,8 @@ public static class EditorAccessibility
     /// <summary>
     /// Returns accessibility properties for the editor surface.
     /// <para>
-    /// <see cref="AccessibilityProperties.Label"/> is <see cref="EditorStrings.EditorAccessibilityLabel"/>,
-    /// followed by <see cref="EditorStrings.EditorReadOnlyAccessibilityState"/> when
+    /// <see cref="AccessibilityProperties.Label"/> is <paramref name="label"/> (by default
+    /// <see cref="EditorStrings.EditorAccessibilityLabel"/>), followed by <see cref="EditorStrings.EditorReadOnlyAccessibilityState"/> when
     /// <paramref name="isReadOnly"/> is true, and by <paramref name="placeholderText"/> when
     /// <paramref name="isEmpty"/> is true and the placeholder is not blank (the text a sighted
     /// user sees in an empty editor). Parts are joined with <see cref="DescriptionSeparator"/>.
@@ -31,13 +31,18 @@ public static class EditorAccessibility
     /// <param name="isEmpty">Whether the document is empty (see <see cref="IsEmpty"/>).</param>
     /// <param name="placeholderText">Placeholder drawn while the document is empty, or null.</param>
     /// <param name="strings">String provider; defaults to <see cref="EditorStrings.Current"/>.</param>
+    /// <param name="label">
+    /// First part of the label in place of <see cref="EditorStrings.EditorAccessibilityLabel"/>,
+    /// e.g. a description the app set on the editor itself; null uses the string provider's label.
+    /// </param>
     public static AccessibilityProperties ForEditor(
-        bool isReadOnly, bool isEmpty, string? placeholderText, EditorStrings? strings = null)
+        bool isReadOnly, bool isEmpty, string? placeholderText, EditorStrings? strings = null,
+        string? label = null)
     {
         strings ??= EditorStrings.Current;
 
         var parts = new List<string>(3);
-        AddIfNotBlank(parts, strings.EditorAccessibilityLabel);
+        AddIfNotBlank(parts, label ?? strings.EditorAccessibilityLabel);
         if (isReadOnly)
             AddIfNotBlank(parts, strings.EditorReadOnlyAccessibilityState);
         if (isEmpty)

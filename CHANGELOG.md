@@ -9,8 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
-- **Basic screen-reader support**: `MintedEditorView` now sets `SemanticProperties.Description` (editor label, "read only" state, and the placeholder while empty) and `SemanticProperties.Hint` from `EditorStrings`, keeps them up to date as `IsReadOnly`, `PlaceholderText` and the document change, announces read-only changes, and hides its internal canvas and keyboard-input views from the accessibility tree. Values the app sets itself are left alone. Document content and toolbar buttons are still not exposed to screen readers.
-- `EditorAccessibility.ForEditor` and `EditorAccessibility.IsEmpty` in `MintedTextEditor.Core.Accessibility`, which compute that description and hint, and `EditorStrings.EditorReadOnlyAccessibilityState` ("read only").
+- **Basic screen-reader support**: `MintedEditorView` now sets `SemanticProperties.Description` (editor label, "read only" state, and the placeholder while empty) and `SemanticProperties.Hint` from `EditorStrings`, keeps them up to date as `IsReadOnly`, `PlaceholderText` and the document change, announces read-only changes (also when the app supplies its own description), and hides its internal canvas from the accessibility tree. On Android and iOS the keyboard-input view is hidden too and a screen-reader double-tap focuses the editor through the canvas; on Windows the keyboard-input `TextBox` stays accessible with the editor's description and hint so Narrator can focus it. Values the app sets itself are left alone. Document content and toolbar buttons are still not exposed to screen readers.
+- `EditorAccessibility.ForEditor` (with an optional `label` replacing the default label) and `EditorAccessibility.IsEmpty` in `MintedTextEditor.Core.Accessibility`, which compute that description and hint, and `EditorStrings.EditorReadOnlyAccessibilityState` ("read only").
 
 ### Changed
 - The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.

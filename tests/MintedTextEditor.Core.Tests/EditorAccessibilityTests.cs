@@ -83,6 +83,33 @@ public class EditorAccessibilityTests
     }
 
     [Fact]
+    public void ForEditor_CustomLabel_ReplacesDefaultLabelAndKeepsState()
+    {
+        var readOnly = EditorAccessibility.ForEditor(isReadOnly: true, isEmpty: false, null, English, label: "Message body");
+        var editable = EditorAccessibility.ForEditor(isReadOnly: false, isEmpty: false, null, English, label: "Message body");
+
+        Assert.Equal("Message body, read only", readOnly.Label);
+        Assert.Equal("Message body", editable.Label);
+        Assert.Equal("Double-tap to edit text", editable.Hint);
+    }
+
+    [Fact]
+    public void ForEditor_NullCustomLabel_UsesStringsLabel()
+    {
+        var props = EditorAccessibility.ForEditor(isReadOnly: true, isEmpty: false, null, English, label: null);
+
+        Assert.Equal("Rich text editor, read only", props.Label);
+    }
+
+    [Fact]
+    public void ForEditor_BlankCustomLabel_IsSkipped()
+    {
+        var props = EditorAccessibility.ForEditor(isReadOnly: true, isEmpty: false, null, English, label: " ");
+
+        Assert.Equal("read only", props.Label);
+    }
+
+    [Fact]
     public void IsEmpty_NewDocument_IsTrue()
     {
         Assert.True(EditorAccessibility.IsEmpty(new Document.Document()));
