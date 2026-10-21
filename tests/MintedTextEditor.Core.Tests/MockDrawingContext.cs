@@ -14,6 +14,10 @@ internal class MockDrawingContext : IDrawingContext
     // Track draw calls for verification
     public List<DrawTextCall> DrawTextCalls { get; } = new();
     public List<FillRectCall> FillRectCalls { get; } = new();
+    /// <summary>Calls to <see cref="FillRoundRect"/>, in order.</summary>
+    public List<FillRectCall> FillRoundRectCalls { get; } = new();
+    /// <summary>Text, bounds and paint passed to <see cref="DrawTextInRect"/>, in order.</summary>
+    public List<DrawTextInRectCall> DrawTextInRectCalls { get; } = new();
 
     /// <summary>Total characters passed to <see cref="MeasureText"/>, to count layout work.</summary>
     public long MeasuredCharacters { get; private set; }
@@ -45,10 +49,10 @@ internal class MockDrawingContext : IDrawingContext
     public void DrawTextInRect(string text, EditorRect rect, EditorPaint paint,
         TextAlignment hAlign = TextAlignment.Left,
         VerticalAlignment vAlign = VerticalAlignment.Center,
-        bool clip = true) => DrawTextInRectCalls.Add((text, rect));
-
-    /// <summary>Text and bounds passed to <see cref="DrawTextInRect"/>, in order.</summary>
-    public List<(string Text, EditorRect Rect)> DrawTextInRectCalls { get; } = new();
+        bool clip = true)
+    {
+        DrawTextInRectCalls.Add(new DrawTextInRectCall(text, rect, paint));
+    }
 
     public void FillRect(EditorRect rect, EditorPaint paint)
     {
@@ -58,10 +62,9 @@ internal class MockDrawingContext : IDrawingContext
     public void DrawRect(EditorRect rect, EditorPaint paint) { }
     public void DrawRoundRect(EditorRect rect, float cornerRadius, EditorPaint paint) { }
     public void FillRoundRect(EditorRect rect, float cornerRadius, EditorPaint paint)
-        => FillRoundRectCalls.Add(new FillRectCall(rect, paint));
-
-    /// <summary>Calls to <see cref="FillRoundRect"/>, in order.</summary>
-    public List<FillRectCall> FillRoundRectCalls { get; } = new();
+    {
+        FillRoundRectCalls.Add(new FillRectCall(rect, paint));
+    }
     public void DrawLine(float x1, float y1, float x2, float y2, EditorPaint paint) { }
     /// <summary>Clip, state and transform calls in order, e.g. "Translate(10,20)".</summary>
     public List<string> TransformCalls { get; } = new();
@@ -99,4 +102,5 @@ internal class MockDrawingContext : IDrawingContext
         public EditorRect? Clip { get; init; }
     }
     public record FillRectCall(EditorRect Rect, EditorPaint Paint);
+    public record DrawTextInRectCall(string Text, EditorRect Rect, EditorPaint Paint);
 }

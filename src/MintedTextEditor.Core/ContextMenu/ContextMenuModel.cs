@@ -1,5 +1,6 @@
 using MintedTextEditor.Core.Commands;
 using MintedTextEditor.Core.Document;
+using MintedTextEditor.Core.Formatting;
 using MintedTextEditor.Core.Localization;
 
 namespace MintedTextEditor.Core.ContextMenu;
@@ -65,7 +66,9 @@ public static class ContextMenuFactory
 {
     /// <summary>
     /// Creates the default context menu for <paramref name="ctx"/>.
-    /// Hyperlink-specific items are included only when relevant.
+    /// Hyperlink-specific items are included only when relevant: when the caret is on a hyperlink
+    /// or the selection starts on one. Cut and Copy are enabled only with a non-empty selection, and
+    /// table row/column items are added when the caret is in a table cell.
     /// </summary>
     /// <param name="ctx">The current editor context.</param>
     /// <returns>A new menu definition with clipboard, hyperlink, image, and table items.</returns>
@@ -227,6 +230,11 @@ public static class ContextMenuFactory
 
     private static bool IsSelectionOnHyperlink(EditorContext ctx)
     {
+        // The hyperlink commands act on the link at the caret (Selection.Active), which is
+        // where a tap, long press or right-click on link text leaves it.
+        if (HyperlinkEngine.GetHyperlinkAtPosition(ctx.Document, ctx.Selection.Active) is not null)
+            return true;
+
         if (ctx.Selection.IsEmpty) return false;
 
         var range = ctx.Selection.Range;

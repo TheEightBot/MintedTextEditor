@@ -1019,6 +1019,69 @@ public sealed class RemoveHyperlinkAction : IUndoableAction
     public bool MergeWith(IUndoableAction next) => false;
 }
 
+// ── EditHyperlinkAction ─────────────────────────────────────────────────────
+
+/// <summary>
+/// Records a change to an existing hyperlink's URL and title so it can be undone by restoring
+/// the previous values. The link text is not changed.
+/// </summary>
+public sealed class EditHyperlinkAction : IUndoableAction
+{
+    private readonly Document.Document _document;
+    private readonly HyperlinkInline _hyperlink;
+    private readonly string _oldUrl;
+    private readonly string? _oldTitle;
+    private readonly string _newUrl;
+    private readonly string? _newTitle;
+    private readonly DocumentPosition _caretPosition;
+
+    /// <summary>
+    /// Creates an action that sets <paramref name="hyperlink"/>'s URL and title to
+    /// <paramref name="newUrl"/> and <paramref name="newTitle"/>. The current values are
+    /// captured now and restored by <see cref="Undo"/>.
+    /// </summary>
+    /// <param name="document">The document that contains <paramref name="hyperlink"/>.</param>
+    /// <param name="hyperlink">The hyperlink to edit.</param>
+    /// <param name="newUrl">The new link target.</param>
+    /// <param name="newTitle">The new title, or null for none.</param>
+    /// <param name="caretPosition">Caret position returned by <see cref="Execute"/>, <see cref="Undo"/> and <see cref="Redo"/>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="document"/>, <paramref name="hyperlink"/> or <paramref name="newUrl"/> is null.</exception>
+    public EditHyperlinkAction(Document.Document document, HyperlinkInline hyperlink,
+        string newUrl, string? newTitle, DocumentPosition caretPosition)
+    {
+        _document = document ?? throw new ArgumentNullException(nameof(document));
+        _hyperlink = hyperlink ?? throw new ArgumentNullException(nameof(hyperlink));
+        _newUrl = newUrl ?? throw new ArgumentNullException(nameof(newUrl));
+        _newTitle = newTitle;
+        _oldUrl = hyperlink.Url;
+        _oldTitle = hyperlink.Title;
+        _caretPosition = caretPosition;
+    }
+
+    /// <inheritdoc/>
+    public string Description => "Edit Hyperlink";
+
+    /// <inheritdoc/>
+    public DocumentPosition Execute()
+    {
+        HyperlinkEngine.EditHyperlink(_document, _hyperlink, _newUrl, _newTitle);
+        return _caretPosition;
+    }
+
+    /// <inheritdoc/>
+    public DocumentPosition Undo()
+    {
+        HyperlinkEngine.EditHyperlink(_document, _hyperlink, _oldUrl, _oldTitle);
+        return _caretPosition;
+    }
+
+    /// <inheritdoc/>
+    public DocumentPosition Redo() => Execute();
+
+    /// <inheritdoc/>
+    public bool MergeWith(IUndoableAction next) => false;
+}
+
 // ── InsertTableAction ─────────────────────────────────────────────────────
 
 /// <summary>
