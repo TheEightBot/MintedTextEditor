@@ -321,6 +321,67 @@ public class SkiaDrawingContextTests : IDisposable
         Assert.Equal(_ctx.MeasureText(text, _paint).Width, previous, 0.01f);
     }
 
+    [Fact]
+    public void MeasureCaretOffset_LongFallbackRun_SegmentsOncePerText()
+    {
+        // Hit-testing a long unwrapped line asks for the caret offset at every character;
+        // the run must not be re-segmented by typeface for each query.
+        string text = new string('a', 300) + "😀" + new string('b', 300);
+
+        int before = _ctx.SegmentationCount;
+        var offsets = new float[text.Length + 1];
+        for (int i = 0; i <= text.Length; i++)
+            offsets[i] = _ctx.MeasureCaretOffset(text, i, _paint);
+        _ctx.MeasureText(text, _paint);
+        _ctx.DrawText(text, 0, 60, _paint);
+        Assert.Equal(before + 1, _ctx.SegmentationCount);
+
+        // The cached results match a context that has never seen the text.
+        for (int i = 0; i <= text.Length; i += 13)
+        {
+            using var fresh = new SkiaDrawingContext(_surface.Canvas);
+            Assert.Equal(fresh.MeasureCaretOffset(text, i, _paint), offsets[i], 0.001f);
+        }
+        Assert.Equal(_ctx.MeasureText(text, _paint).Width, offsets[^1], 0.001f);
+    }
+
+    [Fact]
+    public void Segmentation_IsKeptPerFont()
+    {
+        string text = "bold " + RedHeart + " or not";
+        var bold = new EditorPaint { Color = _paint.Color, Font = new EditorFont { Size = 32f, IsBold = true } };
+        var small = new EditorPaint { Color = _paint.Color, Font = new EditorFont { Size = 16f } };
+
+        float regularWidth = _ctx.MeasureText(text, _paint).Width;
+        int before = _ctx.SegmentationCount;
+
+        float boldWidth = _ctx.MeasureText(text, bold).Width;
+        float smallWidth = _ctx.MeasureText(text, small).Width;
+        Assert.Equal(before + 2, _ctx.SegmentationCount);
+
+        using var fresh = new SkiaDrawingContext(_surface.Canvas);
+        Assert.Equal(fresh.MeasureText(text, bold).Width, boldWidth, 0.001f);
+        Assert.Equal(fresh.MeasureText(text, small).Width, smallWidth, 0.001f);
+        Assert.True(smallWidth < regularWidth);
+
+        // Switching back to the first font reuses its segmentation.
+        Assert.Equal(regularWidth, _ctx.MeasureText(text, _paint).Width);
+        Assert.Equal(before + 2, _ctx.SegmentationCount);
+    }
+
+    [Fact]
+    public void Segmentation_CacheIsBounded()
+    {
+        var first = "first 😀";
+        _ctx.MeasureText(first, _paint);
+        for (int i = 0; i < 20; i++)
+            _ctx.MeasureText($"text {i} 😀", _paint);
+
+        int before = _ctx.SegmentationCount;
+        _ctx.MeasureText(first, _paint);
+        Assert.Equal(before + 1, _ctx.SegmentationCount);
+    }
+
     // ── VS16 emoji presentation ─────────────────────────────────
 
     [Fact]

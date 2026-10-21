@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Wrapping very long unbroken text**: character wrapping finds grapheme boundaries once per text fragment and searches each line from its own position, measuring only text near the line end. A 20,000-character token with no spaces now lays out in linear rather than quadratic time. Lines still always take at least one whole grapheme.
 - **Hit-testing long unwrapped lines**: caret offsets within a shaped run are found by binary search over its glyph clusters instead of a scan from the start, so tapping in a line thousands of characters long no longer takes quadratic time.
 - **Shaping cache for long runs**: shaped runs longer than 256 characters are kept in a small least-recently-used cache, bounded by total glyph count, instead of a single slot. A line split into several long segments (e.g. text either side of an emoji, with word wrap off) no longer reshapes them in turn on every caret query.
+- **Font-fallback segmentation cache**: the Skia drawing context keeps how its eight most recent texts split by typeface (font fallback for emoji and other scripts), and where each segment starts, keyed by text and font (family, size, bold, italic). Caret queries, measuring and drawing the same run reuse the result instead of checking every grapheme again, so hit-testing a long unwrapped line containing an emoji no longer takes quadratic time.
 
 ---
 

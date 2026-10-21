@@ -29,6 +29,11 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
     // lookup for fonts already seen this frame.
     private readonly Dictionary<SKFont, HarfBuzzTextShaper?> _shaperCache = new();
 
+    // The most recent segmentations (see GetSegmentation), most recently used first. The
+    // measure context lives as long as the editor, so this is bounded by entry count.
+    private readonly LinkedList<Segmentation> _segmentations = new();
+    private const int MaxCachedSegmentations = 8;
+
     public SkiaDrawingContext(SKCanvas canvas)
     {
         _canvas = canvas ?? throw new ArgumentNullException(nameof(canvas));
@@ -164,23 +169,31 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
         var skFont = GetOrCreateFont(paint);
         var skPaint = GetOrCreatePaint(paint, SKPaintStyle.Fill);
 
-        if (PrimaryFontCoversAll(text, skFont))
+        var segmentation = GetSegmentation(text, skFont, paint);
+        if (segmentation.Segments is not { } segments)
             return CaretOffsetInRun(text, index, skFont, skPaint, ShapeAllText);
 
-        float x = 0f;
-        foreach (var (start, runText, font) in SegmentByTypeface(text, skFont, paint))
+        // Hit-testing asks for every caret offset in the same run in turn, so find the
+        // segment by binary search over the cached segment positions.
+        var segmentX = SegmentPositions(segmentation, skPaint);
+        int lo = 0, hi = segments.Count - 1, found = -1;
+        while (lo <= hi)
         {
-            if (index <= start)
-                return x;
-
-            bool shape = ShapeAllText || !ReferenceEquals(font, skFont);
-            if (index < start + runText.Length)
-                return x + CaretOffsetInRun(runText, index - start, font, skPaint, shape);
-
-            x += MeasureRun(runText, font, skPaint, shape);
+            int mid = (lo + hi) >>> 1;
+            if (segments[mid].Start < index) { found = mid; lo = mid + 1; }
+            else hi = mid - 1;
         }
 
-        return x;
+        // Before the first segment (an index inside a skipped lone surrogate).
+        if (found < 0)
+            return 0f;
+
+        var (start, runText, font) = segments[found];
+        if (index >= start + runText.Length)
+            return segmentX[found + 1];
+
+        bool shape = ShapeAllText || !ReferenceEquals(font, skFont);
+        return segmentX[found] + CaretOffsetInRun(runText, index - start, font, skPaint, shape);
     }
 
     private float CaretOffsetInRun(string text, int index, SKFont font, SKPaint paint, bool shape)
@@ -409,14 +422,14 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
     {
         // Fast path: the primary font covers every code point (the common case for
         // plain Latin text). Avoid all per-segment allocation and caching work.
-        if (PrimaryFontCoversAll(text, primaryFont))
+        if (GetSegmentation(text, primaryFont, editorPaint).Segments is not { } segments)
         {
             DrawRun(text, x, y, primaryFont, paint, ShapeAllText);
             return;
         }
 
         float penX = x;
-        foreach (var (_, runText, font) in SegmentByTypeface(text, primaryFont, editorPaint))
+        foreach (var (_, runText, font) in segments)
         {
             // The run's paint is reused for every segment. Color-emoji typefaces carry their
             // own color tables and ignore the paint's color, while monochrome fallback glyphs
@@ -431,14 +444,81 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
     /// </summary>
     private float MeasureSegmented(string text, SKFont primaryFont, SKPaint paint, EditorPaint editorPaint)
     {
-        if (PrimaryFontCoversAll(text, primaryFont))
+        var segmentation = GetSegmentation(text, primaryFont, editorPaint);
+        if (segmentation.Segments is null)
             return MeasureRun(text, primaryFont, paint, ShapeAllText);
 
-        float width = 0f;
-        foreach (var (_, runText, font) in SegmentByTypeface(text, primaryFont, editorPaint))
-            width += MeasureRun(runText, font, paint, ShapeAllText || !ReferenceEquals(font, primaryFont));
+        return SegmentPositions(segmentation, paint)[^1];
+    }
 
-        return width;
+    /// <summary>
+    /// Returns how <paramref name="text"/> splits by typeface: <see cref="Segmentation.Segments"/>
+    /// is <c>null</c> when the primary font covers it all. Hit-testing measures the caret at
+    /// every character of a run, and every frame redraws the same lines, so the most recent
+    /// results are cached rather than walking every grapheme of the run on each call. The
+    /// primary font identifies the family, size and style (fonts are cached per
+    /// <see cref="FontKey"/>), which also decide the fallback fonts.
+    /// </summary>
+    private Segmentation GetSegmentation(string text, SKFont primaryFont, EditorPaint editorPaint)
+    {
+        for (var node = _segmentations.First; node is not null; node = node.Next)
+        {
+            var entry = node.Value;
+            if (ReferenceEquals(entry.PrimaryFont, primaryFont) && string.Equals(entry.Text, text, StringComparison.Ordinal))
+            {
+                if (node != _segmentations.First)
+                {
+                    _segmentations.Remove(node);
+                    _segmentations.AddFirst(node);
+                }
+                return entry;
+            }
+        }
+
+        SegmentationCount++;
+        var segmentation = new Segmentation(text, primaryFont,
+            PrimaryFontCoversAll(text, primaryFont) ? null : SegmentByTypeface(text, primaryFont, editorPaint));
+
+        _segmentations.AddFirst(segmentation);
+        if (_segmentations.Count > MaxCachedSegmentations)
+            _segmentations.RemoveLast();
+
+        return segmentation;
+    }
+
+    /// <summary>
+    /// Returns the x of the start of each segment, followed by the total width, measured
+    /// as <see cref="DrawSegmented"/> draws them. Computed once per cached segmentation.
+    /// </summary>
+    private float[] SegmentPositions(Segmentation segmentation, SKPaint paint)
+    {
+        var segments = segmentation.Segments!;
+        if (segmentation.Positions is { } cached && segmentation.PositionsShaped == ShapeAllText)
+            return cached;
+
+        var positions = new float[segments.Count + 1];
+        for (int i = 0; i < segments.Count; i++)
+        {
+            var (_, runText, font) = segments[i];
+            positions[i + 1] = positions[i]
+                + MeasureRun(runText, font, paint, ShapeAllText || !ReferenceEquals(font, segmentation.PrimaryFont));
+        }
+
+        segmentation.Positions = positions;
+        segmentation.PositionsShaped = ShapeAllText;
+        return positions;
+    }
+
+    /// <summary>How many times text has actually been segmented (cache misses), for tests.</summary>
+    internal int SegmentationCount { get; private set; }
+
+    private sealed class Segmentation(string text, SKFont primaryFont, List<(int Start, string Text, SKFont Font)>? segments)
+    {
+        public string Text { get; } = text;
+        public SKFont PrimaryFont { get; } = primaryFont;
+        public List<(int Start, string Text, SKFont Font)>? Segments { get; } = segments;
+        public float[]? Positions { get; set; }
+        public bool PositionsShaped { get; set; }
     }
 
     /// <summary>
@@ -842,6 +922,7 @@ public class SkiaDrawingContext : IDrawingContext, IDisposable
             font.Dispose();
         _fallbackFontCache.Clear();
         _shaperCache.Clear();
+        _segmentations.Clear();
 
         // Several code points routinely resolve to the SAME fallback typeface instance
         // (every emoji maps to one color-emoji font, which is also the emoji typeface), so
