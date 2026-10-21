@@ -226,7 +226,12 @@ There is no built-in find bar; see [docs/commands-events.md](https://github.com/
 Editor.TextChanged += (_, e) => { /* document changed */ };
 Editor.SelectionChanged += (_, e) => { /* selection changed */ };
 Editor.HyperlinkClicked += (_, e) => { /* e.Url; set e.Cancel to stop the default open */ };
+Editor.FontAttributesChanged += (_, e) => { /* e.IsBold, e.IsItalic … at the caret/selection */ };
+Editor.ImageInserted += (_, e) => { /* e.Image */ };
+Editor.ContentLoaded += (_, e) => { /* after LoadHtml / LoadMarkdown */ };
 ```
+
+The formatting events (font, size, colours, bold/italic, underline/strikethrough, heading, alignment, list type) fire only when the formatting at the caret or selection actually changes; `Editor.CurrentFormatting` holds the latest values.
 
 For deeper API details, see [docs/getting-started.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/getting-started.md), [docs/commands-events.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/commands-events.md), and [docs/toolbar-customization.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/toolbar-customization.md).
 

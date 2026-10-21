@@ -61,6 +61,9 @@ public class MintedEditorView : ContentView
     private HyperlinkInline? _hoveredHyperlink; // link under the mouse pointer (desktop hover)
     private (float X, float Y)? _pointerPosition; // last mouse position over the canvas, for re-checking hover
     private string? _selectedHyperlinkUrl;
+    private readonly FormattingStateTracker _formattingStateTracker;
+    private readonly DocumentImageTracker _imageTracker = new();
+    private bool _documentStateUpdatePending;
     private ImageInline? _selectedImage;
     private EditorRect _selectedImageRect;
     private bool _isResizingImage;
@@ -171,6 +174,7 @@ public class MintedEditorView : ContentView
                     v.ClearPointerHover();
                 }
                 v.InvalidateCanvas();
+                v.IsReadOnlyChanged?.Invoke(v, new IsReadOnlyChangedEventArgs((bool)nv));
             });
 
     /// <summary>Bindable property for <see cref="PlaceholderText"/>.</summary>
@@ -620,8 +624,14 @@ public class MintedEditorView : ContentView
                         {
                             // Index 0 is the localized "Default" entry, which clears the font family.
                             if ((uint)idx < (uint)dd.Items.Count)
-                                _fontFormattingEngine.ApplyFontFamily(_document, _inputController.Selection.Range, idx == 0 ? "" : dd.Items[idx]);
-                            InvalidateCanvas();
+                            {
+                                string family = idx == 0 ? "" : dd.Items[idx];
+                                ApplyFontFormatting(range => _fontFormattingEngine.ApplyFontFamily(_document, range, family));
+                            }
+                            else
+                            {
+                                InvalidateCanvas();
+                            }
                         };
                         break;
 
@@ -632,8 +642,9 @@ public class MintedEditorView : ContentView
                         dd.OnSelectionChanged = idx =>
                         {
                             if ((uint)idx < (uint)dd.Items.Count && float.TryParse(dd.Items[idx], out float sz))
-                                _fontFormattingEngine.ApplyFontSize(_document, _inputController.Selection.Range, sz);
-                            InvalidateCanvas();
+                                ApplyFontFormatting(range => _fontFormattingEngine.ApplyFontSize(_document, range, sz));
+                            else
+                                InvalidateCanvas();
                         };
                         break;
 
@@ -643,6 +654,7 @@ public class MintedEditorView : ContentView
                         {
                             if ((uint)idx < (uint)dd.Items.Count)
                                 ParagraphFormattingEngine.SetHeadingLevel(_document, _inputController.Selection.Range, idx);
+                            UpdateFormattingState();
                             InvalidateCanvas();
                         };
                         break;
@@ -743,21 +755,40 @@ public class MintedEditorView : ContentView
                     case "text-color":
                         cp.OnColorSelected = color =>
                         {
-                            _fontFormattingEngine.ApplyTextColor(_document, _inputController.Selection.Range, color);
-                            InvalidateCanvas();
+                            ApplyFontFormatting(range => _fontFormattingEngine.ApplyTextColor(_document, range, color));
                         };
                         break;
 
                     case "highlight-color":
                         cp.OnColorSelected = color =>
                         {
-                            _fontFormattingEngine.ApplyHighlightColor(_document, _inputController.Selection.Range, color);
-                            InvalidateCanvas();
+                            ApplyFontFormatting(range => _fontFormattingEngine.ApplyHighlightColor(_document, range, color));
                         };
                         break;
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Applies a font family, size or colour change to the selection. Like character commands in
+    /// <see cref="ExecuteToolbarCommand"/>, it goes through
+    /// <see cref="DocumentEditor.ApplyCharacterFormatting"/> so the selection is rebuilt after runs
+    /// are split, and the formatting state is then read from the formatted text rather than from
+    /// stale endpoints.
+    /// </summary>
+    private void ApplyFontFormatting(Action<TextRange> apply)
+    {
+        var (newAnchor, newActive) = DocumentEditor.ApplyCharacterFormatting(
+            _document,
+            _inputController.Selection.Anchor,
+            _inputController.Selection.Active,
+            apply);
+        _inputController.Selection.Set(newAnchor, newActive);
+        _caret.MoveTo(_inputController.Selection.Active);
+        NotifyImeSelectionChanged();
+        UpdateFormattingState();
+        InvalidateCanvas();
     }
 
     private void ExecuteToolbarCommand(IEditorCommand command)
@@ -847,6 +878,12 @@ public class MintedEditorView : ContentView
     /// <summary>Current selection state.</summary>
     public Selection Selection => _inputController.Selection;
 
+    /// <summary>
+    /// Formatting at the caret or selection, as last reported by the formatting "changed"
+    /// events (<see cref="FontFamilyChanged"/>, <see cref="FontAttributesChanged"/> and the others).
+    /// </summary>
+    public FormattingState CurrentFormatting => _formattingStateTracker.Current;
+
     // ── Events ───────────────────────────────────────────────────────────────────
 
     /// <summary>Raised whenever the document content changes.</summary>
@@ -866,6 +903,45 @@ public class MintedEditorView : ContentView
 
     /// <summary>Raised when image insertion is requested so hosts can provide a source.</summary>
     public event EventHandler<ImageRequestedEventArgs>? ImageRequested;
+
+    /// <summary>Raised after <see cref="LoadHtml"/> or <see cref="LoadMarkdown"/> replaces the document content.</summary>
+    public event EventHandler<ContentLoadedEventArgs>? ContentLoaded;
+
+    /// <summary>Raised when <see cref="IsReadOnly"/> changes.</summary>
+    public event EventHandler<IsReadOnlyChangedEventArgs>? IsReadOnlyChanged;
+
+    /// <summary>Raised when the font family at the caret or selection changes.</summary>
+    public event EventHandler<FontFamilyChangedEventArgs>? FontFamilyChanged;
+
+    /// <summary>Raised when the font size at the caret or selection changes.</summary>
+    public event EventHandler<FontSizeChangedEventArgs>? FontSizeChanged;
+
+    /// <summary>Raised when bold, italic, subscript or superscript at the caret or selection changes.</summary>
+    public event EventHandler<FontAttributesChangedEventArgs>? FontAttributesChanged;
+
+    /// <summary>Raised when underline or strikethrough at the caret or selection changes.</summary>
+    public event EventHandler<TextDecorationsChangedEventArgs>? TextDecorationsChanged;
+
+    /// <summary>Raised when the paragraph format (heading level or block quote) at the caret or selection changes.</summary>
+    public event EventHandler<TextFormattingChangedEventArgs>? TextFormattingChanged;
+
+    /// <summary>Raised when the paragraph alignment at the caret or selection changes.</summary>
+    public event EventHandler<HorizontalTextAlignmentChangedEventArgs>? HorizontalTextAlignmentChanged;
+
+    /// <summary>Raised when the list type of the paragraph at the caret or selection changes.</summary>
+    public event EventHandler<ListTypeChangedEventArgs>? ListTypeChanged;
+
+    /// <summary>Raised when the text colour at the caret or selection changes.</summary>
+    public event EventHandler<TextColorChangedEventArgs>? TextColorChanged;
+
+    /// <summary>Raised when the highlight colour at the caret or selection changes.</summary>
+    public event EventHandler<HighlightTextColorChangedEventArgs>? HighlightTextColorChanged;
+
+    /// <summary>Raised once per image after an edit, undo or redo adds images to the document.</summary>
+    public event EventHandler<ImageInsertedEventArgs>? ImageInserted;
+
+    /// <summary>Raised once per image after an edit, undo or redo removes images from the document.</summary>
+    public event EventHandler<ImageRemovedEventArgs>? ImageRemoved;
 
     /// <summary>
     /// Raised after <see cref="FindNext"/>, <see cref="FindPrevious"/>, <see cref="Replace"/> or
@@ -923,6 +999,9 @@ public class MintedEditorView : ContentView
 
         CreateToolbarRenderer(ToolbarDefinition.CreateDefault());
 
+        _formattingStateTracker = new FormattingStateTracker(ComputeFormattingState());
+        _imageTracker.Reset(_document);
+
         var grid = new Grid();
         grid.Add(_canvas);
         grid.Add(_keyboardProxy);
@@ -952,6 +1031,7 @@ public class MintedEditorView : ContentView
         _inputController.Selection.CollapseTo(new DocumentPosition(0, 0, 0));
         _caret.Position = new DocumentPosition(0, 0, 0);
         InvalidateCanvas();
+        OnContentLoaded();
     }
 
     /// <summary>Appends the parsed HTML at the end of the current document.</summary>
@@ -979,6 +1059,7 @@ public class MintedEditorView : ContentView
         _inputController.Selection.CollapseTo(new DocumentPosition(0, 0, 0));
         _caret.Position = new DocumentPosition(0, 0, 0);
         InvalidateCanvas();
+        OnContentLoaded();
     }
 
     /// <summary>Appends the parsed Markdown at the end of the current document.</summary>
@@ -2083,6 +2164,7 @@ public class MintedEditorView : ContentView
     {
         _layoutCache.OnDocumentChanged(_document, e);
         TextChanged?.Invoke(this, new EditorTextChangedEventArgs(e.AffectedRange));
+        ScheduleDocumentStateUpdate();
         InvalidateCanvas();
     }
 
@@ -2092,6 +2174,98 @@ public class MintedEditorView : ContentView
         SelectionChanged?.Invoke(this,
             new EditorSelectionChangedEventArgs(sel.Anchor, sel.Active, sel.IsEmpty));
         RaiseHyperlinkSelectionChanged(sel.Active);
+        UpdateFormattingState();
+    }
+
+    /// <summary>
+    /// Takes freshly loaded content as the new baseline (its images are not reported as
+    /// inserted), then raises <see cref="ContentLoaded"/>.
+    /// </summary>
+    private void OnContentLoaded()
+    {
+        _imageTracker.Reset(_document);
+        UpdateFormattingState();
+        ContentLoaded?.Invoke(this, new ContentLoadedEventArgs());
+    }
+
+    /// <summary>
+    /// Queues one image and formatting state check for the end of the current operation: one
+    /// edit can send several document notifications, some before the selection has moved.
+    /// </summary>
+    private void ScheduleDocumentStateUpdate()
+    {
+        if (_documentStateUpdatePending)
+            return;
+        _documentStateUpdatePending = true;
+
+        IDispatcher? dispatcher;
+        try { dispatcher = Dispatcher; }
+        catch (InvalidOperationException) { dispatcher = null; } // no dispatcher on this thread
+        if (dispatcher is null || !dispatcher.Dispatch(UpdateDocumentState))
+            UpdateDocumentState();
+    }
+
+    private void UpdateDocumentState()
+    {
+        _documentStateUpdatePending = false;
+
+        var changes = _imageTracker.Update(_document);
+        foreach (var image in changes.Removed)
+            ImageRemoved?.Invoke(this, new ImageRemovedEventArgs(image.Source));
+        foreach (var image in changes.Inserted)
+            ImageInserted?.Invoke(this, new ImageInsertedEventArgs(image));
+
+        UpdateFormattingState();
+    }
+
+    private FormattingState ComputeFormattingState()
+    {
+        // Merge the pending styles the same way typed input does: character toggles from
+        // one, font family, size and colours from the other.
+        var pending = _formattingEngine.PendingStyle;
+        var pendingFont = _fontFormattingEngine.PendingStyle;
+        if (pending is not null && pendingFont is not null)
+        {
+            pending = pending
+                .WithFontFamily(pendingFont.FontFamily)
+                .WithFontSize(pendingFont.FontSize)
+                .WithTextColor(pendingFont.TextColor)
+                .WithHighlightColor(pendingFont.HighlightColor);
+        }
+        return FormattingState.Compute(_document, _inputController.Selection.Range, pending ?? pendingFont);
+    }
+
+    /// <summary>
+    /// Recomputes the formatting at the caret or selection and raises the matching "changed"
+    /// event for each part that differs from the last state.
+    /// </summary>
+    private void UpdateFormattingState()
+    {
+        var state = ComputeFormattingState();
+        var changes = _formattingStateTracker.Update(state);
+        if (changes == FormattingStateChanges.None)
+            return;
+
+        if (changes.HasFlag(FormattingStateChanges.FontFamily))
+            FontFamilyChanged?.Invoke(this, new FontFamilyChangedEventArgs(state.FontFamily));
+        if (changes.HasFlag(FormattingStateChanges.FontSize))
+            FontSizeChanged?.Invoke(this, new FontSizeChangedEventArgs(state.FontSize));
+        if (changes.HasFlag(FormattingStateChanges.FontAttributes))
+            FontAttributesChanged?.Invoke(this, new FontAttributesChangedEventArgs(
+                state.IsBold, state.IsItalic, state.IsSubscript, state.IsSuperscript));
+        if (changes.HasFlag(FormattingStateChanges.TextDecorations))
+            TextDecorationsChanged?.Invoke(this, new TextDecorationsChangedEventArgs(
+                state.IsUnderline, state.IsStrikethrough));
+        if (changes.HasFlag(FormattingStateChanges.ParagraphFormat))
+            TextFormattingChanged?.Invoke(this, new TextFormattingChangedEventArgs(state.ParagraphFormat));
+        if (changes.HasFlag(FormattingStateChanges.Alignment))
+            HorizontalTextAlignmentChanged?.Invoke(this, new HorizontalTextAlignmentChangedEventArgs(state.Alignment));
+        if (changes.HasFlag(FormattingStateChanges.ListType))
+            ListTypeChanged?.Invoke(this, new ListTypeChangedEventArgs(state.ListType));
+        if (changes.HasFlag(FormattingStateChanges.TextColor))
+            TextColorChanged?.Invoke(this, new TextColorChangedEventArgs(state.TextColor));
+        if (changes.HasFlag(FormattingStateChanges.HighlightColor))
+            HighlightTextColorChanged?.Invoke(this, new HighlightTextColorChangedEventArgs(state.HighlightColor));
     }
 
     private void RaiseHyperlinkSelectionChanged(DocumentPosition position)
