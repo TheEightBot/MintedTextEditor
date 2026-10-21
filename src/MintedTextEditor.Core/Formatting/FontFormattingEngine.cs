@@ -111,7 +111,7 @@ public class FontFormattingEngine
     {
         if (range.IsEmpty)
         {
-            var baseStyle = PendingStyle ?? TextStyle.Default;
+            var baseStyle = PendingStyle ?? DocumentEditor.GetInsertionStyle(doc, range.Start);
             PendingStyle = transform(baseStyle);
             return;
         }

@@ -1059,6 +1059,9 @@ public class MintedEditorView : ContentView
         _inputController.Selection.CollapseTo(new DocumentPosition(0, 0, 0));
         _caret.Position = new DocumentPosition(0, 0, 0);
         InvalidateCanvas();
+        // The document was replaced, so the caret now refers to new content even when its
+        // coordinates happen to match the old ones.
+        RaiseSelectionChanged();
         OnContentLoaded();
     }
 
@@ -1087,6 +1090,9 @@ public class MintedEditorView : ContentView
         _inputController.Selection.CollapseTo(new DocumentPosition(0, 0, 0));
         _caret.Position = new DocumentPosition(0, 0, 0);
         InvalidateCanvas();
+        // The document was replaced, so the caret now refers to new content even when its
+        // coordinates happen to match the old ones.
+        RaiseSelectionChanged();
         OnContentLoaded();
     }
 
@@ -1105,7 +1111,7 @@ public class MintedEditorView : ContentView
         if (_undoManager.CanUndo)
         {
             var pos = _undoManager.Undo();
-            if (pos.HasValue) { _inputController.Selection.CollapseTo(pos.Value); _caret.MoveTo(pos.Value); }
+            if (pos.HasValue) MoveCaretAfterHistoryChange(pos.Value);
             InvalidateCanvas();
         }
     }
@@ -1116,9 +1122,22 @@ public class MintedEditorView : ContentView
         if (_undoManager.CanRedo)
         {
             var pos = _undoManager.Redo();
-            if (pos.HasValue) { _inputController.Selection.CollapseTo(pos.Value); _caret.MoveTo(pos.Value); }
+            if (pos.HasValue) MoveCaretAfterHistoryChange(pos.Value);
             InvalidateCanvas();
         }
+    }
+
+    /// <summary>
+    /// Collapses the selection to <paramref name="position"/> after an undo/redo and raises
+    /// <see cref="SelectionChanged"/> when the caret or selection actually moved.
+    /// </summary>
+    private void MoveCaretAfterHistoryChange(DocumentPosition position)
+    {
+        var sel = _inputController.Selection;
+        bool changed = sel.Anchor != position || sel.Active != position;
+        sel.CollapseTo(position);
+        _caret.MoveTo(position);
+        if (changed) RaiseSelectionChanged();
     }
 
     // ── Find / Replace ───────────────────────────────────────────────────────────
