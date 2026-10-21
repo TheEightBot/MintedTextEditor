@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 - **Editor events that were defined but never raised**: `MintedEditorView` now raises `ContentLoaded` (after `LoadHtml`/`LoadMarkdown`), `IsReadOnlyChanged`, `ImageInserted`/`ImageRemoved` (after edits, undo and redo), and formatting-state events for the caret or selection: `FontFamilyChanged`, `FontSizeChanged`, `FontAttributesChanged`, `TextDecorationsChanged`, `TextColorChanged`, `HighlightTextColorChanged`, `TextFormattingChanged`, `HorizontalTextAlignmentChanged` and `ListTypeChanged`. Formatting events fire only when the value actually changes; the latest values are in the new `CurrentFormatting` property. See [Commands & Events](docs/commands-events.md#events).
-- Core: `FormattingState`, `FormattingStateTracker` and `DocumentImageTracker` (in `MintedTextEditor.Core.Events`), which work out when those events fire.
+- Core: `FormattingState`, `FormattingStateTracker`, `DocumentImageTracker` and `TrackedImage` (in `MintedTextEditor.Core.Events`), which work out when those events fire.
 
 ### Changed
 - The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.

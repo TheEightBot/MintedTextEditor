@@ -129,6 +129,88 @@ public class DocumentImageTrackerTests
     }
 
     [Fact]
+    public void Update_ReplaceImage_ReportsOldSourceRemovedAndUpdatedImageInserted()
+    {
+        var doc = DocWithText("abc");
+        var image = ImageEngine.InsertImage(doc, new DocumentPosition(0, 0, 1), "old.png");
+        var tracker = new DocumentImageTracker();
+        tracker.Reset(doc);
+
+        ImageEngine.ReplaceImage(doc, image, "new.png");
+        var changes = tracker.Update(doc);
+
+        Assert.Same(image, Assert.Single(changes.Inserted));
+        var removed = Assert.Single(changes.Removed);
+        Assert.Equal("old.png", removed.Source);
+        Assert.Same(image, removed.Image);
+        Assert.True(tracker.Update(doc).IsEmpty);
+    }
+
+    [Fact]
+    public void Update_ReplaceImageWithSameSource_ReportsNothing()
+    {
+        var doc = DocWithText("abc");
+        var image = ImageEngine.InsertImage(doc, new DocumentPosition(0, 0, 1), "a.png");
+        var tracker = new DocumentImageTracker();
+        tracker.Reset(doc);
+
+        ImageEngine.ReplaceImage(doc, image, "a.png");
+
+        Assert.True(tracker.Update(doc).IsEmpty);
+    }
+
+    [Fact]
+    public void Update_UndoAndRedoOfReplace_ReportSourceSwaps()
+    {
+        var doc = DocWithText("abc");
+        ImageEngine.InsertImage(doc, new DocumentPosition(0, 0, 1), "old.png");
+        var undo = new UndoManager();
+        var tracker = new DocumentImageTracker();
+        tracker.Reset(doc);
+
+        undo.Push(new ReplaceImageAction(doc, 0, "new.png"));
+        Assert.Equal("new.png", Assert.Single(tracker.Update(doc).Inserted).Source);
+
+        // Undo rebuilds the paragraph from its snapshot: a new instance with the old source.
+        undo.Undo();
+        var afterUndo = tracker.Update(doc);
+        Assert.Equal("new.png", Assert.Single(afterUndo.Removed).Source);
+        Assert.Equal("old.png", Assert.Single(afterUndo.Inserted).Source);
+
+        undo.Redo();
+        var afterRedo = tracker.Update(doc);
+        Assert.Equal("old.png", Assert.Single(afterRedo.Removed).Source);
+        Assert.Equal("new.png", Assert.Single(afterRedo.Inserted).Source);
+        Assert.True(tracker.Update(doc).IsEmpty);
+    }
+
+    /// <summary>Replaces the first image in a paragraph, restoring the paragraph snapshot on undo.</summary>
+    private sealed class ReplaceImageAction(EditorDocument doc, int blockIndex, string newSource) : IUndoableAction
+    {
+        private ParagraphSnapshot? _snapshot;
+
+        public string Description => "Replace Image";
+
+        public DocumentPosition Execute()
+        {
+            var para = (Paragraph)doc.Blocks[blockIndex];
+            _snapshot = SnapshotHelper.Capture(para);
+            ImageEngine.ReplaceImage(doc, para.Inlines.OfType<ImageInline>().First(), newSource);
+            return new DocumentPosition(blockIndex, 0, 0);
+        }
+
+        public DocumentPosition Undo()
+        {
+            SnapshotHelper.Restore((Paragraph)doc.Blocks[blockIndex], _snapshot!);
+            return new DocumentPosition(blockIndex, 0, 0);
+        }
+
+        public DocumentPosition Redo() => Execute();
+
+        public bool MergeWith(IUndoableAction next) => false;
+    }
+
+    [Fact]
     public void CollectImages_FindsImagesInTablesAndHyperlinks()
     {
         var doc = new EditorDocument();

@@ -114,6 +114,130 @@ public class FormattingStateTrackerTests
     }
 
     [Fact]
+    public void Compute_SelectionStartingAtEndOfPrecedingRun_ReadsOnlySelectedRuns()
+    {
+        // "x" (default) + "aa" (Arial 20 bold) + "bb" (Arial 20): the selection covers the two
+        // Arial runs. Its start can be written as the end of "x" or the start of "aa".
+        var doc = new EditorDocument();
+        var para = (Paragraph)doc.Blocks[0];
+        para.AppendRun("x");
+        para.AppendRun("aa", new TextStyle("Arial", 20f, isBold: true));
+        para.AppendRun("bb", new TextStyle("Arial", 20f));
+        var end = new DocumentPosition(0, 2, 2);
+
+        var atPrecedingEnd = FormattingState.Compute(doc, new TextRange(new DocumentPosition(0, 0, 1), end));
+        var atRunStart = FormattingState.Compute(doc, new TextRange(new DocumentPosition(0, 1, 0), end));
+
+        Assert.Equal("Arial", atPrecedingEnd.FontFamily);
+        Assert.Equal(20f, atPrecedingEnd.FontSize);
+        Assert.False(atPrecedingEnd.IsBold);
+        Assert.Equal(atRunStart, atPrecedingEnd);
+    }
+
+    [Fact]
+    public void Compute_SelectionEndingAtStartOfFollowingRun_IgnoresThatRun()
+    {
+        var doc = TwoRuns();
+
+        // "plain " selected, with the end written as the start of "bold".
+        var state = FormattingState.Compute(doc,
+            new TextRange(new DocumentPosition(0, 0, 0), new DocumentPosition(0, 1, 0)));
+
+        Assert.False(state.IsBold);
+        Assert.Equal(TextStyle.Default.FontFamily, state.FontFamily);
+    }
+
+    [Fact]
+    public void Compute_SelectionInTableCell_ReadsCellRuns()
+    {
+        var doc = new EditorDocument();
+        var table = new TableBlock(1, 2);
+        ((Paragraph)table.GetCell(0, 0)!.Blocks[0]).AppendRun("bold", new TextStyle("Arial", 20f, isBold: true));
+        ((Paragraph)table.GetCell(0, 1)!.Blocks[0]).AppendRun("plain");
+        doc.AddBlock(table);
+
+        var whole = FormattingState.Compute(doc,
+            new TextRange(new DocumentPosition(1, 0, 0, 0, 0), new DocumentPosition(1, 0, 4, 0, 0)));
+        var acrossCells = FormattingState.Compute(doc,
+            new TextRange(new DocumentPosition(1, 0, 0, 0, 0), new DocumentPosition(1, 0, 5, 0, 1)));
+
+        Assert.True(whole.IsBold);
+        Assert.Equal("Arial", whole.FontFamily);
+        Assert.False(acrossCells.IsBold);
+    }
+
+    [Fact]
+    public void Compute_SelectionInHyperlink_ReadsLinkRuns()
+    {
+        var doc = new EditorDocument();
+        var para = (Paragraph)doc.Blocks[0];
+        var link = new HyperlinkInline("https://example.com");
+        para.AddInline(link);
+        link.AddChild(new TextRun("ab", TextStyle.Default.WithBold(true)));
+        link.AddChild(new TextRun("cd", TextStyle.Default.WithBold(true).WithItalic(true)));
+
+        var allBold = FormattingState.Compute(doc,
+            new TextRange(new DocumentPosition(0, 0, 0), new DocumentPosition(0, 0, 4)));
+        var italicPart = FormattingState.Compute(doc,
+            new TextRange(new DocumentPosition(0, 0, 2), new DocumentPosition(0, 0, 4)));
+
+        Assert.True(allBold.IsBold);
+        Assert.False(allBold.IsItalic);
+        Assert.True(italicPart.IsItalic);
+    }
+
+    [Fact]
+    public void Compute_MixedSelection_IncludesPlainLinkedText()
+    {
+        // Bold run followed by a link with plain text: the selection is not wholly bold.
+        var doc = new EditorDocument();
+        var para = (Paragraph)doc.Blocks[0];
+        para.AppendRun("bold", TextStyle.Default.WithBold(true));
+        var link = new HyperlinkInline("https://example.com");
+        para.AddInline(link);
+        link.AddChild(new TextRun("link"));
+
+        var state = FormattingState.Compute(doc,
+            new TextRange(new DocumentPosition(0, 0, 0), new DocumentPosition(0, 1, 4)));
+
+        Assert.False(state.IsBold);
+    }
+
+    [Fact]
+    public void Compute_CaretInHyperlink_UsesChildAtOffset()
+    {
+        var doc = new EditorDocument();
+        var para = (Paragraph)doc.Blocks[0];
+        var link = new HyperlinkInline("https://example.com");
+        para.AddInline(link);
+        link.AddChild(new TextRun("ab"));
+        link.AddChild(new TextRun("cd", TextStyle.Default.WithBold(true)));
+
+        Assert.False(FormattingState.Compute(doc, Caret(0, 0, 1)).IsBold);
+        Assert.False(FormattingState.Compute(doc, Caret(0, 0, 2)).IsBold); // boundary: earlier child
+        Assert.True(FormattingState.Compute(doc, Caret(0, 0, 3)).IsBold);
+        Assert.True(FormattingState.Compute(doc, Caret(0, 0, 4)).IsBold);
+    }
+
+    [Fact]
+    public void Compute_AfterFontChangeOnPartOfRun_ReadsRebuiltSelection()
+    {
+        // Selecting "bc" in "abcdef" and applying a font splits the run; the selection rebuilt by
+        // ApplyCharacterFormatting (as the editor view does) must report the new font.
+        var doc = new EditorDocument();
+        ((Paragraph)doc.Blocks[0]).AppendRun("abcdef");
+        var engine = new FontFormattingEngine();
+
+        var (anchor, active) = DocumentEditor.ApplyCharacterFormatting(doc,
+            new DocumentPosition(0, 0, 1), new DocumentPosition(0, 0, 3),
+            range => engine.ApplyFontFamily(doc, range, "Arial"));
+        var state = FormattingState.Compute(doc, new TextRange(anchor, active));
+
+        Assert.Equal("Arial", state.FontFamily);
+        Assert.Equal("bc", DocumentEditor.GetSelectedText(doc, new TextRange(anchor, active)));
+    }
+
+    [Fact]
     public void Compute_OutOfRangePosition_DoesNotThrow()
     {
         var state = FormattingState.Compute(new EditorDocument(), Caret(5, 3, 1));

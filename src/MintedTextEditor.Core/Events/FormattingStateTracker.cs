@@ -10,11 +10,13 @@ namespace MintedTextEditor.Core.Events;
 /// </summary>
 /// <remarks>
 /// For a non-empty selection, bold, italic, underline, strikethrough, subscript and superscript
-/// are true only when applied to the whole selection (as the toolbar shows them); font family,
-/// size and colours are the selection's common value, or the value at its start when mixed.
+/// are true only when applied to all selected text, including text in table cells and hyperlinks;
+/// font family, size and colours are the selected text's common value, or the value of its first
+/// character when mixed.
 /// For a caret, every value comes from the pending style (formatting chosen with nothing
-/// selected, applied to the next typed text) when there is one, otherwise from the text run at
-/// the caret. Paragraph values come from the paragraph at the start of the selection.
+/// selected, applied to the next typed text) when there is one, otherwise from the text run (or
+/// hyperlink text) at the caret. Paragraph values come from the paragraph at the start of the
+/// selection.
 /// </remarks>
 public sealed record FormattingState
 {
@@ -79,17 +81,111 @@ public sealed record FormattingState
             return FromStyles(caretStyle, paraStyle);
         }
 
-        var style = FontFormattingEngine.GetTextStyleForRange(document, range)
-                    ?? GetRunStyle(paragraph, range.Start);
-        return FromStyles(style, paraStyle) with
+        // Styles of the text runs that the selection actually covers, including runs inside
+        // table cells and hyperlinks. A selection with no text (e.g. only an image) has no
+        // on/off styles and takes its font from the run at its start.
+        var styles = CollectSelectedRunStyles(document, range);
+        if (styles.Count == 0)
         {
-            IsBold          = FormattingEngine.IsAppliedToEntireRange(document, range, s => s.IsBold),
-            IsItalic        = FormattingEngine.IsAppliedToEntireRange(document, range, s => s.IsItalic),
-            IsUnderline     = FormattingEngine.IsAppliedToEntireRange(document, range, s => s.IsUnderline),
-            IsStrikethrough = FormattingEngine.IsAppliedToEntireRange(document, range, s => s.IsStrikethrough),
-            IsSubscript     = FormattingEngine.IsAppliedToEntireRange(document, range, s => s.IsSubscript),
-            IsSuperscript   = FormattingEngine.IsAppliedToEntireRange(document, range, s => s.IsSuperscript),
+            return FromStyles(GetRunStyle(paragraph, range.Start), paraStyle) with
+            {
+                IsBold = false, IsItalic = false, IsUnderline = false,
+                IsStrikethrough = false, IsSubscript = false, IsSuperscript = false,
+            };
+        }
+
+        // Font and colours: the common value, or the value at the start of the selection when
+        // mixed; both are the first covered run's value.
+        return FromStyles(styles[0], paraStyle) with
+        {
+            IsBold          = styles.TrueForAll(s => s.IsBold),
+            IsItalic        = styles.TrueForAll(s => s.IsItalic),
+            IsUnderline     = styles.TrueForAll(s => s.IsUnderline),
+            IsStrikethrough = styles.TrueForAll(s => s.IsStrikethrough),
+            IsSubscript     = styles.TrueForAll(s => s.IsSubscript),
+            IsSuperscript   = styles.TrueForAll(s => s.IsSuperscript),
         };
+    }
+
+    /// <summary>
+    /// Returns the styles of the text runs that share at least one character with
+    /// <paramref name="range"/>, in document order. Coverage is decided by character offsets
+    /// within each paragraph, so the equivalent positions either side of a run boundary
+    /// (end of one run, start of the next) select the same runs.
+    /// </summary>
+    private static List<TextStyle> CollectSelectedRunStyles(Document.Document document, TextRange range)
+    {
+        var styles = new List<TextStyle>();
+        var start = range.Start;
+        var end = range.End;
+
+        for (int bi = Math.Max(0, start.BlockIndex); bi <= end.BlockIndex && bi < document.Blocks.Count; bi++)
+        {
+            switch (document.Blocks[bi])
+            {
+                case Paragraph paragraph:
+                {
+                    int from = bi == start.BlockIndex && !start.IsInTableCell
+                        ? DocumentEditor.GetAbsoluteCharOffset(document, start) : 0;
+                    int to = bi == end.BlockIndex && !end.IsInTableCell
+                        ? DocumentEditor.GetAbsoluteCharOffset(document, end) : int.MaxValue;
+                    CollectFromInlines(paragraph.Inlines, 0, from, to, styles);
+                    break;
+                }
+                case TableBlock table:
+                {
+                    bool startsInTable = bi == start.BlockIndex && start.IsInTableCell;
+                    bool endsInTable = bi == end.BlockIndex && end.IsInTableCell;
+                    for (int r = 0; r < table.Rows.Count; r++)
+                    {
+                        for (int c = 0; c < table.Rows[r].Cells.Count; c++)
+                        {
+                            bool isStartCell = startsInTable && r == start.CellRow && c == start.CellCol;
+                            bool isEndCell = endsInTable && r == end.CellRow && c == end.CellCol;
+                            if (startsInTable && (r, c).CompareTo((start.CellRow, start.CellCol)) < 0) continue;
+                            if (endsInTable && (r, c).CompareTo((end.CellRow, end.CellCol)) > 0) continue;
+
+                            // Positions in a cell refer to its first paragraph.
+                            var blocks = table.Rows[r].Cells[c].Blocks;
+                            for (int k = 0; k < blocks.Count; k++)
+                            {
+                                if (blocks[k] is not Paragraph cellParagraph) continue;
+                                if (isEndCell && k > 0) break;
+                                int from = isStartCell && k == 0 ? DocumentEditor.GetAbsoluteCharOffset(document, start) : 0;
+                                int to = isEndCell ? DocumentEditor.GetAbsoluteCharOffset(document, end) : int.MaxValue;
+                                CollectFromInlines(cellParagraph.Inlines, 0, from, to, styles);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        return styles;
+    }
+
+    /// <summary>
+    /// Adds the styles of text runs in <paramref name="inlines"/> (and in hyperlinks among them)
+    /// that overlap the character span [<paramref name="from"/>, <paramref name="to"/>).
+    /// Returns the offset after the last inline.
+    /// </summary>
+    private static int CollectFromInlines(IEnumerable<Inline> inlines, int offset, int from, int to, List<TextStyle> styles)
+    {
+        foreach (var inline in inlines)
+        {
+            if (inline is HyperlinkInline link)
+            {
+                offset = CollectFromInlines(link.Children, offset, from, to, styles);
+                continue;
+            }
+
+            int length = inline.Length;
+            if (inline is TextRun run && Math.Max(offset, from) < Math.Min(offset + length, to))
+                styles.Add(run.Style);
+            offset += length;
+        }
+        return offset;
     }
 
     private static FormattingState FromStyles(TextStyle text, ParagraphStyle paragraph) => new()
@@ -134,9 +230,29 @@ public sealed record FormattingState
         return paragraph.Inlines[ii] switch
         {
             TextRun run => run.Style,
-            HyperlinkInline link => link.Children.OfType<TextRun>().FirstOrDefault()?.Style ?? TextStyle.Default,
+            HyperlinkInline link => GetHyperlinkChildStyle(link, position.Offset),
             _ => TextStyle.Default,
         };
+    }
+
+    /// <summary>
+    /// Returns the style of the hyperlink child at <paramref name="offset"/> (counted over the
+    /// children's cumulative lengths). At a boundary between two children the earlier one is used,
+    /// as <see cref="DocumentEditor.InsertText"/> does when typing there.
+    /// </summary>
+    private static TextStyle GetHyperlinkChildStyle(HyperlinkInline link, int offset)
+    {
+        int remaining = Math.Clamp(offset, 0, link.Length);
+        TextStyle? lastText = null;
+        foreach (var child in link.Children)
+        {
+            if (child is TextRun run)
+                lastText = run.Style;
+            if (remaining <= child.Length && lastText is not null)
+                return lastText;
+            remaining -= child.Length;
+        }
+        return lastText ?? TextStyle.Default;
     }
 }
 

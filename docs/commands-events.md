@@ -189,7 +189,7 @@ Raised once per image after an edit adds images to the document or removes them:
 
 - They are raised once the edit has finished (on the next turn of the UI dispatcher), after `TextChanged`.
 - Images that arrive with `LoadHtml` / `LoadMarkdown` are not reported: the loaded content is the new starting point.
-- Undo and redo rebuild paragraphs, so a removed image and an added image with the same source in one edit count as the same image and raise nothing. Replacing an image with one from a different source raises both events.
+- Undo and redo rebuild paragraphs, so a removed image and an added image with the same source in one edit count as the same image and raise nothing. Replacing an image with one from a different source raises both events, including when the source of an existing image is changed in place with `ImageEngine.ReplaceImage`: `ImageRemoved` carries the old source and `ImageInserted` the updated image.
 
 ```csharp
 editor.ImageRemoved += (sender, e) => imageStore.Release(e.Source);
@@ -213,8 +213,8 @@ These events report the formatting at the caret or selection, for keeping a cust
 
 How the values are worked out (`FormattingState.Compute` in Core):
 
-- **Caret**: from the formatting chosen for the next typed text if there is any, otherwise from the text run at the caret.
-- **Selection**: bold, italic, underline, strikethrough, subscript and superscript are true only when they apply to the whole selection, as the toolbar buttons show them. Font family, size and colours are the selection's common value, or the value at its start when they are mixed.
+- **Caret**: from the formatting chosen for the next typed text if there is any, otherwise from the text at the caret (including text inside a hyperlink).
+- **Selection**: bold, italic, underline, strikethrough, subscript and superscript are true only when they apply to all the selected text, including text in table cells and hyperlinks. Font family, size and colours are the selected text's common value, or the value of its first character when they are mixed.
 - **Paragraph values** come from the paragraph at the start of the selection.
 
 `editor.CurrentFormatting` returns the latest `FormattingState`, so you can read the initial values before any event has fired.
