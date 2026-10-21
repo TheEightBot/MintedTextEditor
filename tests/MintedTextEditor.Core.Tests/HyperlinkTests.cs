@@ -1,4 +1,5 @@
 using MintedTextEditor.Core.Document;
+using MintedTextEditor.Core.Editing;
 using MintedTextEditor.Core.Formatting;
 
 namespace MintedTextEditor.Core.Tests;
@@ -213,6 +214,49 @@ public class HyperlinkTests
         var link = HyperlinkEngine.AutoDetectUrl(doc, 0, 0, 19);
 
         Assert.Null(link);
+    }
+
+    // ── EditHyperlinkAction ────────────────────────────────────────────────
+
+    [Fact]
+    public void EditHyperlinkAction_UndoRestoresUrlAndTitle_RedoReappliesThem()
+    {
+        var (doc, _) = MakeDoc("Click here");
+        var range = new TextRange(new DocumentPosition(0, 0, 6), new DocumentPosition(0, 0, 10));
+        var link = HyperlinkEngine.InsertHyperlink(doc, range, "https://old.com", "Old");
+        var undo = new UndoManager();
+        var caret = new DocumentPosition(0, 1, 2);
+
+        var pos = undo.Push(new EditHyperlinkAction(doc, link, "https://new.com", "New", caret));
+
+        Assert.Equal(caret, pos);
+        Assert.Equal("https://new.com", link.Url);
+        Assert.Equal("New", link.Title);
+        Assert.Equal("here", link.GetText());
+
+        Assert.Equal(caret, undo.Undo());
+        Assert.Equal("https://old.com", link.Url);
+        Assert.Equal("Old", link.Title);
+
+        Assert.Equal(caret, undo.Redo());
+        Assert.Equal("https://new.com", link.Url);
+        Assert.Equal("New", link.Title);
+    }
+
+    [Fact]
+    public void EditHyperlinkAction_RaisesDocumentChanged()
+    {
+        var (doc, _) = MakeDoc("Click here");
+        var range = new TextRange(new DocumentPosition(0, 0, 6), new DocumentPosition(0, 0, 10));
+        var link = HyperlinkEngine.InsertHyperlink(doc, range, "https://old.com");
+        int changes = 0;
+        doc.Changed += (_, _) => changes++;
+
+        var undo = new UndoManager();
+        undo.Push(new EditHyperlinkAction(doc, link, "https://new.com", null, default));
+        undo.Undo();
+
+        Assert.Equal(2, changes);
     }
 
     // ── HitTestHyperlink (pointer hover) ──────────────────────────────────

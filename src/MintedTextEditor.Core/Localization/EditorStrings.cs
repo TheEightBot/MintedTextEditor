@@ -204,6 +204,10 @@ public class EditorStrings
     public virtual string HyperlinkDialogOk           => "OK";
     /// <summary>Validation message for an invalid URL in a custom hyperlink dialog. Not used by the built-in prompt. Default: "Please enter a valid URL."</summary>
     public virtual string HyperlinkDialogInvalidUrl   => "Please enter a valid URL.";
+    /// <summary>Title of the built-in prompt that changes a hyperlink's URL (context menu Edit hyperlink). Default: "Edit hyperlink"</summary>
+    public virtual string EditHyperlinkDialogTitle    => "Edit hyperlink";
+    /// <summary>Confirm button text of the built-in edit-hyperlink prompt. Default: "Save"</summary>
+    public virtual string EditHyperlinkDialogSave     => "Save";
 
     /// <summary>Title of the built-in image prompt. Default: "Insert image"</summary>
     public virtual string ImageDialogTitle            => "Insert image";
