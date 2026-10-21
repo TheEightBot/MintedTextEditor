@@ -95,7 +95,7 @@ public class SkiaDrawingContextTests : IDisposable
     public void Vs15_KeepsTextPresentation()
     {
         // 😀︎ (U+1F600 U+FE0E) asks for the text glyph: it must not be forced to the emoji font.
-        if (!HasEmojiFont || DejaVu is not { } typeface || !typeface.ContainsGlyph(0x1F600)) return;
+        if (!HasEmojiFont || DejaVu is not { } typeface || !HasGlyph(typeface, 0x1F600)) return;
 
         var paint = new EditorPaint { Font = new EditorFont("DejaVu Sans", 32f) };
         using var dejaVuFont = new SKFont(typeface, 32f);
@@ -161,12 +161,12 @@ public class SkiaDrawingContextTests : IDisposable
     {
         // Caret placement and hit-testing measure prefixes left to right, so glyphs must stay
         // in logical order (first character leftmost) rather than being reversed.
-        if (DejaVu is not { } typeface || !typeface.ContainsGlyph(0x05D0)) return;
+        if (DejaVu is not { } typeface || !HasGlyph(typeface, 0x05D0)) return;
 
         var shaped = HarfBuzzTextShaper.Get(typeface)!.Shape("אב", 32f);
 
-        Assert.Equal(typeface.GetGlyph(0x05D0), shaped.Glyphs[0]);
-        Assert.Equal(typeface.GetGlyph(0x05D1), shaped.Glyphs[1]);
+        Assert.Equal(GlyphOf(typeface, 0x05D0), shaped.Glyphs[0]);
+        Assert.Equal(GlyphOf(typeface, 0x05D1), shaped.Glyphs[1]);
         Assert.True(shaped.Positions[0].X < shaped.Positions[1].X);
     }
 
@@ -174,14 +174,14 @@ public class SkiaDrawingContextTests : IDisposable
     public void Shape_MixedScripts_ShapesEachScriptWithItsOwnRules()
     {
         // In "abcسلام" the Arabic must get its joined forms, exactly as when shaped alone.
-        if (DejaVu is not { } typeface || !typeface.ContainsGlyph(0x0633)) return;
+        if (DejaVu is not { } typeface || !HasGlyph(typeface, 0x0633)) return;
         var shaper = HarfBuzzTextShaper.Get(typeface)!;
 
         var arabicAlone = shaper.Shape("سلام", 32f).Glyphs;
         var mixed = shaper.Shape("abcسلام", 32f).Glyphs;
 
         Assert.Equal(arabicAlone, mixed[^arabicAlone.Length..]);
-        Assert.NotEqual(typeface.GetGlyph(0x0633), arabicAlone[0]); // initial form, not isolated
+        Assert.NotEqual(GlyphOf(typeface, 0x0633), arabicAlone[0]); // initial form, not isolated
     }
 
     [Fact]
@@ -291,6 +291,18 @@ public class SkiaDrawingContextTests : IDisposable
     }
 
     private static SKTypeface? DejaVu => SKFontManager.Default.MatchFamily("DejaVu Sans") is { FamilyName: "DejaVu Sans" } t ? t : null;
+
+    private static bool HasGlyph(SKTypeface typeface, int codePoint)
+    {
+        using var font = new SKFont(typeface);
+        return font.ContainsGlyph(codePoint);
+    }
+
+    private static ushort GlyphOf(SKTypeface typeface, int codePoint)
+    {
+        using var font = new SKFont(typeface);
+        return font.GetGlyph(codePoint);
+    }
 
     [Theory]
     [InlineData("AV")]
@@ -429,7 +441,7 @@ public class SkiaDrawingContextTests : IDisposable
         // DejaVu Sans has its own monochrome 😀 (it is the default font on Linux CI), so the
         // text font "covers" the string, but the emoji must still come from the color font.
         if (!HasEmojiFont || SKFontManager.Default.MatchFamily("DejaVu Sans") is not { } dejaVu
-            || !dejaVu.ContainsGlyph(0x1F600))
+            || !HasGlyph(dejaVu, 0x1F600))
             return;
 
         var paint = new EditorPaint { Color = new EditorColor(0, 0, 0), Font = new EditorFont("DejaVu Sans", 32f) };

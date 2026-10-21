@@ -11,9 +11,35 @@ name: Publish
         required: true
 
 jobs:
+  # ── Job 0: Test ─────────────────────────────────────────────────────────────
+  # Nothing is packed or published unless the tests pass on the tagged commit.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      # The SkiaSharp tests render emoji; without a color emoji font they return early.
+      - name: Install emoji font
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-color-emoji
+
+      - name: Test (Core)
+        run: dotnet test tests/MintedTextEditor.Core.Tests/ --configuration Release
+
+      - name: Test (SkiaSharp)
+        run: dotnet test tests/MintedTextEditor.SkiaSharp.Tests/ --configuration Release
+
   # ── Job 1: Pack Core & SkiaSharp ────────────────────────────────────────────
   pack-core:
     name: Pack Core & SkiaSharp
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
@@ -81,6 +107,7 @@ jobs:
   # ── Job 2: Pack MAUI ────────────────────────────────────────────────────────
   pack-maui:
     name: Pack MAUI
+    needs: test
     runs-on: windows-latest
 
     steps:
