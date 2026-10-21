@@ -356,6 +356,15 @@ public class MintedEditorView : ContentView
                 var v = (MintedEditorView)b;
                 v.ApplyToolbarMaxRows();
                 v.InvalidateCanvas();
+            },
+            // Setting the current value again, or clearing a value equal to the default, raises
+            // no property change, yet it switches between the explicit limit and the definition's
+            // MaxRows. MAUI calls coerceValue on every SetValue and ClearValue (before IsSet is
+            // updated), so request a repaint here; painting re-applies the override.
+            coerceValue: static (b, value) =>
+            {
+                ((MintedEditorView)b).InvalidateCanvas();
+                return value;
             });
 
     /// <summary>
@@ -1213,7 +1222,7 @@ public class MintedEditorView : ContentView
             _toolbarRenderer.ActiveColor     = theme.ToolbarActiveColor;
             _toolbarRenderer.SeparatorColor  = theme.ToolbarSeparatorColor;
             _toolbarRenderer.DisabledColor   = theme.ToolbarSeparatorColor;
-            ApplyToolbarMaxRows(); // also covers ClearValue, which raises no change when the value is unchanged
+            ApplyToolbarMaxRows(); // picks up set/clear transitions that raise no property change (see coerceValue)
             _toolbarRenderer.UpdateToggleStates(GetEditorContext());
             _toolbarRenderer.Render(dc, new EditorRect(0, 0, logicalW, logicalH));
             toolbarH = _toolbarRenderer.ToolbarHeight;
