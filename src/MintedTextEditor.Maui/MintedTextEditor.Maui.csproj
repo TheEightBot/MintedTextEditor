@@ -12,7 +12,6 @@
 
 		<!-- NuGet Package Metadata (Authors, License, URLs inherited from Directory.Build.props) -->
 		<PackageId>MintedTextEditor.Maui</PackageId>
-		<Version>1.0.0</Version>
 		<Description>A high-performance, fully custom-drawn Rich Text Editor for .NET MAUI. Features bold, italic, underline, font control, paragraph formatting, hyperlinks, images, tables, clipboard, undo/redo, toolbar, context menu, and theming — all rendered via SkiaSharp with zero native controls.</Description>
 		<PackageTags>maui;richtexteditor;rte;editor;skiasharp;dotnet;cross-platform</PackageTags>
 
