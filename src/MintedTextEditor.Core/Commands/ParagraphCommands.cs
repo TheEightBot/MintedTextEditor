@@ -1,8 +1,17 @@
 using MintedTextEditor.Core.Document;
+using MintedTextEditor.Core.Editing;
 using MintedTextEditor.Core.Formatting;
 using MintedTextEditor.Core.Rendering;
 
 namespace MintedTextEditor.Core.Commands;
+
+// Paragraph commands record their change on the UndoManager as one ApplyParagraphStyleAction,
+// so undo restores every affected paragraph's previous style in a single step.
+internal static class ParagraphCommandUndo
+{
+    internal static void Push(EditorContext ctx, string description, Action<Document.Document, TextRange> apply)
+        => ctx.UndoManager.Push(new ApplyParagraphStyleAction(ctx.Document, ctx.Selection.Range, apply, description));
+}
 
 // ── Alignment ────────────────────────────────────────────────────────────────
 
@@ -15,7 +24,7 @@ public sealed class AlignLeftCommand : IEditorCommand
     public string Description => "Aligns selected paragraphs to the left.";
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ParagraphFormattingEngine.SetAlignment(ctx.Document, ctx.Selection.Range, TextAlignment.Left);
+        ParagraphCommandUndo.Push(ctx, "Align Left", (d, r) => ParagraphFormattingEngine.SetAlignment(d, r, TextAlignment.Left));
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
 }
@@ -29,7 +38,7 @@ public sealed class AlignCenterCommand : IEditorCommand
     public string Description => "Centers selected paragraphs.";
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ParagraphFormattingEngine.SetAlignment(ctx.Document, ctx.Selection.Range, TextAlignment.Center);
+        ParagraphCommandUndo.Push(ctx, "Align Center", (d, r) => ParagraphFormattingEngine.SetAlignment(d, r, TextAlignment.Center));
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
 }
@@ -43,7 +52,7 @@ public sealed class AlignRightCommand : IEditorCommand
     public string Description => "Aligns selected paragraphs to the right.";
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ParagraphFormattingEngine.SetAlignment(ctx.Document, ctx.Selection.Range, TextAlignment.Right);
+        ParagraphCommandUndo.Push(ctx, "Align Right", (d, r) => ParagraphFormattingEngine.SetAlignment(d, r, TextAlignment.Right));
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
 }
@@ -57,7 +66,7 @@ public sealed class AlignJustifyCommand : IEditorCommand
     public string Description => "Justifies selected paragraphs.";
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ParagraphFormattingEngine.SetAlignment(ctx.Document, ctx.Selection.Range, TextAlignment.Justify);
+        ParagraphCommandUndo.Push(ctx, "Justify", (d, r) => ParagraphFormattingEngine.SetAlignment(d, r, TextAlignment.Justify));
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
 }
@@ -73,7 +82,7 @@ public sealed class ToggleBulletListCommand : IEditorCommand
     public string Description => "Toggles a bullet (unordered) list on the selected paragraphs.";
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ParagraphFormattingEngine.ToggleBulletList(ctx.Document, ctx.Selection.Range);
+        ParagraphCommandUndo.Push(ctx, "Bullet List", ParagraphFormattingEngine.ToggleBulletList);
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
 }
@@ -87,7 +96,7 @@ public sealed class ToggleNumberListCommand : IEditorCommand
     public string Description => "Toggles a numbered (ordered) list on the selected paragraphs.";
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ParagraphFormattingEngine.ToggleNumberList(ctx.Document, ctx.Selection.Range);
+        ParagraphCommandUndo.Push(ctx, "Number List", ParagraphFormattingEngine.ToggleNumberList);
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
 }
@@ -103,7 +112,7 @@ public sealed class IncreaseIndentCommand : IEditorCommand
     public string Description => "Increases the indent level of the selected paragraphs.";
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ParagraphFormattingEngine.IncreaseIndent(ctx.Document, ctx.Selection.Range);
+        ParagraphCommandUndo.Push(ctx, "Increase Indent", ParagraphFormattingEngine.IncreaseIndent);
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
 }
@@ -117,7 +126,7 @@ public sealed class DecreaseIndentCommand : IEditorCommand
     public string Description => "Decreases the indent level of the selected paragraphs.";
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ParagraphFormattingEngine.DecreaseIndent(ctx.Document, ctx.Selection.Range);
+        ParagraphCommandUndo.Push(ctx, "Decrease Indent", ParagraphFormattingEngine.DecreaseIndent);
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
 }
@@ -142,7 +151,7 @@ public sealed class SetHeadingLevelCommand : IEditorCommand
 
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ParagraphFormattingEngine.SetHeadingLevel(ctx.Document, ctx.Selection.Range, _level);
+        ParagraphCommandUndo.Push(ctx, "Heading", (d, r) => ParagraphFormattingEngine.SetHeadingLevel(d, r, _level));
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
@@ -164,7 +173,7 @@ public sealed class SetParagraphFormatCommand : IEditorCommand
 
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ParagraphFormattingEngine.SetParagraphFormat(ctx.Document, ctx.Selection.Range, _format);
+        ParagraphCommandUndo.Push(ctx, "Paragraph Format", (d, r) => ParagraphFormattingEngine.SetParagraphFormat(d, r, _format));
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;

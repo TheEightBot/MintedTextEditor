@@ -5,94 +5,164 @@ namespace MintedTextEditor.Core.Editing;
 
 // ── Shared snapshot helpers ─────────────────────────────────────────────────
 
-internal abstract record InlineSnapshot;
-internal record TextRunSnapshot(string Text, TextStyle Style) : InlineSnapshot;
-internal record ImageInlineSnapshot(string Source, string AltText, float Width, float Height) : InlineSnapshot;
-internal record HyperChildSnapshot(string Text, TextStyle Style);
-internal record HyperlinkInlineSnapshot(string Url, string? Title, IReadOnlyList<HyperChildSnapshot> Children) : InlineSnapshot;
-internal record ParagraphSnapshot(ParagraphStyle Style, IReadOnlyList<InlineSnapshot> Inlines);
+// Snapshots keep a reference to each original object together with its mutable state at capture
+// time. Restoring puts those same objects back (with that state) instead of creating copies, so
+// other undo actions that hold an inline or paragraph reference (e.g. InsertImageAction) still
+// find it after an undo.
+internal abstract record InlineSnapshot(Inline Inline);
+internal record TextRunSnapshot(TextRun Run, string Text, TextStyle Style) : InlineSnapshot(Run);
+internal record ImageInlineSnapshot(ImageInline Image, string Source, string AltText, float Width, float Height) : InlineSnapshot(Image);
+internal record HyperlinkInlineSnapshot(HyperlinkInline Link, string Url, string? Title, IReadOnlyList<InlineSnapshot> Children) : InlineSnapshot(Link);
+// Inlines without mutable state of their own (LineBreak, and any other inline type).
+internal record OpaqueInlineSnapshot(Inline Inline) : InlineSnapshot(Inline);
+internal record ParagraphSnapshot(Paragraph Paragraph, ParagraphStyle Style, IReadOnlyList<InlineSnapshot> Inlines);
 
 /// <summary>
 /// A position stored as a character offset within its paragraph (or table-cell paragraph)
 /// instead of an (inline index, offset) pair. Run splits and merges from formatting are not
 /// on the undo stack, so inline indices recorded by an action can go stale; paragraph
 /// offsets stay valid and are resolved back to a position when the action replays.
+/// A position that is not in a paragraph (e.g. a table block without cell coordinates)
+/// is kept as is, so it still names its own block rather than the document's last block.
 /// </summary>
 internal readonly struct ParagraphAnchor
 {
     private readonly DocumentPosition _context;
     private readonly int _offset;
+    private readonly bool _inParagraph;
+    private readonly bool _atHyperlinkStart;
 
-    public ParagraphAnchor(Document.Document document, DocumentPosition position)
+    /// <param name="document">The document containing <paramref name="position"/>.</param>
+    /// <param name="position">The position to anchor.</param>
+    /// <param name="keepHyperlinkStart">
+    /// When true and <paramref name="position"/> is at the start of a hyperlink, <see cref="Resolve"/>
+    /// returns the start of the hyperlink rather than the end of the inline before it.
+    /// </param>
+    public ParagraphAnchor(Document.Document document, DocumentPosition position, bool keepHyperlinkStart = false)
     {
         _context = position;
-        _offset = DocumentEditor.GetAbsoluteCharOffset(document, position);
+        _inParagraph = IsParagraphPosition(document, position);
+        _offset = _inParagraph ? DocumentEditor.GetAbsoluteCharOffset(document, position) : position.Offset;
+        _atHyperlinkStart = _inParagraph && keepHyperlinkStart && position.Offset == 0
+            && DocumentEditor.GetHyperlinkAt(document, position) is not null;
     }
 
     public DocumentPosition Resolve(Document.Document document)
-        => DocumentEditor.AbsoluteCharOffsetToPosition(document, _context, _offset);
+    {
+        if (!_inParagraph || !IsParagraphPosition(document, _context))
+            return _context;
+        var position = DocumentEditor.AbsoluteCharOffsetToPosition(document, _context, _offset);
+        return _atHyperlinkStart ? DocumentEditor.PreferFollowingHyperlink(document, position) : position;
+    }
 
     public bool SameAs(ParagraphAnchor other)
         => _context.BlockIndex == other._context.BlockIndex
            && _context.CellRow == other._context.CellRow
            && _context.CellCol == other._context.CellCol
-           && _offset == other._offset;
+           && _inParagraph == other._inParagraph
+           && (_inParagraph ? _offset == other._offset : _context == other._context);
+
+    // Mirrors DocumentEditor.GetParagraph: a top-level paragraph, or the first paragraph of a table cell.
+    private static bool IsParagraphPosition(Document.Document document, DocumentPosition position)
+    {
+        if (position.BlockIndex < 0 || position.BlockIndex >= document.Blocks.Count)
+            return false;
+        var block = document.Blocks[position.BlockIndex];
+        if (!position.IsInTableCell)
+            return block is Paragraph;
+        return block is TableBlock table
+            && table.GetCell(position.CellRow, position.CellCol) is { Blocks.Count: > 0 } cell
+            && cell.Blocks[0] is Paragraph;
+    }
 }
 
 internal static class SnapshotHelper
 {
     internal static ParagraphSnapshot Capture(Paragraph p) =>
-        new(p.Style.Clone(), p.Inlines.Select(CaptureInline).ToList());
+        new(p, p.Style.Clone(), p.Inlines.Select(CaptureInline).ToList());
 
     private static InlineSnapshot CaptureInline(Inline inline) => inline switch
     {
-        TextRun t => new TextRunSnapshot(t.Text, t.Style),
-        ImageInline i => new ImageInlineSnapshot(i.Source, i.AltText, i.Width, i.Height),
-        HyperlinkInline h => new HyperlinkInlineSnapshot(h.Url, h.Title,
-            h.Children.OfType<TextRun>().Select(c => new HyperChildSnapshot(c.Text, c.Style)).ToList()),
-        _ => new TextRunSnapshot(inline.GetText(), TextStyle.Default)
+        TextRun t => new TextRunSnapshot(t, t.Text, t.Style),
+        ImageInline i => new ImageInlineSnapshot(i, i.Source, i.AltText, i.Width, i.Height),
+        HyperlinkInline h => new HyperlinkInlineSnapshot(h, h.Url, h.Title, h.Children.Select(CaptureInline).ToList()),
+        _ => new OpaqueInlineSnapshot(inline)
     };
 
     /// <summary>
-    /// Replaces the inlines (and style) of <paramref name="p"/> with the data from
-    /// <paramref name="snapshot"/>, without changing <paramref name="p"/>'s identity or parent.
+    /// Puts the inlines (and style) recorded in <paramref name="snapshot"/> back into
+    /// <paramref name="p"/>, without changing <paramref name="p"/>'s identity or parent.
+    /// The recorded inline objects themselves are reinserted with their recorded state.
     /// </summary>
     internal static void Restore(Paragraph p, ParagraphSnapshot snapshot)
     {
-        p.Style = snapshot.Style;
+        p.Style = snapshot.Style.Clone();
         // Remove existing inlines from back to front to keep indices stable
         for (int i = p.Inlines.Count - 1; i >= 0; i--)
             p.RemoveInline(i);
         foreach (var snap in snapshot.Inlines)
-            AppendInline(p, snap);
+            p.AddInline(RestoreInline(p, snap));
     }
 
-    /// <summary>Creates a new <see cref="Paragraph"/> fully populated from a snapshot.</summary>
+    /// <summary>
+    /// Returns the paragraph recorded in <paramref name="snapshot"/>, restored to its recorded
+    /// content, for reinsertion into the document.
+    /// </summary>
     internal static Paragraph CreateParagraph(ParagraphSnapshot snapshot)
     {
-        var p = new Paragraph { Style = snapshot.Style };
-        foreach (var snap in snapshot.Inlines)
-            AppendInline(p, snap);
-        return p;
+        Restore(snapshot.Paragraph, snapshot);
+        return snapshot.Paragraph;
     }
 
-    private static void AppendInline(Paragraph p, InlineSnapshot snap)
+    /// <summary>
+    /// Restores the paragraphs recorded from consecutive blocks starting at <paramref name="startBlock"/>.
+    /// A recorded paragraph still in the document is restored in place; one that was removed (merged
+    /// away) is reinserted at its original index. Returns whether any paragraph was reinserted, in
+    /// which case later blocks have moved and the caller must report a structural change.
+    /// </summary>
+    internal static bool RestoreBlocks(Document.Document document, int startBlock, IReadOnlyList<ParagraphSnapshot> snapshots)
+    {
+        bool reinserted = false;
+        for (int i = 0; i < snapshots.Count; i++)
+        {
+            var p = snapshots[i].Paragraph;
+            if (document.Blocks.Contains(p))
+            {
+                Restore(p, snapshots[i]);
+            }
+            else
+            {
+                document.InsertBlock(Math.Min(startBlock + i, document.Blocks.Count), CreateParagraph(snapshots[i]));
+                reinserted = true;
+            }
+        }
+        return reinserted;
+    }
+
+    private static Inline RestoreInline(Paragraph p, InlineSnapshot snap)
     {
         switch (snap)
         {
             case TextRunSnapshot t:
-                p.AppendRun(t.Text, t.Style);
+                t.Run.Text = t.Text;
+                t.Run.Style = t.Style;
                 break;
             case ImageInlineSnapshot i:
-                p.AddInline(new ImageInline(i.Source, i.AltText, i.Width, i.Height));
+                i.Image.Source = i.Source;
+                i.Image.AltText = i.AltText;
+                i.Image.Width = i.Width;
+                i.Image.Height = i.Height;
                 break;
             case HyperlinkInlineSnapshot h:
-                var link = new HyperlinkInline(h.Url, h.Title);
-                p.AddInline(link);  // set link.Parent = p before adding children
+                h.Link.Url = h.Url;
+                h.Link.Title = h.Title;
+                h.Link.Children.Clear();
                 foreach (var c in h.Children)
-                    link.AddChild(new TextRun(c.Text, c.Style));
+                    h.Link.Children.Add(RestoreInline(p, c));
                 break;
         }
+        snap.Inline.Parent = p;
+        return snap.Inline;
     }
 }
 
@@ -121,12 +191,19 @@ public sealed class InsertTextAction : IUndoableAction
     /// <inheritdoc/>
     public string Description => $"Insert \"{_text}\"";
 
+    /// <summary>
+    /// When true, text inserted at the start or end of a hyperlink goes outside the link instead
+    /// of extending it (see <see cref="DocumentEditor.InsertText(Document.Document, DocumentPosition, string, TextStyle?, bool)"/>).
+    /// Set it for text typed or pasted at a collapsed caret; leave it false when the text replaces a selection.
+    /// </summary>
+    public bool EscapeHyperlinkBoundary { get; init; }
+
     /// <inheritdoc/>
     public DocumentPosition Execute()
     {
         var start = _startAnchor is { } anchor ? anchor.Resolve(_document) : _position;
-        _startAnchor ??= new ParagraphAnchor(_document, start);
-        _resultPosition = DocumentEditor.InsertText(_document, start, _text, _style);
+        _startAnchor ??= new ParagraphAnchor(_document, start, keepHyperlinkStart: true);
+        _resultPosition = DocumentEditor.InsertText(_document, start, _text, _style, EscapeHyperlinkBoundary);
         _endAnchor = new ParagraphAnchor(_document, _resultPosition);
         return _resultPosition;
     }
@@ -152,7 +229,8 @@ public sealed class InsertTextAction : IUndoableAction
         if (next is InsertTextAction insert &&
             insert._startAnchor is { } nextStart &&
             nextStart.SameAs(_endAnchor) &&
-            insert._style == _style)
+            insert._style == _style &&
+            insert.EscapeHyperlinkBoundary == EscapeHyperlinkBoundary)
         {
             _text += insert._text;
             _resultPosition = insert._resultPosition;
@@ -207,21 +285,11 @@ public sealed class DeleteRangeAction : IUndoableAction
     {
         if (_snapshots.Count == 0) return _range.Start;
 
-        // Restore the first (possibly only) paragraph in-place
-        if (_range.Start.BlockIndex < _document.Blocks.Count &&
-            _document.Blocks[_range.Start.BlockIndex] is Paragraph first)
-        {
-            SnapshotHelper.Restore(first, _snapshots[0]);
-        }
-
-        // Re-insert additional paragraphs for multi-block ranges
-        for (int i = 1; i < _snapshots.Count; i++)
-        {
-            var p = SnapshotHelper.CreateParagraph(_snapshots[i]);
-            _document.InsertBlock(_range.Start.BlockIndex + i, p);
-        }
-
-        _document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.TextInserted, _range));
+        // Restore the first paragraph in place and re-insert any merged away by a multi-block range.
+        // Reinserted blocks shift every later block, so report a structural change for them.
+        bool reinserted = SnapshotHelper.RestoreBlocks(_document, _range.Start.BlockIndex, _snapshots);
+        _document.NotifyChanged(new DocumentChangedEventArgs(
+            reinserted ? DocumentChangeType.BlockSplit : DocumentChangeType.TextInserted, _range));
         return _startAnchor.Resolve(_document);
     }
 
@@ -345,30 +413,55 @@ public sealed class MergeBlocksAction : IUndoableAction
 // ── ApplyStyleAction ────────────────────────────────────────────────────────
 
 /// <summary>
-/// Records a style change. Snapshots all affected paragraph inlines before applying
-/// so the originals can be restored on undo.
+/// Records a character-formatting change over a range. Snapshots the inlines of every
+/// affected paragraph before applying, so undo restores the original runs with their exact
+/// styles. Redo applies the change again to the restored runs.
 /// </summary>
+/// <remarks>
+/// Undo restores only the paragraphs' inlines and leaves their <see cref="ParagraphStyle"/>
+/// alone, since character formatting never changes it. Runs split by the change are merged
+/// back with same-styled neighbours after it is applied.
+/// </remarks>
 public sealed class ApplyStyleAction : IUndoableAction
 {
     private readonly Document.Document _document;
     private TextRange _range;
     private readonly ParagraphAnchor _startAnchor;
     private readonly ParagraphAnchor _endAnchor;
-    private readonly Func<TextStyle, TextStyle> _transform;
-    private List<ParagraphSnapshot> _snapshots = [];
+    private readonly Action<TextRange> _apply;
+    private readonly List<(int BlockIndex, ParagraphSnapshot Snapshot)> _snapshots = [];
 
     /// <summary>Creates an action that applies <paramref name="transform"/> to the style of the text in <paramref name="range"/>.</summary>
     public ApplyStyleAction(Document.Document document, TextRange range, Func<TextStyle, TextStyle> transform)
+        : this(document, range, r => DocumentEditor.ApplyTextStyle(document, r, transform), "Apply Style")
+    {
+    }
+
+    /// <summary>
+    /// Creates an action that runs <paramref name="apply"/> over <paramref name="range"/>. Use it for
+    /// formatting operations that choose their own transform, such as the <see cref="FormattingEngine"/>
+    /// toggles, which add a format unless the whole range already has it.
+    /// </summary>
+    /// <param name="document">The document to format.</param>
+    /// <param name="range">The range to format.</param>
+    /// <param name="apply">
+    /// Formats the range it is given. It may split and restyle the text runs of the paragraphs the
+    /// range covers, but must not add, remove or move text or blocks. It runs again on redo, against
+    /// the same runs it saw the first time.
+    /// </param>
+    /// <param name="description">Description of the undo step, e.g. "Bold".</param>
+    public ApplyStyleAction(Document.Document document, TextRange range, Action<TextRange> apply, string description)
     {
         _document = document;
         _range = range;
         _startAnchor = new ParagraphAnchor(document, range.Start);
         _endAnchor = new ParagraphAnchor(document, range.End);
-        _transform = transform;
+        _apply = apply;
+        Description = description;
     }
 
     /// <inheritdoc/>
-    public string Description => "Apply Style";
+    public string Description { get; }
 
     /// <inheritdoc/>
     public DocumentPosition Execute()
@@ -378,23 +471,40 @@ public sealed class ApplyStyleAction : IUndoableAction
         for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
         {
             if (_document.Blocks[i] is Paragraph p)
-                _snapshots.Add(SnapshotHelper.Capture(p));
+                _snapshots.Add((i, SnapshotHelper.Capture(p)));
         }
-        DocumentEditor.ApplyTextStyle(_document, _range, _transform);
-        return _range.Start;
+
+        _apply(_range);
+
+        foreach (var (blockIndex, _) in _snapshots)
+        {
+            if (blockIndex < _document.Blocks.Count && _document.Blocks[blockIndex] is Paragraph p)
+                DocumentEditor.NormalizeInlines(p);
+        }
+        return _endAnchor.Resolve(_document);
     }
 
     /// <inheritdoc/>
     public DocumentPosition Undo()
     {
-        for (int i = 0; i < _snapshots.Count; i++)
+        foreach (var (blockIndex, snapshot) in _snapshots)
         {
-            int blockIdx = _range.Start.BlockIndex + i;
-            if (blockIdx < _document.Blocks.Count && _document.Blocks[blockIdx] is Paragraph p)
-                SnapshotHelper.Restore(p, _snapshots[i]);
+            if (blockIndex < _document.Blocks.Count && _document.Blocks[blockIndex] is Paragraph p)
+                RestoreInlines(p, snapshot);
         }
         _document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.StyleChanged, _range));
-        return _range.Start;
+        return _endAnchor.Resolve(_document);
+    }
+
+    /// <summary>
+    /// Restores the inlines recorded in <paramref name="snapshot"/> but keeps <paramref name="p"/>'s
+    /// current paragraph style, which inline-only changes never alter.
+    /// </summary>
+    internal static void RestoreInlines(Paragraph p, ParagraphSnapshot snapshot)
+    {
+        var style = p.Style;
+        SnapshotHelper.Restore(p, snapshot);
+        p.Style = style;
     }
 
     /// <inheritdoc/>
@@ -402,6 +512,93 @@ public sealed class ApplyStyleAction : IUndoableAction
 
     /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
+}
+
+// ── ApplyParagraphStyleAction ───────────────────────────────────────────────
+
+/// <summary>
+/// Records a paragraph-level formatting change (alignment, heading, list, indent, line spacing,
+/// block quote, …). Snapshots the <see cref="ParagraphStyle"/> of every paragraph in the range
+/// before and after the change, so undo restores the previous styles and redo reapplies the
+/// recorded result in one step.
+/// </summary>
+public sealed class ApplyParagraphStyleAction : IUndoableAction
+{
+    private readonly Document.Document _document;
+    private TextRange _range;
+    private readonly ParagraphAnchor _startAnchor;
+    private readonly ParagraphAnchor _endAnchor;
+    private readonly Action<Document.Document, TextRange> _apply;
+    private readonly List<(int BlockIndex, ParagraphStyle Before, ParagraphStyle After)> _changes = [];
+
+    /// <summary>
+    /// Creates an action that runs <paramref name="apply"/> over <paramref name="range"/>, for example
+    /// <c>(d, r) =&gt; ParagraphFormattingEngine.SetAlignment(d, r, TextAlignment.Center)</c>.
+    /// </summary>
+    /// <param name="document">The document to modify.</param>
+    /// <param name="range">The range whose paragraphs are formatted.</param>
+    /// <param name="apply">Changes the paragraph styles of the paragraphs in the range. Only the styles of the
+    /// paragraphs from <paramref name="range"/>'s start block to its end block are recorded.</param>
+    /// <param name="description">Human-readable description of the change.</param>
+    public ApplyParagraphStyleAction(
+        Document.Document document,
+        TextRange range,
+        Action<Document.Document, TextRange> apply,
+        string description = "Paragraph Format")
+    {
+        _document = document;
+        _range = range;
+        _startAnchor = new ParagraphAnchor(document, range.Start);
+        _endAnchor = new ParagraphAnchor(document, range.End);
+        _apply = apply;
+        Description = description;
+    }
+
+    /// <inheritdoc/>
+    public string Description { get; }
+
+    /// <inheritdoc/>
+    public DocumentPosition Execute()
+    {
+        _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
+        var before = new List<(int, ParagraphStyle)>();
+        for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
+        {
+            if (_document.Blocks[i] is Paragraph p)
+                before.Add((i, p.Style.Clone()));
+        }
+
+        _apply(_document, _range);
+
+        _changes.Clear();
+        foreach (var (index, style) in before)
+        {
+            if (index < _document.Blocks.Count && _document.Blocks[index] is Paragraph p)
+                _changes.Add((index, style, p.Style.Clone()));
+        }
+        return _range.Start;
+    }
+
+    /// <inheritdoc/>
+    public DocumentPosition Undo() => Restore(after: false);
+
+    /// <inheritdoc/>
+    public DocumentPosition Redo() => Restore(after: true);
+
+    /// <inheritdoc/>
+    public bool MergeWith(IUndoableAction next) => false;
+
+    private DocumentPosition Restore(bool after)
+    {
+        foreach (var (index, before, afterStyle) in _changes)
+        {
+            if (index < _document.Blocks.Count && _document.Blocks[index] is Paragraph p)
+                p.Style = (after ? afterStyle : before).Clone();
+        }
+        _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
+        _document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.StyleChanged, _range));
+        return _range.Start;
+    }
 }
 
 // ── CompositeAction ─────────────────────────────────────────────────────────
@@ -450,6 +647,172 @@ public sealed class CompositeAction : IUndoableAction
 
     /// <inheritdoc/>
     public bool MergeWith(IUndoableAction next) => false;
+}
+
+// ── ReplaceMatchesAction ────────────────────────────────────────────────────
+
+/// <summary>
+/// Replaces a set of find matches as one undo step. Each affected paragraph is snapshotted
+/// once before and once after the edit, so the memory held does not grow with the number of
+/// matches. Matches are stored as paragraph character offsets and applied last to first, so
+/// the offsets of earlier matches stay valid while later ones change length.
+/// </summary>
+internal sealed class ReplaceMatchesAction : IUndoableAction
+{
+    private readonly record struct Span(int Block, int Start, int End);
+
+    private readonly Document.Document _document;
+    private readonly IReadOnlyList<Span> _spans;
+    private readonly string _replacement;
+    private readonly List<(int Block, ParagraphSnapshot Snapshot)> _before = [];
+    private readonly List<(int Block, ParagraphSnapshot Snapshot)> _after = [];
+
+    /// <summary>
+    /// Creates an action that replaces <paramref name="matches"/> (in document order, each within
+    /// one top-level paragraph, as <see cref="FindReplaceEngine"/> returns them) with
+    /// <paramref name="replacement"/>.
+    /// </summary>
+    public ReplaceMatchesAction(Document.Document document, IEnumerable<FindMatch> matches, string replacement)
+    {
+        _document = document;
+        _replacement = replacement ?? string.Empty;
+        _spans = [.. matches.Select(m => new Span(
+            m.Range.Start.BlockIndex,
+            DocumentEditor.GetAbsoluteCharOffset(document, m.Range.Start),
+            DocumentEditor.GetAbsoluteCharOffset(document, m.Range.End)))];
+    }
+
+    /// <summary>Number of paragraph snapshots currently held (for tests).</summary>
+    internal int SnapshotCount => _before.Count + _after.Count;
+
+    /// <inheritdoc/>
+    public string Description => _spans.Count == 1 ? "Replace" : "Replace All";
+
+    /// <inheritdoc/>
+    public DocumentPosition Execute()
+    {
+        _before.Clear();
+        _after.Clear();
+        if (_spans.Count == 0) return default;
+
+        Capture(_before);
+        for (int i = _spans.Count - 1; i >= 0; i--)
+            ReplaceSpan(_spans[i]);
+        Capture(_after);
+
+        return PositionAt(_spans[0].Block, _spans[0].Start + _replacement.Length);
+    }
+
+    /// <inheritdoc/>
+    public DocumentPosition Undo()
+    {
+        if (_spans.Count == 0) return default;
+        Restore(_before);
+        return PositionAt(_spans[0].Block, _spans[0].Start);
+    }
+
+    /// <inheritdoc/>
+    public DocumentPosition Redo()
+    {
+        if (_spans.Count == 0) return default;
+        Restore(_after);
+        return PositionAt(_spans[0].Block, _spans[0].Start + _replacement.Length);
+    }
+
+    /// <inheritdoc/>
+    public bool MergeWith(IUndoableAction next) => false;
+
+    private void ReplaceSpan(Span span)
+    {
+        if (span.Block >= _document.Blocks.Count || _document.Blocks[span.Block] is not Paragraph paragraph)
+            return;
+
+        var context = new DocumentPosition(span.Block, 0, 0);
+        if (_replacement.Length > 0 && TextPositionOfChar(paragraph, context, span.Start) is { } at)
+        {
+            // Insert in front of the match, inside the inline holding its first character, then
+            // delete the match. The replacement keeps that run's style (and hyperlink) even when
+            // the match is the whole run, which deleting first would remove.
+            DocumentEditor.InsertText(_document, at, _replacement, StyleAt(paragraph, at));
+            Delete(context, span.Start + _replacement.Length, span.End + _replacement.Length);
+        }
+        else
+        {
+            Delete(context, span.Start, span.End);
+            if (_replacement.Length > 0)
+                DocumentEditor.InsertText(_document, PositionAt(span.Block, span.Start), _replacement);
+        }
+    }
+
+    private void Delete(DocumentPosition context, int start, int end) =>
+        DocumentEditor.DeleteRange(_document, new TextRange(
+            DocumentEditor.AbsoluteCharOffsetToPosition(_document, context, start),
+            DocumentEditor.AbsoluteCharOffsetToPosition(_document, context, end)));
+
+    private DocumentPosition PositionAt(int block, int offset) =>
+        DocumentEditor.AbsoluteCharOffsetToPosition(_document, new DocumentPosition(block, 0, 0), offset);
+
+    /// <summary>
+    /// The position of the character at <paramref name="offset"/> within the inline that holds
+    /// it (not the end of the inline before), or <c>null</c> when that inline is not text.
+    /// </summary>
+    private static DocumentPosition? TextPositionOfChar(Paragraph paragraph, DocumentPosition context, int offset)
+    {
+        int accumulated = 0;
+        for (int i = 0; i < paragraph.Inlines.Count; i++)
+        {
+            var inline = paragraph.Inlines[i];
+            if (offset < accumulated + inline.Length)
+                return inline is TextRun or HyperlinkInline ? context.With(i, offset - accumulated) : null;
+            accumulated += inline.Length;
+        }
+        return null;
+    }
+
+    private static TextStyle? StyleAt(Paragraph paragraph, DocumentPosition position)
+    {
+        switch (paragraph.Inlines[position.InlineIndex])
+        {
+            case TextRun run:
+                return run.Style;
+            case HyperlinkInline link:
+                int remaining = position.Offset;
+                foreach (var child in link.Children)
+                {
+                    if (remaining < child.Length)
+                        return (child as TextRun)?.Style;
+                    remaining -= child.Length;
+                }
+                return null;
+            default:
+                return null;
+        }
+    }
+
+    private void Capture(List<(int Block, ParagraphSnapshot Snapshot)> snapshots)
+    {
+        int previous = -1;
+        foreach (var span in _spans)
+        {
+            if (span.Block == previous) continue;
+            previous = span.Block;
+            if (span.Block < _document.Blocks.Count && _document.Blocks[span.Block] is Paragraph p)
+                snapshots.Add((span.Block, SnapshotHelper.Capture(p)));
+        }
+    }
+
+    private void Restore(List<(int Block, ParagraphSnapshot Snapshot)> snapshots)
+    {
+        foreach (var (block, snapshot) in snapshots)
+        {
+            if (block < _document.Blocks.Count && _document.Blocks[block] is Paragraph p)
+                SnapshotHelper.Restore(p, snapshot);
+        }
+
+        var first = new DocumentPosition(_spans[0].Block, 0, 0);
+        var last = new DocumentPosition(_spans[^1].Block, 0, 0);
+        _document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.TextInserted, new TextRange(first, last)));
+    }
 }
 
 // ── InsertImageAction ───────────────────────────────────────────────────────
@@ -518,22 +881,39 @@ public sealed class InsertImageAction : IUndoableAction
 // ── InsertHyperlinkAction ───────────────────────────────────────────────────
 
 /// <summary>
-/// Records a hyperlink insertion so it can be undone by removing the inserted hyperlink.
+/// Records a hyperlink insertion. Snapshots the affected paragraphs before inserting so undo
+/// restores the original text and formatting exactly, and redo can replay the insertion.
 /// </summary>
 public sealed class InsertHyperlinkAction : IUndoableAction
 {
     private readonly Document.Document _document;
-    private readonly TextRange _originalRange;
+    private TextRange _range;
+    private readonly ParagraphAnchor _startAnchor;
+    private readonly ParagraphAnchor _endAnchor;
     private readonly string _url;
-    private HyperlinkInline? _inserted;
-    private DocumentPosition _resultPosition;
+    private readonly string? _displayText;
+    private readonly List<ParagraphSnapshot> _snapshots = [];
 
     /// <summary>Creates an action that inserts a hyperlink to <paramref name="url"/> over <paramref name="originalRange"/>.</summary>
     public InsertHyperlinkAction(Document.Document document, TextRange originalRange, string url)
+        : this(document, originalRange, url, displayText: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates an action that inserts a hyperlink to <paramref name="url"/> over <paramref name="originalRange"/>
+    /// with <paramref name="displayText"/> as its text. When <paramref name="displayText"/> is non-empty (not null
+    /// or whitespace) it replaces the text in <paramref name="originalRange"/>; otherwise the text in the range is
+    /// linked, or the URL is inserted as the text when the range is empty. Undo restores the original text.
+    /// </summary>
+    public InsertHyperlinkAction(Document.Document document, TextRange originalRange, string url, string? displayText)
     {
         _document = document;
-        _originalRange = originalRange;
+        _range = originalRange;
+        _startAnchor = new ParagraphAnchor(document, originalRange.Start);
+        _endAnchor = new ParagraphAnchor(document, originalRange.End);
         _url = url;
+        _displayText = displayText;
     }
 
     /// <inheritdoc/>
@@ -542,40 +922,94 @@ public sealed class InsertHyperlinkAction : IUndoableAction
     /// <inheritdoc/>
     public DocumentPosition Execute()
     {
-        _inserted = HyperlinkEngine.InsertHyperlink(_document, _originalRange, _url);
-        if (_inserted.Parent is Paragraph para)
+        _range = new TextRange(_startAnchor.Resolve(_document), _endAnchor.Resolve(_document));
+        _snapshots.Clear();
+        for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
+        {
+            if (_document.Blocks[i] is Paragraph p)
+                _snapshots.Add(SnapshotHelper.Capture(p));
+        }
+
+        var inserted = HyperlinkEngine.InsertHyperlink(_document, _range, _url, title: null, _displayText);
+        if (inserted.Parent is Paragraph para)
         {
             int blockIdx = _document.Blocks.IndexOf(para);
-            int linkIdx = para.Inlines.IndexOf(_inserted);
-            _resultPosition = new DocumentPosition(blockIdx, linkIdx, _inserted.Length);
+            int linkIdx = para.Inlines.IndexOf(inserted);
+            return new DocumentPosition(blockIdx, linkIdx, inserted.Length);
         }
-        else
-        {
-            _resultPosition = _originalRange.Start;
-        }
-        return _resultPosition;
+        return _range.Start;
     }
 
     /// <inheritdoc/>
     public DocumentPosition Undo()
     {
-        if (_inserted is null || _inserted.Parent is not Paragraph para)
-            return _originalRange.Start;
+        if (_snapshots.Count == 0) return _range.Start;
 
-        int blockIdx = _document.Blocks.IndexOf(para);
-        int linkIdx = para.Inlines.IndexOf(_inserted);
-        if (blockIdx < 0 || linkIdx < 0) return _originalRange.Start;
-
-        // Remove hyperlink and restore plain text if the range was non-empty
-        para.RemoveInline(linkIdx);
-        if (!_originalRange.IsEmpty)
-            para.InsertInline(linkIdx, new TextRun(_inserted.GetText()) { Parent = para });
-
+        // Restore the first paragraph in place and re-insert any merged away by a multi-block
+        // selection. Reinserted blocks shift every later block, so report a structural change for them.
+        bool reinserted = SnapshotHelper.RestoreBlocks(_document, _range.Start.BlockIndex, _snapshots);
         _document.NotifyChanged(new DocumentChangedEventArgs(
-            DocumentChangeType.TextDeleted,
-            new TextRange(_originalRange.Start, _originalRange.Start)));
+            reinserted ? DocumentChangeType.BlockSplit : DocumentChangeType.TextDeleted, _range));
+        return _startAnchor.Resolve(_document);
+    }
 
-        return _originalRange.Start;
+    /// <inheritdoc/>
+    public DocumentPosition Redo() => Execute();
+
+    /// <inheritdoc/>
+    public bool MergeWith(IUndoableAction next) => false;
+}
+
+// ── RemoveHyperlinkAction ───────────────────────────────────────────────────
+
+/// <summary>
+/// Records the removal of a hyperlink, whose text stays in place with its formatting.
+/// Snapshots the paragraph's inlines so undo restores the link exactly.
+/// </summary>
+public sealed class RemoveHyperlinkAction : IUndoableAction
+{
+    private readonly Document.Document _document;
+    private readonly DocumentPosition _position;
+    private readonly ParagraphAnchor _anchor;
+    private ParagraphSnapshot? _snapshot;
+
+    /// <summary>Creates an action that removes the hyperlink at <paramref name="position"/>.</summary>
+    public RemoveHyperlinkAction(Document.Document document, DocumentPosition position)
+    {
+        _document = document;
+        _position = position;
+        _anchor = new ParagraphAnchor(document, position);
+    }
+
+    /// <inheritdoc/>
+    public string Description => "Remove Hyperlink";
+
+    /// <inheritdoc/>
+    public DocumentPosition Execute()
+    {
+        _snapshot = null;
+        if (HyperlinkEngine.GetHyperlinkAtPosition(_document, _position) is not null &&
+            _document.Blocks[_position.BlockIndex] is Paragraph para)
+        {
+            _snapshot = SnapshotHelper.Capture(para);
+            HyperlinkEngine.RemoveHyperlink(_document, _position);
+        }
+        return _anchor.Resolve(_document);
+    }
+
+    /// <inheritdoc/>
+    public DocumentPosition Undo()
+    {
+        if (_snapshot is not null &&
+            _position.BlockIndex < _document.Blocks.Count &&
+            _document.Blocks[_position.BlockIndex] is Paragraph para)
+        {
+            ApplyStyleAction.RestoreInlines(para, _snapshot);
+            _document.NotifyChanged(new DocumentChangedEventArgs(
+                DocumentChangeType.TextInserted,
+                new TextRange(_position, _position)));
+        }
+        return _anchor.Resolve(_document);
     }
 
     /// <inheritdoc/>

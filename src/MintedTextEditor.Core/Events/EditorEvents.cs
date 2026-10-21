@@ -47,7 +47,7 @@ public sealed class EditorTextChangedEventArgs : EditorEventArgs
         AffectedRange = affectedRange;
 }
 
-/// <summary>Event data signalling that document content has been loaded.</summary>
+/// <summary>Event data signalling that document content has been loaded (for example by LoadHtml or LoadMarkdown).</summary>
 public sealed class ContentLoadedEventArgs : EditorEventArgs { }
 
 // ── Font ──────────────────────────────────────────────────────────────────────
@@ -125,11 +125,14 @@ public sealed class TextDecorationsChangedEventArgs : EditorEventArgs
 /// <summary>Event data for a change of the current paragraph format (heading level or paragraph style).</summary>
 public sealed class TextFormattingChangedEventArgs : EditorEventArgs
 {
-    /// <summary>Heading level (0 = body text) or paragraph style name.</summary>
+    /// <summary>
+    /// The paragraph format name: "Normal", "Heading1"–"Heading6" or "Quote"
+    /// (see <see cref="FormattingState.ParagraphFormat"/>).
+    /// </summary>
     public string Format { get; }
 
     /// <summary>Creates paragraph format change event data.</summary>
-    /// <param name="format">Heading level or paragraph style name.</param>
+    /// <param name="format">The paragraph format name.</param>
     public TextFormattingChangedEventArgs(string format) => Format = format;
 }
 

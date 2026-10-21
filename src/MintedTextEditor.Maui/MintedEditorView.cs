@@ -1,3 +1,4 @@
+using MintedTextEditor.Core.Accessibility;
 using MintedTextEditor.Core.Commands;
 using MintedTextEditor.Core.Document;
 using MintedTextEditor.Core.Editing;
@@ -7,6 +8,7 @@ using MintedTextEditor.Core.Html;
 using MintedTextEditor.Core.Markdown;
 using MintedTextEditor.Core.Input;
 using MintedTextEditor.Core.Layout;
+using MintedTextEditor.Core.Localization;
 using MintedTextEditor.Core.Rendering;
 using MintedTextEditor.Core.Theming;
 using MintedTextEditor.Core.Toolbar;
@@ -43,6 +45,7 @@ public class MintedEditorView : ContentView
     private readonly FontFormattingEngine _fontFormattingEngine = new();
     private readonly UndoManager _undoManager = new();
     private readonly EditorInputController _inputController;
+    private readonly EditorFindReplace _findReplace;
 
     // Persistent 1×1 off-screen surface used for text measurement calls (hit-testing)
     // that happen outside of a PaintSurface callback.
@@ -56,7 +59,12 @@ public class MintedEditorView : ContentView
     private float _scrollOffset;
     private readonly InertialScroller _inertialScroller = new();
     private bool _isHyperlinkSelected;
+    private HyperlinkInline? _hoveredHyperlink; // link under the mouse pointer (desktop hover)
+    private (float X, float Y)? _pointerPosition; // last mouse position over the canvas, for re-checking hover
     private string? _selectedHyperlinkUrl;
+    private readonly FormattingStateTracker _formattingStateTracker;
+    private readonly DocumentImageTracker _imageTracker = new();
+    private bool _documentStateUpdatePending;
     private ImageInline? _selectedImage;
     private EditorRect _selectedImageRect;
     private bool _isResizingImage;
@@ -101,6 +109,18 @@ public class MintedEditorView : ContentView
     private readonly Dictionary<string, SKBitmap> _imageCache = new();
     private const int DefaultSvgRasterSize = 512;
     private int _iconLoadVersion;
+    // Weak, so an editor that is discarded without being unloaded can still be collected.
+    private IDisposable? _stringsSubscription;
+
+    // ── Accessibility ────────────────────────────────────────────────────────────
+    // Last SemanticProperties values this view applied to itself. A different current value
+    // means the app set its own, which is then left alone.
+    private string? _appliedSemanticDescription;
+    private string? _appliedSemanticHint;
+
+    // Whether the keyboard-capture view is the editor's accessible element (Windows; see the
+    // constructor).
+    private static bool ProxyCarriesSemantics => DeviceInfo.Platform == DevicePlatform.WinUI;
 
 
 
@@ -159,8 +179,14 @@ public class MintedEditorView : ContentView
                 v._caret.BlinkEnabled = !(bool)nv;
                 // Touch is ignored while read-only, so a release could never end the gesture.
                 if ((bool)nv)
+                {
                     v.CancelCaretGesture();
+                    // Pointer moves are ignored while read-only, so hover could never clear.
+                    v.ClearPointerHover();
+                }
+                v.UpdateSemantics(announce: true);
                 v.InvalidateCanvas();
+                v.IsReadOnlyChanged?.Invoke(v, new IsReadOnlyChangedEventArgs((bool)nv));
             });
 
     /// <summary>Bindable property for <see cref="PlaceholderText"/>.</summary>
@@ -170,7 +196,12 @@ public class MintedEditorView : ContentView
             typeof(string),
             typeof(MintedEditorView),
             "Start typing…",
-            propertyChanged: static (b, _, _) => ((MintedEditorView)b).InvalidateCanvas());
+            propertyChanged: static (b, _, _) =>
+            {
+                var v = (MintedEditorView)b;
+                v.UpdateSemantics();
+                v.InvalidateCanvas();
+            });
 
     /// <summary>
     /// Visual theme applied to the editor. Defaults to the built-in light theme.
@@ -296,6 +327,26 @@ public class MintedEditorView : ContentView
         set => SetValue(ShowToolbarProperty, value);
     }
 
+    /// <summary>Bindable property for <see cref="ShowFocusRing"/>.</summary>
+    public static readonly BindableProperty ShowFocusRingProperty =
+        BindableProperty.Create(
+            nameof(ShowFocusRing),
+            typeof(bool),
+            typeof(MintedEditorView),
+            false,
+            propertyChanged: static (b, _, _) => ((MintedEditorView)b).InvalidateCanvas());
+
+    /// <summary>
+    /// Whether a thin ring in the theme's <see cref="EditorStyle.FocusRingColor"/> is drawn around
+    /// the editor while it has keyboard focus. Defaults to false (opt in), so existing layouts gain no new visual. A <c>Transparent</c>
+    /// <see cref="EditorStyle.FocusRingColor"/> also hides it.
+    /// </summary>
+    public bool ShowFocusRing
+    {
+        get => (bool)GetValue(ShowFocusRingProperty);
+        set => SetValue(ShowFocusRingProperty, value);
+    }
+
     /// <summary>Bindable property for <see cref="IsMagnifierEnabled"/>.</summary>
     public static readonly BindableProperty IsMagnifierEnabledProperty =
         BindableProperty.Create(
@@ -354,14 +405,31 @@ public class MintedEditorView : ContentView
             propertyChanged: static (b, _, nv) =>
             {
                 var v = (MintedEditorView)b;
-                v._toolbarRenderer.Definition.MaxRows = (int)nv!;
+                v.ApplyToolbarMaxRows();
                 v.InvalidateCanvas();
+            },
+            // Setting the current value again, or clearing a value equal to the default, raises
+            // no property change, yet it switches between the explicit limit and the definition's
+            // MaxRows. MAUI calls coerceValue on every SetValue and ClearValue (before IsSet is
+            // updated), so request a repaint here; painting re-applies the override.
+            coerceValue: static (b, value) =>
+            {
+                ((MintedEditorView)b).InvalidateCanvas();
+                return value;
             });
 
     /// <summary>
     /// Maximum number of toolbar rows to display before remaining items are collapsed
     /// into an overflow (…) button. 0 (the default) means unlimited.
     /// </summary>
+    /// <remarks>
+    /// Once set (to any value, including 0), this property takes precedence over
+    /// <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> and stays in effect when
+    /// <see cref="ToolbarDefinition"/>, <see cref="ToolbarItems"/> or <see cref="ToolbarIconPack"/>
+    /// change. While it has never been set (or after <c>ClearValue(ToolbarMaxRowsProperty)</c>),
+    /// the current definition's <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> is used.
+    /// The definition object itself is never modified.
+    /// </remarks>
     public int ToolbarMaxRows
     {
         get => (int)GetValue(ToolbarMaxRowsProperty);
@@ -407,7 +475,8 @@ public class MintedEditorView : ContentView
     /// <summary>
     /// Optional custom <see cref="Core.Toolbar.ToolbarDefinition"/>.
     /// When <see langword="null"/> the editor uses <see cref="Core.Toolbar.ToolbarDefinition.CreateDefault()"/>.
-    /// Ignored while <see cref="ToolbarItems"/> is non-empty.
+    /// Ignored while <see cref="ToolbarItems"/> is non-empty. The definition's
+    /// <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> applies only while <see cref="ToolbarMaxRows"/> is unset.
     /// </summary>
     public ToolbarDefinition? ToolbarDefinition
     {
@@ -443,13 +512,7 @@ public class MintedEditorView : ContentView
             return;
         }
 
-        var definition = def ?? ToolbarDefinition.CreateDefault();
-        _toolbarRenderer = new ToolbarRenderer(definition);
-        _toolbarRenderer.IconPack = ToolbarIconPack;
-        _toolbarRenderer.IconResolver = key =>
-            _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
-        WireToolbarCallbacks(definition);
-        InvalidateCanvas();
+        ApplyToolbarDefinition(def ?? ToolbarDefinition.CreateDefault());
     }
 
     private void OnToolbarItemsChanged(IList<Core.Toolbar.ToolbarItem>? items)
@@ -465,27 +528,106 @@ public class MintedEditorView : ContentView
 
     private void ApplyToolbarDefinition(ToolbarDefinition definition)
     {
+        CreateToolbarRenderer(definition);
+        InvalidateCanvas();
+    }
+
+    // Every toolbar rebuild goes through here so view-level settings (icon pack,
+    // icon resolver, row limit) carry over to the new renderer.
+    private void CreateToolbarRenderer(ToolbarDefinition definition)
+    {
         _toolbarRenderer = new ToolbarRenderer(definition);
         _toolbarRenderer.IconPack = ToolbarIconPack;
         _toolbarRenderer.IconResolver = key =>
             _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
+        ApplyToolbarMaxRows();
         WireToolbarCallbacks(definition);
+    }
+
+    // Font families offered by the font-family dropdown after the localized "Default" entry.
+    private static readonly string[] s_fontFamilies =
+    [
+        "Arial", "Times New Roman", "Courier New",
+        "Georgia", "Verdana", "Trebuchet MS", "Comic Sans MS",
+    ];
+
+    /// <summary>
+    /// Fills the options of the built-in dropdowns (font family, heading level, edit, object and
+    /// table menus) from <see cref="EditorStrings.Current"/>, keeping each selection. Called when the
+    /// toolbar is wired and again whenever <see cref="EditorStrings.Current"/> changes.
+    /// </summary>
+    private static void ApplyLocalizedDropdownItems(ToolbarDefinition def)
+    {
+        var s = EditorStrings.Current;
+        foreach (var dd in def.AllItems.OfType<ToolbarDropdown>())
+        {
+            string[]? items = dd.Icon switch
+            {
+                "font-family"    => [s.DefaultFontFamily, .. s_fontFamilies],
+                "heading"        => [s.NormalText, s.Heading1, s.Heading2, s.Heading3, s.Heading4, s.Heading5, s.Heading6],
+                "edit-actions"   => [s.Copy, s.Cut, s.Paste, s.SelectAll],
+                "object-actions" => [s.OpenLink, s.RemoveLink, s.RemoveImage],
+                "table-actions"  =>
+                [
+                    s.InsertTableEllipsis, s.InsertRowAbove, s.InsertRowBelow, s.DeleteRow,
+                    s.InsertColumnLeft, s.InsertColumnRight, s.DeleteColumn, s.DeleteTable,
+                ],
+                _ => null,
+            };
+            if (items is null) continue;
+
+            dd.Items.Clear();
+            foreach (var text in items) dd.Items.Add(text);
+        }
+    }
+
+    private void OnEditorStringsChanged()
+    {
+        // EditorStrings.Current may be replaced from any thread.
+        Dispatcher.Dispatch(RefreshLocalizedStrings);
+    }
+
+    private void RefreshLocalizedStrings()
+    {
+        ApplyLocalizedDropdownItems(_toolbarRenderer.Definition);
         InvalidateCanvas();
     }
 
+    /// <summary>
+    /// Starts listening for <see cref="EditorStrings.CurrentChanged"/> (if not already) and applies
+    /// strings that were replaced while the editor was not listening.
+    /// </summary>
+    private void SubscribeToEditorStrings()
+    {
+        if (_stringsSubscription is not null) return;
+        _stringsSubscription = EditorStrings.SubscribeCurrentChangedWeak(
+            this, static view => view.OnEditorStringsChanged());
+        RefreshLocalizedStrings();
+    }
+
+    private void UnsubscribeFromEditorStrings()
+    {
+        _stringsSubscription?.Dispose();
+        _stringsSubscription = null;
+    }
+
+    private void OnViewLoaded(object? sender, EventArgs e) => SubscribeToEditorStrings();
+
+    private void OnViewUnloaded(object? sender, EventArgs e) => UnsubscribeFromEditorStrings();
+
+    // ToolbarMaxRows wins once the app has set it; otherwise the definition's MaxRows applies.
+    private void ApplyToolbarMaxRows() =>
+        _toolbarRenderer.MaxRowsOverride = IsSet(ToolbarMaxRowsProperty) ? ToolbarMaxRows : null;
+
     private void WireToolbarCallbacks(ToolbarDefinition def)
     {
-        string[] fontFamilies =
-        [
-            "Default", "Arial", "Times New Roman", "Courier New",
-            "Georgia", "Verdana", "Trebuchet MS", "Comic Sans MS",
-        ];
         string[] fontSizes =
         [
             "8", "9", "10", "11", "12", "14", "16", "18",
             "20", "24", "28", "32", "36", "48", "72",
         ];
-        string[] headingLevels = ["Normal", "H1", "H2", "H3", "H4", "H5", "H6"];
+
+        ApplyLocalizedDropdownItems(def);
 
         foreach (var item in def.AllItems)
         {
@@ -494,14 +636,20 @@ public class MintedEditorView : ContentView
                 switch (dd.Icon)
                 {
                     case "font-family":
-                        dd.Items.Clear();
-                        foreach (var f in fontFamilies) dd.Items.Add(f);
                         dd.SelectedIndex = 0;
                         dd.OnSelectionChanged = idx =>
                         {
+                            // Index 0 is the localized "Default" entry, which clears the font family.
                             if ((uint)idx < (uint)dd.Items.Count)
-                                _fontFormattingEngine.ApplyFontFamily(_document, _inputController.Selection.Range, dd.Items[idx] == "Default" ? "" : dd.Items[idx]);
-                            InvalidateCanvas();
+                            {
+                                string family = idx == 0 ? "" : dd.Items[idx];
+                                ApplyToolbarCharacterFormatting("Font",
+                                    r => _fontFormattingEngine.ApplyFontFamily(_document, r, family));
+                            }
+                            else
+                            {
+                                InvalidateCanvas();
+                            }
                         };
                         break;
 
@@ -512,29 +660,27 @@ public class MintedEditorView : ContentView
                         dd.OnSelectionChanged = idx =>
                         {
                             if ((uint)idx < (uint)dd.Items.Count && float.TryParse(dd.Items[idx], out float sz))
-                                _fontFormattingEngine.ApplyFontSize(_document, _inputController.Selection.Range, sz);
-                            InvalidateCanvas();
+                            {
+                                ApplyToolbarCharacterFormatting("Font Size",
+                                    r => _fontFormattingEngine.ApplyFontSize(_document, r, sz));
+                            }
+                            else
+                                InvalidateCanvas();
                         };
                         break;
 
                     case "heading":
-                        dd.Items.Clear();
-                        foreach (var h in headingLevels) dd.Items.Add(h);
                         dd.SelectedIndex = 0;
                         dd.OnSelectionChanged = idx =>
                         {
                             if ((uint)idx < (uint)dd.Items.Count)
-                                ParagraphFormattingEngine.SetHeadingLevel(_document, _inputController.Selection.Range, idx);
+                                new SetHeadingLevelCommand(idx).Execute(GetEditorContext());
+                            UpdateFormattingState();
                             InvalidateCanvas();
                         };
                         break;
 
                     case "edit-actions":
-                        dd.Items.Clear();
-                        dd.Items.Add("Copy");
-                        dd.Items.Add("Cut");
-                        dd.Items.Add("Paste");
-                        dd.Items.Add("Select All");
                         dd.SelectedIndex = -1;
                         dd.OnSelectionChanged = async idx =>
                         {
@@ -559,10 +705,6 @@ public class MintedEditorView : ContentView
                         break;
 
                     case "object-actions":
-                        dd.Items.Clear();
-                        dd.Items.Add("Open Link");
-                        dd.Items.Add("Remove Link");
-                        dd.Items.Add("Remove Image");
                         dd.SelectedIndex = -1;
                         dd.OnSelectionChanged = idx =>
                         {
@@ -591,15 +733,6 @@ public class MintedEditorView : ContentView
                         break;
 
                     case "table-actions":
-                        dd.Items.Clear();
-                        dd.Items.Add("Insert Table...");
-                        dd.Items.Add("Insert Row Above");
-                        dd.Items.Add("Insert Row Below");
-                        dd.Items.Add("Delete Row");
-                        dd.Items.Add("Insert Column Left");
-                        dd.Items.Add("Insert Column Right");
-                        dd.Items.Add("Delete Column");
-                        dd.Items.Add("Delete Table");
                         dd.SelectedIndex = -1;
                         dd.OnSelectionChanged = async idx =>
                         {
@@ -643,21 +776,36 @@ public class MintedEditorView : ContentView
                     case "text-color":
                         cp.OnColorSelected = color =>
                         {
-                            _fontFormattingEngine.ApplyTextColor(_document, _inputController.Selection.Range, color);
-                            InvalidateCanvas();
+                            ApplyToolbarCharacterFormatting("Text Color",
+                                r => _fontFormattingEngine.ApplyTextColor(_document, r, color));
                         };
                         break;
 
                     case "highlight-color":
                         cp.OnColorSelected = color =>
                         {
-                            _fontFormattingEngine.ApplyHighlightColor(_document, _inputController.Selection.Range, color);
-                            InvalidateCanvas();
+                            ApplyToolbarCharacterFormatting("Highlight Color",
+                                r => _fontFormattingEngine.ApplyHighlightColor(_document, r, color));
                         };
                         break;
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Applies a toolbar dropdown or colour-picker format to the selection as one undo step
+    /// (or to the pending style when the selection is empty), keeping the selection on the same text,
+    /// then reads the formatting state back from the formatted text.
+    /// </summary>
+    private void ApplyToolbarCharacterFormatting(string description, Action<TextRange> apply)
+    {
+        GetEditorContext().ApplyCharacterFormatting(description, apply);
+        _caret.MoveTo(_inputController.Selection.Active);
+        RaiseSelectionChanged();
+        NotifyImeSelectionChanged();
+        UpdateFormattingState();
+        InvalidateCanvas();
     }
 
     private void ExecuteToolbarCommand(IEditorCommand command)
@@ -747,6 +895,12 @@ public class MintedEditorView : ContentView
     /// <summary>Current selection state.</summary>
     public Selection Selection => _inputController.Selection;
 
+    /// <summary>
+    /// Formatting at the caret or selection, as last reported by the formatting "changed"
+    /// events (<see cref="FontFamilyChanged"/>, <see cref="FontAttributesChanged"/> and the others).
+    /// </summary>
+    public FormattingState CurrentFormatting => _formattingStateTracker.Current;
+
     // ── Events ───────────────────────────────────────────────────────────────────
 
     /// <summary>Raised whenever the document content changes.</summary>
@@ -766,6 +920,52 @@ public class MintedEditorView : ContentView
 
     /// <summary>Raised when image insertion is requested so hosts can provide a source.</summary>
     public event EventHandler<ImageRequestedEventArgs>? ImageRequested;
+
+    /// <summary>Raised after <see cref="LoadHtml"/> or <see cref="LoadMarkdown"/> replaces the document content.</summary>
+    public event EventHandler<ContentLoadedEventArgs>? ContentLoaded;
+
+    /// <summary>Raised when <see cref="IsReadOnly"/> changes.</summary>
+    public event EventHandler<IsReadOnlyChangedEventArgs>? IsReadOnlyChanged;
+
+    /// <summary>Raised when the font family at the caret or selection changes.</summary>
+    public event EventHandler<FontFamilyChangedEventArgs>? FontFamilyChanged;
+
+    /// <summary>Raised when the font size at the caret or selection changes.</summary>
+    public event EventHandler<FontSizeChangedEventArgs>? FontSizeChanged;
+
+    /// <summary>Raised when bold, italic, subscript or superscript at the caret or selection changes.</summary>
+    public event EventHandler<FontAttributesChangedEventArgs>? FontAttributesChanged;
+
+    /// <summary>Raised when underline or strikethrough at the caret or selection changes.</summary>
+    public event EventHandler<TextDecorationsChangedEventArgs>? TextDecorationsChanged;
+
+    /// <summary>Raised when the paragraph format (heading level or block quote) at the caret or selection changes.</summary>
+    public event EventHandler<TextFormattingChangedEventArgs>? TextFormattingChanged;
+
+    /// <summary>Raised when the paragraph alignment at the caret or selection changes.</summary>
+    public event EventHandler<HorizontalTextAlignmentChangedEventArgs>? HorizontalTextAlignmentChanged;
+
+    /// <summary>Raised when the list type of the paragraph at the caret or selection changes.</summary>
+    public event EventHandler<ListTypeChangedEventArgs>? ListTypeChanged;
+
+    /// <summary>Raised when the text colour at the caret or selection changes.</summary>
+    public event EventHandler<TextColorChangedEventArgs>? TextColorChanged;
+
+    /// <summary>Raised when the highlight colour at the caret or selection changes.</summary>
+    public event EventHandler<HighlightTextColorChangedEventArgs>? HighlightTextColorChanged;
+
+    /// <summary>Raised once per image after an edit, undo or redo adds images to the document.</summary>
+    public event EventHandler<ImageInsertedEventArgs>? ImageInserted;
+
+    /// <summary>Raised once per image after an edit, undo or redo removes images from the document.</summary>
+    public event EventHandler<ImageRemovedEventArgs>? ImageRemoved;
+
+    /// <summary>
+    /// Raised after <see cref="FindNext"/>, <see cref="FindPrevious"/>, <see cref="Replace"/> or
+    /// <see cref="ReplaceAll"/> completes, with the match count and the 1-based index of the
+    /// selected match (0 when none) for the query after the operation.
+    /// </summary>
+    public event EventHandler<FindReplaceResultEventArgs>? FindReplaceCompleted;
 
     /// <summary>Platform handler used to open hyperlinks when activation is not cancelled.</summary>
     public IHyperlinkHandler HyperlinkHandler { get; set; } = new MauiHyperlinkHandler();
@@ -787,6 +987,8 @@ public class MintedEditorView : ContentView
             FormattingEngine = _formattingEngine,
             FontFormattingEngine = _fontFormattingEngine,
         };
+
+        _findReplace = new EditorFindReplace(_document, _inputController.Selection, _undoManager);
 
         _document.Changed += OnDocumentChanged;
 
@@ -812,16 +1014,29 @@ public class MintedEditorView : ContentView
         _caret.IsFocused = false;
         _inputController.ClipboardProvider = new MauiClipboardProvider();
 
-        _toolbarRenderer = new ToolbarRenderer(ToolbarDefinition.CreateDefault());
-        _toolbarRenderer.IconPack = ToolbarIconPack;
-        _toolbarRenderer.IconResolver = key =>
-            _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
-        WireToolbarCallbacks(_toolbarRenderer.Definition);
+        CreateToolbarRenderer(ToolbarDefinition.CreateDefault());
+
+        _formattingStateTracker = new FormattingStateTracker(ComputeFormattingState());
+        _imageTracker.Reset(_document);
+
+        // The editor is announced as one element; the canvas would otherwise show up as an
+        // unlabeled node. On Android and iOS that element is this view: double-tapping it makes
+        // the screen reader tap its centre, which lands on the canvas and focuses the editor, so
+        // the hidden keyboard-capture view is excluded too. Windows has no such fallback, so there
+        // the capture view (a TextBox, which Narrator can focus and the user can Tab to) stays in
+        // the tree and gets the editor's description and hint (see UpdateSemantics).
+        AutomationProperties.SetIsInAccessibleTree(_canvas, false);
+        if (!ProxyCarriesSemantics)
+            AutomationProperties.SetIsInAccessibleTree(_keyboardProxy, false);
 
         var grid = new Grid();
         grid.Add(_canvas);
         grid.Add(_keyboardProxy);
         Content = grid;
+
+        Loaded += OnViewLoaded;
+        Unloaded += OnViewUnloaded;
+        UpdateSemantics();
     }
 
     // ── HTML API ─────────────────────────────────────────────────────────────────
@@ -844,6 +1059,10 @@ public class MintedEditorView : ContentView
         _inputController.Selection.CollapseTo(new DocumentPosition(0, 0, 0));
         _caret.Position = new DocumentPosition(0, 0, 0);
         InvalidateCanvas();
+        // The document was replaced, so the caret now refers to new content even when its
+        // coordinates happen to match the old ones.
+        RaiseSelectionChanged();
+        OnContentLoaded();
     }
 
     /// <summary>Appends the parsed HTML at the end of the current document.</summary>
@@ -871,6 +1090,10 @@ public class MintedEditorView : ContentView
         _inputController.Selection.CollapseTo(new DocumentPosition(0, 0, 0));
         _caret.Position = new DocumentPosition(0, 0, 0);
         InvalidateCanvas();
+        // The document was replaced, so the caret now refers to new content even when its
+        // coordinates happen to match the old ones.
+        RaiseSelectionChanged();
+        OnContentLoaded();
     }
 
     /// <summary>Appends the parsed Markdown at the end of the current document.</summary>
@@ -888,7 +1111,7 @@ public class MintedEditorView : ContentView
         if (_undoManager.CanUndo)
         {
             var pos = _undoManager.Undo();
-            if (pos.HasValue) { _inputController.Selection.CollapseTo(pos.Value); _caret.MoveTo(pos.Value); }
+            if (pos.HasValue) MoveCaretAfterHistoryChange(pos.Value);
             InvalidateCanvas();
         }
     }
@@ -899,10 +1122,116 @@ public class MintedEditorView : ContentView
         if (_undoManager.CanRedo)
         {
             var pos = _undoManager.Redo();
-            if (pos.HasValue) { _inputController.Selection.CollapseTo(pos.Value); _caret.MoveTo(pos.Value); }
+            if (pos.HasValue) MoveCaretAfterHistoryChange(pos.Value);
             InvalidateCanvas();
         }
     }
+
+    /// <summary>
+    /// Collapses the selection to <paramref name="position"/> after an undo/redo and raises
+    /// <see cref="SelectionChanged"/> when the caret or selection actually moved.
+    /// </summary>
+    private void MoveCaretAfterHistoryChange(DocumentPosition position)
+    {
+        var sel = _inputController.Selection;
+        bool changed = sel.Anchor != position || sel.Active != position;
+        sel.CollapseTo(position);
+        _caret.MoveTo(position);
+        if (changed) RaiseSelectionChanged();
+    }
+
+    // ── Find / Replace ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Selects and scrolls to the next occurrence of <paramref name="query"/> after the current
+    /// selection, wrapping to the start of the document when <paramref name="wrapAround"/> is
+    /// <c>true</c>. Returns <c>false</c> (leaving the selection unchanged) when there is no match.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    /// <param name="wrapAround">When <c>true</c>, continues from the start after the last match.</param>
+    public bool FindNext(string query, bool matchCase = false, bool wholeWord = false, bool wrapAround = true)
+    {
+        var match = _findReplace.FindNext(query, CreateFindOptions(matchCase, wholeWord, wrapAround));
+        if (match is not null)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return match is not null;
+    }
+
+    /// <summary>
+    /// Selects and scrolls to the previous occurrence of <paramref name="query"/> before the
+    /// current selection, wrapping to the end of the document when <paramref name="wrapAround"/>
+    /// is <c>true</c>. Returns <c>false</c> (leaving the selection unchanged) when there is no match.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    /// <param name="wrapAround">When <c>true</c>, continues from the end before the first match.</param>
+    public bool FindPrevious(string query, bool matchCase = false, bool wholeWord = false, bool wrapAround = true)
+    {
+        var match = _findReplace.FindPrevious(query, CreateFindOptions(matchCase, wholeWord, wrapAround));
+        if (match is not null)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return match is not null;
+    }
+
+    /// <summary>
+    /// Replaces the selected occurrence of <paramref name="query"/> (or, when the selection is not
+    /// a match, the next one) with <paramref name="replacement"/> as a single undo step, then
+    /// selects the following match. Returns <c>true</c> when a replacement was made; always
+    /// <c>false</c> when <see cref="IsReadOnly"/> is set.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="replacement">The replacement text; empty deletes the match.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    public bool Replace(string query, string replacement, bool matchCase = false, bool wholeWord = false)
+    {
+        if (IsReadOnly) return false;
+        bool replaced = _findReplace.Replace(query, replacement, CreateFindOptions(matchCase, wholeWord, wrapAround: true));
+        if (replaced)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return replaced;
+    }
+
+    /// <summary>
+    /// Replaces every occurrence of <paramref name="query"/> with <paramref name="replacement"/>
+    /// as a single undo step and returns the number of replacements; always 0 when
+    /// <see cref="IsReadOnly"/> is set.
+    /// </summary>
+    /// <param name="query">The text to find.</param>
+    /// <param name="replacement">The replacement text; empty deletes the matches.</param>
+    /// <param name="matchCase">When <c>true</c>, the search is case-sensitive.</param>
+    /// <param name="wholeWord">When <c>true</c>, only whole-word occurrences match.</param>
+    public int ReplaceAll(string query, string replacement, bool matchCase = false, bool wholeWord = false)
+    {
+        if (IsReadOnly) return 0;
+        int count = _findReplace.ReplaceAll(query, replacement, CreateFindOptions(matchCase, wholeWord, wrapAround: true));
+        if (count > 0)
+            OnFindReplaceSelectionChanged();
+        RaiseFindReplaceCompleted(query);
+        return count;
+    }
+
+    private static FindOptions CreateFindOptions(bool matchCase, bool wholeWord, bool wrapAround) =>
+        new() { MatchCase = matchCase, WholeWord = wholeWord, WrapAround = wrapAround };
+
+    private void OnFindReplaceSelectionChanged()
+    {
+        _caret.MoveTo(_inputController.Selection.Active);
+        ScrollCaretIntoView();
+        RaiseSelectionChanged();
+        NotifyImeSelectionChanged();
+        InvalidateCanvas();
+    }
+
+    private void RaiseFindReplaceCompleted(string query) =>
+        FindReplaceCompleted?.Invoke(this, new FindReplaceResultEventArgs(
+            query ?? string.Empty, _findReplace.MatchCount, _findReplace.CurrentMatchIndex + 1));
 
     // ── Insert Hyperlink / Image ──────────────────────────────────────────────────
 
@@ -911,11 +1240,12 @@ public class MintedEditorView : ContentView
         var page = GetHostPage();
         if (page == null) return;
 
+        var strings = EditorStrings.Current;
         string? url = await page.DisplayPromptAsync(
-            "Insert Hyperlink",
-            "Enter URL:",
-            accept: "Insert",
-            cancel: "Cancel",
+            strings.HyperlinkDialogTitle,
+            strings.HyperlinkDialogMessage,
+            accept: strings.HyperlinkDialogInsert,
+            cancel: strings.HyperlinkDialogCancel,
             placeholder: "https://",
             keyboard: Keyboard.Url);
 
@@ -941,11 +1271,12 @@ public class MintedEditorView : ContentView
             var page = GetHostPage();
             if (page == null) return;
 
+            var strings = EditorStrings.Current;
             source = await page.DisplayPromptAsync(
-                "Insert Image",
-                "Enter image URL or path:",
-                accept: "Insert",
-                cancel: "Cancel",
+                strings.ImageDialogTitle,
+                strings.ImageDialogMessage,
+                accept: strings.ImageDialogInsert,
+                cancel: strings.ImageDialogCancel,
                 placeholder: "https://",
                 keyboard: Keyboard.Url);
         }
@@ -964,11 +1295,12 @@ public class MintedEditorView : ContentView
         var page = GetHostPage();
         if (page == null) return;
 
+        var strings = EditorStrings.Current;
         string? rowsInput = await page.DisplayPromptAsync(
-            "Insert Table",
-            "Rows:",
-            accept: "Next",
-            cancel: "Cancel",
+            strings.TableDialogTitle,
+            strings.TableDialogRows,
+            accept: strings.TableDialogNext,
+            cancel: strings.TableDialogCancel,
             initialValue: "2",
             keyboard: Keyboard.Numeric);
 
@@ -976,10 +1308,10 @@ public class MintedEditorView : ContentView
             return;
 
         string? colsInput = await page.DisplayPromptAsync(
-            "Insert Table",
-            "Columns:",
-            accept: "Insert",
-            cancel: "Cancel",
+            strings.TableDialogTitle,
+            strings.TableDialogColumns,
+            accept: strings.TableDialogInsert,
+            cancel: strings.TableDialogCancel,
             initialValue: "2",
             keyboard: Keyboard.Numeric);
 
@@ -1012,23 +1344,32 @@ public class MintedEditorView : ContentView
 
     /// <inheritdoc/>
     /// <remarks>
-    /// When a handler is attached, loads the toolbar icons and starts the caret blink timer if the
-    /// editor is focused; when it is removed, stops the blink timer.
+    /// When a handler is attached, loads the toolbar icons, starts the caret blink timer if the
+    /// editor is focused, and starts listening for <see cref="EditorStrings.CurrentChanged"/>; when
+    /// it is removed, stops the blink timer and the listener. The listener is also started on
+    /// <see cref="VisualElement.Loaded"/> and stopped on <see cref="VisualElement.Unloaded"/>, and
+    /// holds the view only weakly, so an editor that is discarded without either can still be
+    /// garbage collected.
     /// </remarks>
     protected override void OnHandlerChanged()
     {
         base.OnHandlerChanged();
         if (Handler is not null)
         {
+            // Also picks up strings replaced while the view had no handler.
+            SubscribeToEditorStrings();
             // The blink timer is driven by focus (OnNativeFocusChanged), not by the
             // handler lifetime — an idle editor should not repaint 10x per second.
             if (_isEditorFocused)
                 StartBlinkTimer();
+            // Picks up an EditorStrings.Current assigned after construction.
+            UpdateSemantics();
             _ = LoadToolbarIconsAsync();
         }
         else
         {
             StopBlinkTimer();
+            UnsubscribeFromEditorStrings();
         }
     }
 
@@ -1202,6 +1543,8 @@ public class MintedEditorView : ContentView
             _toolbarRenderer.ActiveColor     = theme.ToolbarActiveColor;
             _toolbarRenderer.SeparatorColor  = theme.ToolbarSeparatorColor;
             _toolbarRenderer.DisabledColor   = theme.ToolbarSeparatorColor;
+            _toolbarRenderer.HoverColor      = theme.ToolbarHoverColor;
+            ApplyToolbarMaxRows(); // picks up set/clear transitions that raise no property change (see coerceValue)
             _toolbarRenderer.UpdateToggleStates(GetEditorContext());
             _toolbarRenderer.Render(dc, new EditorRect(0, 0, logicalW, logicalH));
             toolbarH = _toolbarRenderer.ToolbarHeight;
@@ -1213,7 +1556,6 @@ public class MintedEditorView : ContentView
         _renderer.BackgroundColor         = theme.Background;
         _renderer.DefaultTextColor        = theme.DefaultTextColor;
         _renderer.PreferThemeTextColorForDefaultBlack = true;
-        _renderer.ScrollOffset            = _scrollOffset;
         _renderer.ScrollbarWidth          = theme.ScrollbarWidth;
         _renderer.ScrollbarTrackColor     = theme.ScrollbarTrackColor;
         _renderer.ScrollbarThumbColor     = theme.ScrollbarThumbColor;
@@ -1223,17 +1565,46 @@ public class MintedEditorView : ContentView
         _caretRenderer.CaretColor         = theme.CaretColor;
         _caretRenderer.CaretWidth         = theme.CaretWidth;
         _selectionRenderer.SelectionColor = theme.SelectionHighlightColor;
-        _layoutEngine.HyperlinkTextColor = theme.HyperlinkColor;
+        _renderer.SelectionTextColor      = theme.SelectionTextColor;
+        _renderer.HyperlinkHoverColor     = theme.HyperlinkHoverColor;
         _layoutEngine.UnderlineHyperlinks = true;
+
+        // Link colour and spacing are baked into cached block layouts: re-lay out when they change.
+        if (_layoutEngine.HyperlinkTextColor != theme.HyperlinkColor
+            || _layoutEngine.DefaultLineSpacing != theme.LineSpacing
+            || _layoutEngine.DefaultParagraphSpacing != theme.ParagraphSpacing)
+        {
+            _layoutEngine.HyperlinkTextColor      = theme.HyperlinkColor;
+            _layoutEngine.DefaultLineSpacing      = theme.LineSpacing;
+            _layoutEngine.DefaultParagraphSpacing = theme.ParagraphSpacing;
+            _layoutCache.InvalidateAll();
+        }
 
         // Layout → render (with selection behind text) → caret
         _lastLayout = _layoutCache.GetLayout(_document, logicalW, dc);
+
+        // The document may have become shorter (edits, spacing or theme changes): keep the
+        // scroll position within it so the view never shows empty space below the end.
+        float maxScroll = Math.Max(0f, _lastLayout.TotalHeight - viewport.Height);
+        if (_scrollOffset > maxScroll)
+            _scrollOffset = maxScroll;
+        _renderer.ScrollOffset = _scrollOffset;
+
+        // Text under a resting mouse pointer moves when the view scrolls or the layout
+        // changes: hit-test the hovered link again before drawing.
+        if (_pointerPosition is { } pointer)
+            UpdateHyperlinkHover(pointer.X, pointer.Y);
+        _renderer.HoveredHyperlink = _hoveredHyperlink;
 
         // Wire selection into the pre-text layer so highlights appear behind text.
         var currentSelection = _inputController.Selection;
         var currentLayout    = _lastLayout;
         _renderer.PreTextLayer = currentSelection.IsEmpty ? null : ctx =>
             _selectionRenderer.Render(currentSelection, currentLayout, _document, ctx);
+        // Selected text is redrawn in the theme's selection text colour within these rects.
+        _renderer.SelectionRects = currentSelection.IsEmpty || theme.SelectionTextColor.A == 0
+            ? null
+            : _selectionRenderer.GetSelectionRects(currentSelection, currentLayout, _document, dc);
         _renderer.ImageResolver = ResolveDocumentImage;
 
         if (!IsReadOnly)
@@ -1242,8 +1613,7 @@ public class MintedEditorView : ContentView
         RenderDocumentLayer(dc, viewport);
 
         // Placeholder — shown only when the document is an empty single paragraph
-        if (_document.Blocks.Count == 1
-            && _document.Blocks[0] is Paragraph p && p.Inlines.Count == 0
+        if (EditorAccessibility.IsEmpty(_document)
             && !string.IsNullOrEmpty(PlaceholderText))
         {
             var placeholder = new EditorPaint
@@ -1261,6 +1631,27 @@ public class MintedEditorView : ContentView
         // Render overflow panel on top of document (it can extend below the toolbar)
         if (ShowToolbar && _toolbarRenderer.IsOverflowPanelOpen)
             _toolbarRenderer.RenderOverflowPanel(dc, logicalW, logicalH);
+
+        // Toolbar items may have moved (resize, overflow): hit-test the hovered item again now
+        // that every item's rect is known, and redraw if it changed.
+        if (_pointerPosition is { } toolbarPointer && UpdateToolbarHover(toolbarPointer.X, toolbarPointer.Y))
+            InvalidateCanvas();
+
+        // Focus ring around the whole control. The native view that holds keyboard focus is
+        // invisible, so the platform draws no focus visual of its own for the editor.
+        if (ShowFocusRing && _isEditorFocused && theme.FocusRingColor.A != 0)
+        {
+            const float ringWidth = 1.5f;
+            var ringPaint = new EditorPaint
+            {
+                Color = theme.FocusRingColor,
+                Style = PaintStyle.Stroke,
+                StrokeWidth = ringWidth,
+                IsAntiAlias = true,
+            };
+            float inset = ringWidth / 2f;
+            dc.DrawRect(new EditorRect(inset, inset, logicalW - ringWidth, logicalH - ringWidth), ringPaint);
+        }
 
         // Magnifier last, above everything: the document drawn again, zoomed, in a lens.
         _magnifierRenderer.Render(dc, _magnifier, new EditorRect(0, 0, logicalW, logicalH),
@@ -1310,6 +1701,25 @@ public class MintedEditorView : ContentView
         {
             if (e.ActionType is SKTouchAction.Released or SKTouchAction.Cancelled)
                 _ignoredTouchIds.Remove(e.Id);
+            e.Handled = true;
+            return;
+        }
+
+        // Remember where the mouse is, so hover can be re-checked after a scroll or layout change.
+        if (e.DeviceType == SKTouchDeviceType.Mouse && e.ActionType != SKTouchAction.Exited)
+            _pointerPosition = (rawX, rawY);
+
+        // Mouse hover (reported where the platform sends pointer moves with no button pressed).
+        if (e.ActionType == SKTouchAction.Moved && !e.InContact)
+        {
+            UpdatePointerHover(rawX, rawY);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ActionType == SKTouchAction.Exited)
+        {
+            ClearPointerHover();
             e.Handled = true;
             return;
         }
@@ -1547,6 +1957,62 @@ public class MintedEditorView : ContentView
         e.Handled = true;
     }
 
+    // ── Pointer hover ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Updates the hovered toolbar item and hyperlink for a mouse pointer at the given
+    /// canvas coordinates, redrawing when either changes.
+    /// </summary>
+    private void UpdatePointerHover(float rawX, float rawY)
+    {
+        _pointerPosition = (rawX, rawY);
+        bool changed = UpdateToolbarHover(rawX, rawY) | UpdateHyperlinkHover(rawX, rawY);
+        if (changed)
+            InvalidateCanvas();
+    }
+
+    /// <summary>Whether a pointer at canvas height <paramref name="rawY"/> is over the document, not the toolbar or its panels.</summary>
+    private bool IsPointerOverDocument(float rawY)
+    {
+        if (!ShowToolbar) return true;
+        // A drop-down list, colour grid or the overflow panel covers what is beneath it.
+        return !_toolbarRenderer.HasOpenOverlay
+               && !_toolbarRenderer.IsOverflowPanelOpen
+               && rawY >= _toolbarRenderer.ToolbarHeight;
+    }
+
+    /// <summary>Sets the hovered toolbar item; returns <c>true</c> when it changed.</summary>
+    private bool UpdateToolbarHover(float rawX, float rawY)
+    {
+        if (ShowToolbar && !_toolbarRenderer.HasOpenOverlay && !IsPointerOverDocument(rawY))
+            return _toolbarRenderer.UpdateHover(rawX, rawY);
+        return _toolbarRenderer.ClearHover();
+    }
+
+    /// <summary>Sets the hovered hyperlink; returns <c>true</c> when it changed.</summary>
+    private bool UpdateHyperlinkHover(float rawX, float rawY)
+    {
+        HyperlinkInline? link = null;
+        if (IsPointerOverDocument(rawY))
+        {
+            float toolbarH = ShowToolbar ? _toolbarRenderer.ToolbarHeight : 0f;
+            link = DocumentHitTester.HitTestHyperlink(rawX, rawY - toolbarH + _scrollOffset, _lastLayout);
+        }
+
+        if (ReferenceEquals(link, _hoveredHyperlink)) return false;
+        _hoveredHyperlink = link;
+        return true;
+    }
+
+    private void ClearPointerHover()
+    {
+        _pointerPosition = null;
+        bool changed = _toolbarRenderer.ClearHover() | (_hoveredHyperlink is not null);
+        _hoveredHyperlink = null;
+        if (changed)
+            InvalidateCanvas();
+    }
+
     // ── Long-press caret drag & magnifier ────────────────────────────────────────
 
     private void StartLongPress(long touchId, float rawX, float rawY)
@@ -1746,7 +2212,75 @@ public class MintedEditorView : ContentView
     {
         _layoutCache.OnDocumentChanged(_document, e);
         TextChanged?.Invoke(this, new EditorTextChangedEventArgs(e.AffectedRange));
+        ScheduleDocumentStateUpdate();
+        UpdateSemantics();
         InvalidateCanvas();
+    }
+
+    // ── Accessibility ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Applies the editor's screen-reader description and hint (see
+    /// <see cref="EditorAccessibility.ForEditor"/>) to this view's <see cref="SemanticProperties"/>,
+    /// unless the app has set its own value. With <paramref name="announce"/> (used when
+    /// <see cref="IsReadOnly"/> toggles), the new state is announced, also when the app owns the
+    /// description: then the app's description followed by the read-only state.
+    /// </summary>
+    private void UpdateSemantics(bool announce = false)
+    {
+        bool isEmpty = EditorAccessibility.IsEmpty(_document);
+        var props = EditorAccessibility.ForEditor(IsReadOnly, isEmpty, PlaceholderText);
+        string? description = string.IsNullOrEmpty(props.Label) ? null : props.Label;
+        string? hint = string.IsNullOrEmpty(props.Hint) ? null : props.Hint;
+
+        bool ownsDescription = SemanticProperties.GetDescription(this) == _appliedSemanticDescription;
+        if (ownsDescription && description != _appliedSemanticDescription)
+        {
+            _appliedSemanticDescription = description;
+            SemanticProperties.SetDescription(this, description);
+        }
+
+        if (SemanticProperties.GetHint(this) == _appliedSemanticHint
+            && hint != _appliedSemanticHint)
+        {
+            _appliedSemanticHint = hint;
+            SemanticProperties.SetHint(this, hint);
+        }
+
+        if (announce && Handler is not null)
+        {
+            string announcement = ownsDescription
+                ? description ?? string.Empty
+                : EditorAccessibility.ForEditor(IsReadOnly, isEmpty, PlaceholderText,
+                    label: SemanticProperties.GetDescription(this)).Label;
+            if (announcement.Length > 0)
+                Microsoft.Maui.Accessibility.SemanticScreenReader.Default.Announce(announcement);
+        }
+
+        SyncProxySemantics();
+    }
+
+    /// <summary>
+    /// On Windows, copies this view's current description and hint (the editor's or the app's)
+    /// to the keyboard-capture view, which is the element Narrator reads and focuses there.
+    /// </summary>
+    private void SyncProxySemantics()
+    {
+        if (!ProxyCarriesSemantics) return;
+        SemanticProperties.SetDescription(_keyboardProxy, SemanticProperties.GetDescription(this));
+        SemanticProperties.SetHint(_keyboardProxy, SemanticProperties.GetHint(this));
+    }
+
+    /// <inheritdoc/>
+    protected override void OnPropertyChanged([System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
+    {
+        base.OnPropertyChanged(propertyName);
+        // An app-set description or hint must reach the Windows keyboard-capture view too.
+        // _keyboardProxy is null while the base constructor sets properties.
+        if (_keyboardProxy is not null
+            && (propertyName == SemanticProperties.DescriptionProperty.PropertyName
+                || propertyName == SemanticProperties.HintProperty.PropertyName))
+            SyncProxySemantics();
     }
 
     private void RaiseSelectionChanged()
@@ -1755,6 +2289,98 @@ public class MintedEditorView : ContentView
         SelectionChanged?.Invoke(this,
             new EditorSelectionChangedEventArgs(sel.Anchor, sel.Active, sel.IsEmpty));
         RaiseHyperlinkSelectionChanged(sel.Active);
+        UpdateFormattingState();
+    }
+
+    /// <summary>
+    /// Takes freshly loaded content as the new baseline (its images are not reported as
+    /// inserted), then raises <see cref="ContentLoaded"/>.
+    /// </summary>
+    private void OnContentLoaded()
+    {
+        _imageTracker.Reset(_document);
+        UpdateFormattingState();
+        ContentLoaded?.Invoke(this, new ContentLoadedEventArgs());
+    }
+
+    /// <summary>
+    /// Queues one image and formatting state check for the end of the current operation: one
+    /// edit can send several document notifications, some before the selection has moved.
+    /// </summary>
+    private void ScheduleDocumentStateUpdate()
+    {
+        if (_documentStateUpdatePending)
+            return;
+        _documentStateUpdatePending = true;
+
+        IDispatcher? dispatcher;
+        try { dispatcher = Dispatcher; }
+        catch (InvalidOperationException) { dispatcher = null; } // no dispatcher on this thread
+        if (dispatcher is null || !dispatcher.Dispatch(UpdateDocumentState))
+            UpdateDocumentState();
+    }
+
+    private void UpdateDocumentState()
+    {
+        _documentStateUpdatePending = false;
+
+        var changes = _imageTracker.Update(_document);
+        foreach (var image in changes.Removed)
+            ImageRemoved?.Invoke(this, new ImageRemovedEventArgs(image.Source));
+        foreach (var image in changes.Inserted)
+            ImageInserted?.Invoke(this, new ImageInsertedEventArgs(image));
+
+        UpdateFormattingState();
+    }
+
+    private FormattingState ComputeFormattingState()
+    {
+        // Merge the pending styles the same way typed input does: character toggles from
+        // one, font family, size and colours from the other.
+        var pending = _formattingEngine.PendingStyle;
+        var pendingFont = _fontFormattingEngine.PendingStyle;
+        if (pending is not null && pendingFont is not null)
+        {
+            pending = pending
+                .WithFontFamily(pendingFont.FontFamily)
+                .WithFontSize(pendingFont.FontSize)
+                .WithTextColor(pendingFont.TextColor)
+                .WithHighlightColor(pendingFont.HighlightColor);
+        }
+        return FormattingState.Compute(_document, _inputController.Selection.Range, pending ?? pendingFont);
+    }
+
+    /// <summary>
+    /// Recomputes the formatting at the caret or selection and raises the matching "changed"
+    /// event for each part that differs from the last state.
+    /// </summary>
+    private void UpdateFormattingState()
+    {
+        var state = ComputeFormattingState();
+        var changes = _formattingStateTracker.Update(state);
+        if (changes == FormattingStateChanges.None)
+            return;
+
+        if (changes.HasFlag(FormattingStateChanges.FontFamily))
+            FontFamilyChanged?.Invoke(this, new FontFamilyChangedEventArgs(state.FontFamily));
+        if (changes.HasFlag(FormattingStateChanges.FontSize))
+            FontSizeChanged?.Invoke(this, new FontSizeChangedEventArgs(state.FontSize));
+        if (changes.HasFlag(FormattingStateChanges.FontAttributes))
+            FontAttributesChanged?.Invoke(this, new FontAttributesChangedEventArgs(
+                state.IsBold, state.IsItalic, state.IsSubscript, state.IsSuperscript));
+        if (changes.HasFlag(FormattingStateChanges.TextDecorations))
+            TextDecorationsChanged?.Invoke(this, new TextDecorationsChangedEventArgs(
+                state.IsUnderline, state.IsStrikethrough));
+        if (changes.HasFlag(FormattingStateChanges.ParagraphFormat))
+            TextFormattingChanged?.Invoke(this, new TextFormattingChangedEventArgs(state.ParagraphFormat));
+        if (changes.HasFlag(FormattingStateChanges.Alignment))
+            HorizontalTextAlignmentChanged?.Invoke(this, new HorizontalTextAlignmentChangedEventArgs(state.Alignment));
+        if (changes.HasFlag(FormattingStateChanges.ListType))
+            ListTypeChanged?.Invoke(this, new ListTypeChangedEventArgs(state.ListType));
+        if (changes.HasFlag(FormattingStateChanges.TextColor))
+            TextColorChanged?.Invoke(this, new TextColorChangedEventArgs(state.TextColor));
+        if (changes.HasFlag(FormattingStateChanges.HighlightColor))
+            HighlightTextColorChanged?.Invoke(this, new HighlightTextColorChangedEventArgs(state.HighlightColor));
     }
 
     private void RaiseHyperlinkSelectionChanged(DocumentPosition position)

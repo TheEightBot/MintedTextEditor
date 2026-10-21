@@ -59,6 +59,31 @@ public class DocumentRenderer
     /// <summary>Color used to draw the line-number digits.</summary>
     public EditorColor LineNumbersTextColor { get; set; } = new EditorColor(150, 150, 150);
 
+    // ─── Selection & hover ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Text color for selected text, or <see cref="EditorColor.Transparent"/> (the default) to
+    /// keep each run's own color. Takes effect where <see cref="SelectionRects"/> covers a line.
+    /// </summary>
+    public EditorColor SelectionTextColor { get; set; } = EditorColor.Transparent;
+
+    /// <summary>
+    /// Selected region of each line, in document content coordinates (one rectangle per line,
+    /// as returned by <see cref="Editing.SelectionRenderer.GetSelectionRects"/>), or <c>null</c>
+    /// when nothing is selected. Text inside these rectangles is drawn in
+    /// <see cref="SelectionTextColor"/>, without its run highlight so the selection shows.
+    /// </summary>
+    public IReadOnlyList<EditorRect>? SelectionRects { get; set; }
+
+    /// <summary>The hyperlink under the mouse pointer, or <c>null</c>.</summary>
+    public HyperlinkInline? HoveredHyperlink { get; set; }
+
+    /// <summary>
+    /// Text color for <see cref="HoveredHyperlink"/>, or <see cref="EditorColor.Transparent"/>
+    /// (the default) to keep the link color.
+    /// </summary>
+    public EditorColor HyperlinkHoverColor { get; set; } = EditorColor.Transparent;
+
     /// <summary>
     /// Optional action invoked within the clipped/translated coordinate space immediately
     /// before text is rendered. Use this to draw selection highlights or other layers that
@@ -244,7 +269,7 @@ public class DocumentRenderer
                     if (lineBottom < visibleTop) continue;
                     if (lineTop > visibleBottom) break;
 
-                    RenderLine(line, 0f, context);
+                    RenderLine(line, 0f, context, canShowSelection: false);
                 }
 
                 context.Restore();
@@ -435,16 +460,71 @@ public class DocumentRenderer
 
     // ─── Line rendering ───────────────────────────────────────────────────────
 
-    private void RenderLine(LayoutLine line, float blockY, IDrawingContext context)
+    private void RenderLine(LayoutLine line, float blockY, IDrawingContext context, bool canShowSelection = true)
     {
         float lineTop = blockY + line.Y;
 
+        if (canShowSelection && TryGetSelectionSpan(lineTop, line.Height, out float selStart, out float selEnd))
+        {
+            // Draw the line three times, clipped to the parts before, inside and after the
+            // selection. Clipping (rather than splitting runs into substrings) keeps the
+            // shaping, kerning and ligatures of each run exactly as they are unselected.
+            const float Far = 1000000f;
+            float clipTop = lineTop - line.Height;
+            float clipHeight = line.Height * 3f; // room for sub/superscripts and underlines
+
+            context.Save();
+            context.ClipRect(new EditorRect(-Far, clipTop, selStart + Far, clipHeight));
+            DrawRuns(line, lineTop, context, selected: false);
+            context.Restore();
+
+            context.Save();
+            context.ClipRect(new EditorRect(selStart, clipTop, selEnd - selStart, clipHeight));
+            DrawRuns(line, lineTop, context, selected: true);
+            context.Restore();
+
+            context.Save();
+            context.ClipRect(new EditorRect(selEnd, clipTop, Far, clipHeight));
+            DrawRuns(line, lineTop, context, selected: false);
+            context.Restore();
+            return;
+        }
+
+        DrawRuns(line, lineTop, context, selected: false);
+    }
+
+    /// <summary>
+    /// Finds the selected horizontal span of the line at <paramref name="lineTop"/>, when
+    /// selected text is recoloured.
+    /// </summary>
+    private bool TryGetSelectionSpan(float lineTop, float lineHeight, out float start, out float end)
+    {
+        start = end = 0f;
+        if (SelectionTextColor.A == 0 || SelectionRects is not { Count: > 0 } rects)
+            return false;
+
+        float mid = lineTop + lineHeight / 2f;
+        foreach (var rect in rects)
+        {
+            if (mid >= rect.Y && mid < rect.Bottom && rect.Width > 0f)
+            {
+                start = rect.X;
+                end = rect.Right;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void DrawRuns(LayoutLine line, float lineTop, IDrawingContext context, bool selected)
+    {
         foreach (var run in line.Runs)
         {
             var style = run.Style;
 
-            // Draw highlight background if set
-            if (style.HighlightColor != EditorColor.Transparent)
+            // Draw highlight background if set (not under selected text: the selection shows there)
+            if (!selected && style.HighlightColor != EditorColor.Transparent)
             {
                 var highlightRect = new EditorRect(run.X, lineTop, run.Width, line.Height);
                 var highlightPaint = new EditorPaint
@@ -495,6 +575,12 @@ public class DocumentRenderer
             {
                 runTextColor = DefaultTextColor;
             }
+
+            if (selected)
+                runTextColor = SelectionTextColor;
+            else if (HyperlinkHoverColor.A != 0 && HoveredHyperlink is not null
+                     && ReferenceEquals(run.SourceInline, HoveredHyperlink))
+                runTextColor = HyperlinkHoverColor;
 
             var textPaint = _paintCache.GetTextPaint(
                 runTextColor,

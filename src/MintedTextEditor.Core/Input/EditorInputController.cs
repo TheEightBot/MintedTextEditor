@@ -18,6 +18,11 @@ public class EditorInputController
     private readonly Selection _selection = new Selection();
     private bool _isDragging;
 
+    // Where the last typed or pasted text ended, and whether it was kept out of a hyperlink.
+    // Text inserted right there continues that insertion, so typing over a selection inside a
+    // link keeps every following character in the link too.
+    private (Document.Document Document, DocumentPosition End, bool EscapedLink)? _lastInsertion;
+
     /// <summary>Creates an input controller that drives the given caret and its renderer.</summary>
     /// <param name="caret">The caret moved by navigation and editing.</param>
     /// <param name="caretRenderer">Used to measure the caret X position for vertical navigation.</param>
@@ -178,7 +183,7 @@ public class EditorInputController
             case EditorKey.B when ctrl:
                 if (FormattingEngine != null)
                 {
-                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleBold(document, r));
+                    ApplyFormattingWithSelectionRestore(document, "Bold", r => FormattingEngine.ToggleBold(document, r));
                     return true;
                 }
                 return false;
@@ -186,7 +191,7 @@ public class EditorInputController
             case EditorKey.I when ctrl:
                 if (FormattingEngine != null)
                 {
-                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleItalic(document, r));
+                    ApplyFormattingWithSelectionRestore(document, "Italic", r => FormattingEngine.ToggleItalic(document, r));
                     return true;
                 }
                 return false;
@@ -194,7 +199,7 @@ public class EditorInputController
             case EditorKey.U when ctrl:
                 if (FormattingEngine != null)
                 {
-                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleUnderline(document, r));
+                    ApplyFormattingWithSelectionRestore(document, "Underline", r => FormattingEngine.ToggleUnderline(document, r));
                     return true;
                 }
                 return false;
@@ -268,19 +273,62 @@ public class EditorInputController
     {
         SyncToVisibleCell(document);
         DocumentPosition insertPos = _caret.Position;
-        if (!_selection.IsEmpty)
+        bool replacesSelection = !_selection.IsEmpty;
+        if (replacesSelection)
         {
-            insertPos = PushOrExecute(new DeleteRangeAction(document, _selection.Range));
+            insertPos = DeleteSelectionForReplacement(document);
             _selection.CollapseTo(insertPos);
         }
 
-        var style = FormattingEngine?.ConsumePendingStyle();
-        var pendingFontStyle = FontFormattingEngine?.ConsumePendingStyle();
-        if (pendingFontStyle is not null)
-            style = style is null ? pendingFontStyle : MergeStyles(style, pendingFontStyle);
-        var newPos = PushOrExecute(new InsertTextAction(document, insertPos, text, style));
+        // Pending styles (picked with no selection) win; otherwise the text inherits the
+        // style of the character before the caret (or after it at a paragraph start).
+        var style = Formatting.FormattingEngine.GetEffectiveCaretStyle(
+            document,
+            insertPos,
+            FormattingEngine?.ConsumePendingStyle(),
+            FontFormattingEngine?.ConsumePendingStyle());
+        var newPos = InsertAndTrack(document, insertPos, text, style, replacesSelection);
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
+    }
+
+    /// <summary>
+    /// Deletes the selection that typed or pasted text is about to replace. When the selection
+    /// starts inside a hyperlink that survives the deletion, the returned position is inside
+    /// that link (not at the end of the text before it), so the replacement stays in the link.
+    /// </summary>
+    private DocumentPosition DeleteSelectionForReplacement(Document.Document document)
+    {
+        var range = _selection.Range;
+        var link = DocumentEditor.GetHyperlinkAt(document, range.Start);
+        if (link is not null && range.Start.Offset >= link.Length)
+            link = null; // the selection starts after the link's text
+
+        var pos = PushOrExecute(new DeleteRangeAction(document, range));
+        return link is null ? pos : DocumentEditor.PreferFollowingHyperlink(document, pos, link);
+    }
+
+    /// <summary>
+    /// Inserts typed or pasted text as an undoable action. Text at a collapsed caret on a hyperlink
+    /// boundary goes outside the link; text that replaces a selection stays in the link it replaced,
+    /// and so does text typed straight after it.
+    /// </summary>
+    private DocumentPosition InsertAndTrack(Document.Document document, DocumentPosition insertPos,
+        string text, TextStyle? style, bool replacesSelection)
+    {
+        bool escapeLink = !replacesSelection;
+        if (!replacesSelection && _lastInsertion is { } last
+            && ReferenceEquals(last.Document, document) && last.End == insertPos)
+        {
+            escapeLink = last.EscapedLink;
+        }
+
+        var newPos = PushOrExecute(new InsertTextAction(document, insertPos, text, style)
+        {
+            EscapeHyperlinkBoundary = escapeLink,
+        });
+        _lastInsertion = (document, newPos, escapeLink);
+        return newPos;
     }
 
     /// <summary>
@@ -327,15 +375,6 @@ public class EditorInputController
         return segments;
     }
 
-    private static TextStyle MergeStyles(TextStyle primary, TextStyle overlay)
-    {
-        return primary
-            .WithFontFamily(overlay.FontFamily)
-            .WithFontSize(overlay.FontSize)
-            .WithTextColor(overlay.TextColor)
-            .WithHighlightColor(overlay.HighlightColor);
-    }
-
     // ── Undo helper ─────────────────────────────────────────────────
 
     /// <summary>Pushes to the undo stack (executing the action) if an UndoManager is present;
@@ -372,13 +411,14 @@ public class EditorInputController
 
         SyncToVisibleCell(document);
         DocumentPosition insertPos = _caret.Position;
-        if (!_selection.IsEmpty)
+        bool replacesSelection = !_selection.IsEmpty;
+        if (replacesSelection)
         {
-            insertPos = PushOrExecute(new DeleteRangeAction(document, _selection.Range));
+            insertPos = DeleteSelectionForReplacement(document);
             _selection.CollapseTo(insertPos);
         }
 
-        var newPos = PushOrExecute(new InsertTextAction(document, insertPos, pasteText));
+        var newPos = InsertAndTrack(document, insertPos, pasteText, null, replacesSelection);
         _selection.CollapseTo(newPos);
         _caret.MoveTo(newPos);
     }
@@ -1107,11 +1147,20 @@ public class EditorInputController
     /// run splits and merges.  Uses <see cref="DocumentEditor.ApplyCharacterFormatting"/>
     /// so the selection is rebuilt from absolute character offsets after
     /// <see cref="DocumentEditor.NormalizeInlines"/> is called on all affected paragraphs.
+    /// A non-empty selection is recorded as one undo step; an empty one only changes the
+    /// pending style and is not recorded.
     /// </summary>
-    private void ApplyFormattingWithSelectionRestore(Document.Document document, Action<TextRange> applyOp)
+    private void ApplyFormattingWithSelectionRestore(Document.Document document, string description, Action<TextRange> applyOp)
     {
         var (newAnchor, newActive) = DocumentEditor.ApplyCharacterFormatting(
-            document, _selection.Anchor, _selection.Active, applyOp);
+            document, _selection.Anchor, _selection.Active,
+            range =>
+            {
+                if (range.IsEmpty || UndoManager is null)
+                    applyOp(range);
+                else
+                    UndoManager.Push(new ApplyStyleAction(document, range, applyOp, description));
+            });
         _selection.Set(newAnchor, newActive);
         _caret.MoveTo(newActive);
     }

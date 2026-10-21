@@ -7,7 +7,7 @@ namespace MintedTextEditor.Core.Commands;
 // ── Apply Font Family ─────────────────────────────────────────────────────────
 
 /// <summary>Applies <see cref="FontFamily"/> to the selected text.</summary>
-public sealed class ApplyFontFamilyCommand : IEditorCommand
+public sealed class ApplyFontFamilyCommand : ICharacterFormattingCommand
 {
     /// <inheritdoc/>
     public string Name => "ApplyFontFamily";
@@ -21,7 +21,8 @@ public sealed class ApplyFontFamilyCommand : IEditorCommand
     public void Execute(EditorContext ctx)
     {
         if (string.IsNullOrEmpty(FontFamily)) return;
-        ctx.FontFormattingEngine.ApplyFontFamily(ctx.Document, ctx.Selection.Range, FontFamily);
+        var family = FontFamily;
+        ctx.ApplyCharacterFormatting("Font", r => ctx.FontFormattingEngine.ApplyFontFamily(ctx.Document, r, family));
     }
 
     /// <inheritdoc/>
@@ -31,7 +32,7 @@ public sealed class ApplyFontFamilyCommand : IEditorCommand
 // ── Apply Font Size ───────────────────────────────────────────────────────────
 
 /// <summary>Applies <see cref="FontSize"/> to the selected text.</summary>
-public sealed class ApplyFontSizeCommand : IEditorCommand
+public sealed class ApplyFontSizeCommand : ICharacterFormattingCommand
 {
     /// <inheritdoc/>
     public string Name => "ApplyFontSize";
@@ -45,7 +46,8 @@ public sealed class ApplyFontSizeCommand : IEditorCommand
     public void Execute(EditorContext ctx)
     {
         if (FontSize <= 0) return;
-        ctx.FontFormattingEngine.ApplyFontSize(ctx.Document, ctx.Selection.Range, FontSize);
+        var size = FontSize;
+        ctx.ApplyCharacterFormatting("Font Size", r => ctx.FontFormattingEngine.ApplyFontSize(ctx.Document, r, size));
     }
 
     /// <inheritdoc/>
@@ -55,7 +57,7 @@ public sealed class ApplyFontSizeCommand : IEditorCommand
 // ── Apply Text Color ──────────────────────────────────────────────────────────
 
 /// <summary>Applies <see cref="Color"/> as the text colour of the selected text.</summary>
-public sealed class ApplyTextColorCommand : IEditorCommand
+public sealed class ApplyTextColorCommand : ICharacterFormattingCommand
 {
     /// <inheritdoc/>
     public string Name => "ApplyTextColor";
@@ -66,8 +68,11 @@ public sealed class ApplyTextColorCommand : IEditorCommand
     public EditorColor Color { get; set; } = EditorColor.Black;
 
     /// <inheritdoc/>
-    public void Execute(EditorContext ctx) =>
-        ctx.FontFormattingEngine.ApplyTextColor(ctx.Document, ctx.Selection.Range, Color);
+    public void Execute(EditorContext ctx)
+    {
+        var color = Color;
+        ctx.ApplyCharacterFormatting("Text Color", r => ctx.FontFormattingEngine.ApplyTextColor(ctx.Document, r, color));
+    }
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
@@ -76,7 +81,7 @@ public sealed class ApplyTextColorCommand : IEditorCommand
 // ── Apply Highlight Color ─────────────────────────────────────────────────────
 
 /// <summary>Applies <see cref="Color"/> as the highlight colour of the selected text.</summary>
-public sealed class ApplyHighlightColorCommand : IEditorCommand
+public sealed class ApplyHighlightColorCommand : ICharacterFormattingCommand
 {
     /// <inheritdoc/>
     public string Name => "ApplyHighlightColor";
@@ -87,8 +92,11 @@ public sealed class ApplyHighlightColorCommand : IEditorCommand
     public EditorColor Color { get; set; } = EditorColor.Yellow;
 
     /// <inheritdoc/>
-    public void Execute(EditorContext ctx) =>
-        ctx.FontFormattingEngine.ApplyHighlightColor(ctx.Document, ctx.Selection.Range, Color);
+    public void Execute(EditorContext ctx)
+    {
+        var color = Color;
+        ctx.ApplyCharacterFormatting("Highlight Color", r => ctx.FontFormattingEngine.ApplyHighlightColor(ctx.Document, r, color));
+    }
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
