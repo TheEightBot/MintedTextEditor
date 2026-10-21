@@ -43,6 +43,7 @@ editor.Theme = EditorTheme.CreateDark() with
 
     // Selection
     SelectionHighlightColor = new EditorColor(64, 128, 208, 102),
+    SelectionTextColor      = EditorColor.Transparent, // keep the text's own colors
 
     // Caret
     CaretColor              = new EditorColor(212, 212, 212),
@@ -55,6 +56,11 @@ editor.Theme = EditorTheme.CreateDark() with
 
     // Links
     HyperlinkColor          = new EditorColor(78, 201, 176),
+    HyperlinkHoverColor     = new EditorColor(120, 220, 200),
+
+    // Spacing
+    LineSpacing             = 4f,   // extra pixels between lines
+    ParagraphSpacing        = 12f,  // pixels below each paragraph
 };
 ```
 
@@ -108,13 +114,23 @@ Properties the MAUI control currently uses:
 | `DefaultTextColor` | Default text color |
 | `DefaultFontFamily` / `DefaultFontSize` / `Padding` | Font and position of the placeholder text |
 | `SelectionHighlightColor` | Text selection fill |
+| `SelectionTextColor` | Color of selected text; `Transparent` keeps each run's own color |
 | `CaretColor` / `CaretWidth` | Caret color and width |
 | `HyperlinkColor` | Link text color |
+| `HyperlinkHoverColor` | Link text color while the mouse pointer is over it; `Transparent` keeps `HyperlinkColor` |
 | `ToolbarBackground` | Toolbar fill |
 | `ToolbarButtonColor` | Toolbar icon/label color (icons are tinted with it) |
 | `ToolbarActiveColor` | Toolbar button active/toggled fill |
+| `ToolbarHoverColor` | Fill of the toolbar button or drop-down under the mouse pointer (active buttons keep `ToolbarActiveColor`) |
 | `ToolbarSeparatorColor` | Toolbar group separator and disabled items |
 | `ScrollbarTrackColor` / `ScrollbarThumbColor` / `ScrollbarWidth` | Scrollbar |
 | `LineNumbersGutterColor` / `LineNumbersTextColor` / `LineNumbersGutterWidth` | Line-number gutter (`ShowLineNumbers`) |
+| `FocusRingColor` | Thin ring around the editor while it has keyboard focus; `Transparent`, or `ShowFocusRing = false` on the view, hides it |
+| `LineSpacing` | Extra pixels between the lines of a paragraph (default 0) |
+| `ParagraphSpacing` | Pixels below each paragraph (default 8) |
 
-`EditorStyle` also defines `BorderColor`, `BorderWidth`, `SelectionTextColor`, `HyperlinkHoverColor`, `ToolbarHoverColor`, `ContextMenuBackground`, `ContextMenuTextColor`, `ContextMenuHoverColor`, `FocusRingColor`, `LineSpacing` and `ParagraphSpacing`, which the built-in themes set but the control does not draw with yet.
+Hover colors apply where the platform reports mouse movement with no button pressed (Windows); on touch screens there is no hover.
+
+`LineSpacing` and `ParagraphSpacing` are defaults: a paragraph whose `ParagraphStyle.LineSpacing` or `ParagraphStyle.SpaceAfter` has been set keeps its own value (see `IsLineSpacingSet` / `IsSpaceAfterSet`). The built-in themes use 0 and 8, which lay documents out exactly as when these properties were unused.
+
+`EditorStyle` also defines `BorderColor`, `BorderWidth`, `ContextMenuBackground`, `ContextMenuTextColor` and `ContextMenuHoverColor`, which the built-in themes set but the control does not draw with yet.

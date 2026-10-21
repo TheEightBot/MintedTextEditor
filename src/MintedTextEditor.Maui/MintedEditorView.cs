@@ -56,6 +56,7 @@ public class MintedEditorView : ContentView
     private float _scrollOffset;
     private readonly InertialScroller _inertialScroller = new();
     private bool _isHyperlinkSelected;
+    private HyperlinkInline? _hoveredHyperlink; // link under the mouse pointer (desktop hover)
     private string? _selectedHyperlinkUrl;
     private ImageInline? _selectedImage;
     private EditorRect _selectedImageRect;
@@ -294,6 +295,26 @@ public class MintedEditorView : ContentView
     {
         get => (bool)GetValue(ShowToolbarProperty);
         set => SetValue(ShowToolbarProperty, value);
+    }
+
+    /// <summary>Bindable property for <see cref="ShowFocusRing"/>.</summary>
+    public static readonly BindableProperty ShowFocusRingProperty =
+        BindableProperty.Create(
+            nameof(ShowFocusRing),
+            typeof(bool),
+            typeof(MintedEditorView),
+            true,
+            propertyChanged: static (b, _, _) => ((MintedEditorView)b).InvalidateCanvas());
+
+    /// <summary>
+    /// Whether a thin ring in the theme's <see cref="EditorStyle.FocusRingColor"/> is drawn around
+    /// the editor while it has keyboard focus. Defaults to true. A <c>Transparent</c>
+    /// <see cref="EditorStyle.FocusRingColor"/> also hides it.
+    /// </summary>
+    public bool ShowFocusRing
+    {
+        get => (bool)GetValue(ShowFocusRingProperty);
+        set => SetValue(ShowFocusRingProperty, value);
     }
 
     /// <summary>Bindable property for <see cref="IsMagnifierEnabled"/>.</summary>
@@ -1202,6 +1223,7 @@ public class MintedEditorView : ContentView
             _toolbarRenderer.ActiveColor     = theme.ToolbarActiveColor;
             _toolbarRenderer.SeparatorColor  = theme.ToolbarSeparatorColor;
             _toolbarRenderer.DisabledColor   = theme.ToolbarSeparatorColor;
+            _toolbarRenderer.HoverColor      = theme.ToolbarHoverColor;
             _toolbarRenderer.UpdateToggleStates(GetEditorContext());
             _toolbarRenderer.Render(dc, new EditorRect(0, 0, logicalW, logicalH));
             toolbarH = _toolbarRenderer.ToolbarHeight;
@@ -1223,8 +1245,21 @@ public class MintedEditorView : ContentView
         _caretRenderer.CaretColor         = theme.CaretColor;
         _caretRenderer.CaretWidth         = theme.CaretWidth;
         _selectionRenderer.SelectionColor = theme.SelectionHighlightColor;
-        _layoutEngine.HyperlinkTextColor = theme.HyperlinkColor;
+        _renderer.SelectionTextColor      = theme.SelectionTextColor;
+        _renderer.HyperlinkHoverColor     = theme.HyperlinkHoverColor;
+        _renderer.HoveredHyperlink        = _hoveredHyperlink;
         _layoutEngine.UnderlineHyperlinks = true;
+
+        // Link colour and spacing are baked into cached block layouts: re-lay out when they change.
+        if (_layoutEngine.HyperlinkTextColor != theme.HyperlinkColor
+            || _layoutEngine.DefaultLineSpacing != theme.LineSpacing
+            || _layoutEngine.DefaultParagraphSpacing != theme.ParagraphSpacing)
+        {
+            _layoutEngine.HyperlinkTextColor      = theme.HyperlinkColor;
+            _layoutEngine.DefaultLineSpacing      = theme.LineSpacing;
+            _layoutEngine.DefaultParagraphSpacing = theme.ParagraphSpacing;
+            _layoutCache.InvalidateAll();
+        }
 
         // Layout → render (with selection behind text) → caret
         _lastLayout = _layoutCache.GetLayout(_document, logicalW, dc);
@@ -1234,6 +1269,10 @@ public class MintedEditorView : ContentView
         var currentLayout    = _lastLayout;
         _renderer.PreTextLayer = currentSelection.IsEmpty ? null : ctx =>
             _selectionRenderer.Render(currentSelection, currentLayout, _document, ctx);
+        // Selected text is redrawn in the theme's selection text colour within these rects.
+        _renderer.SelectionRects = currentSelection.IsEmpty || theme.SelectionTextColor.A == 0
+            ? null
+            : _selectionRenderer.GetSelectionRects(currentSelection, currentLayout, _document, dc);
         _renderer.ImageResolver = ResolveDocumentImage;
 
         if (!IsReadOnly)
@@ -1261,6 +1300,22 @@ public class MintedEditorView : ContentView
         // Render overflow panel on top of document (it can extend below the toolbar)
         if (ShowToolbar && _toolbarRenderer.IsOverflowPanelOpen)
             _toolbarRenderer.RenderOverflowPanel(dc, logicalW, logicalH);
+
+        // Focus ring around the whole control. The native view that holds keyboard focus is
+        // invisible, so the platform draws no focus visual of its own for the editor.
+        if (ShowFocusRing && _isEditorFocused && theme.FocusRingColor.A != 0)
+        {
+            const float ringWidth = 1.5f;
+            var ringPaint = new EditorPaint
+            {
+                Color = theme.FocusRingColor,
+                Style = PaintStyle.Stroke,
+                StrokeWidth = ringWidth,
+                IsAntiAlias = true,
+            };
+            float inset = ringWidth / 2f;
+            dc.DrawRect(new EditorRect(inset, inset, logicalW - ringWidth, logicalH - ringWidth), ringPaint);
+        }
 
         // Magnifier last, above everything: the document drawn again, zoomed, in a lens.
         _magnifierRenderer.Render(dc, _magnifier, new EditorRect(0, 0, logicalW, logicalH),
@@ -1310,6 +1365,21 @@ public class MintedEditorView : ContentView
         {
             if (e.ActionType is SKTouchAction.Released or SKTouchAction.Cancelled)
                 _ignoredTouchIds.Remove(e.Id);
+            e.Handled = true;
+            return;
+        }
+
+        // Mouse hover (reported where the platform sends pointer moves with no button pressed).
+        if (e.ActionType == SKTouchAction.Moved && !e.InContact)
+        {
+            UpdatePointerHover(rawX, rawY);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ActionType == SKTouchAction.Exited)
+        {
+            ClearPointerHover();
             e.Handled = true;
             return;
         }
@@ -1545,6 +1615,51 @@ public class MintedEditorView : ContentView
         }
 
         e.Handled = true;
+    }
+
+    // ── Pointer hover ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Updates the hovered toolbar item and hyperlink for a mouse pointer at the given
+    /// canvas coordinates, redrawing when either changes.
+    /// </summary>
+    private void UpdatePointerHover(float rawX, float rawY)
+    {
+        float toolbarH = ShowToolbar ? _toolbarRenderer.ToolbarHeight : 0f;
+        bool changed;
+        HyperlinkInline? link = null;
+
+        if (ShowToolbar && _toolbarRenderer.HasOpenOverlay)
+        {
+            // A drop-down list or colour grid covers the items beneath it.
+            changed = _toolbarRenderer.ClearHover();
+        }
+        else if (ShowToolbar && (rawY < toolbarH || _toolbarRenderer.IsOverflowPanelOpen))
+        {
+            changed = _toolbarRenderer.UpdateHover(rawX, rawY);
+        }
+        else
+        {
+            changed = _toolbarRenderer.ClearHover();
+            link = DocumentHitTester.HitTestHyperlink(rawX, rawY - toolbarH + _scrollOffset, _lastLayout);
+        }
+
+        if (!ReferenceEquals(link, _hoveredHyperlink))
+        {
+            _hoveredHyperlink = link;
+            changed = true;
+        }
+
+        if (changed)
+            InvalidateCanvas();
+    }
+
+    private void ClearPointerHover()
+    {
+        bool changed = _toolbarRenderer.ClearHover() | (_hoveredHyperlink is not null);
+        _hoveredHyperlink = null;
+        if (changed)
+            InvalidateCanvas();
     }
 
     // ── Long-press caret drag & magnifier ────────────────────────────────────────

@@ -48,6 +48,41 @@ public sealed class ToolbarRenderer
     public EditorColor SeparatorColor  { get; set; } = new EditorColor(200, 200, 200);
     /// <summary>Color of icons and labels on disabled items.</summary>
     public EditorColor DisabledColor   { get; set; } = new EditorColor(180, 180, 180);
+    /// <summary>Fill color of the button or drop-down under the mouse pointer (see <see cref="HoveredItem"/>).</summary>
+    public EditorColor HoverColor      { get; set; } = new EditorColor(220, 220, 220);
+
+    // ── Hover ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The enabled button or drop-down under the mouse pointer, or <c>null</c>. Drawn with
+    /// <see cref="HoverColor"/> unless the button is active. Set by <see cref="UpdateHover"/>.
+    /// </summary>
+    public ToolbarItem? HoveredItem { get; private set; }
+
+    /// <summary>
+    /// Updates <see cref="HoveredItem"/> for a mouse pointer at (<paramref name="x"/>, <paramref name="y"/>).
+    /// Requires <see cref="Render"/> to have been called first.
+    /// </summary>
+    /// <returns><c>true</c> when the hovered item changed and the toolbar should be redrawn.</returns>
+    public bool UpdateHover(float x, float y)
+    {
+        var item = HitTest(x, y);
+        if (item is not (ToolbarButton or ToolbarDropdown) || !item.IsEnabled)
+            item = null;
+
+        if (ReferenceEquals(item, HoveredItem)) return false;
+        HoveredItem = item;
+        return true;
+    }
+
+    /// <summary>Clears <see cref="HoveredItem"/>, e.g. when the pointer leaves the toolbar.</summary>
+    /// <returns><c>true</c> when an item was hovered and the toolbar should be redrawn.</returns>
+    public bool ClearHover()
+    {
+        if (HoveredItem is null) return false;
+        HoveredItem = null;
+        return true;
+    }
 
     /// <summary>
     /// Optional icon resolver.  Given an icon key (e.g. "bold") returns a
@@ -462,6 +497,7 @@ public sealed class ToolbarRenderer
         float overflowBtnW = ButtonSize + ButtonPadding;
         int  currentRow   = 0;
         bool inOverflow   = false;
+        var  hoverPaint   = new EditorPaint { Color = HoverColor };
 
         float x = left;
         float y = startY;
@@ -541,7 +577,9 @@ public sealed class ToolbarRenderer
 
                 if (item is ToolbarButton btn)
                 {
-                    var fill = btn.IsActive ? activePaint : normalPaint;
+                    var fill = btn.IsActive ? activePaint
+                             : ReferenceEquals(item, HoveredItem) ? hoverPaint
+                             : normalPaint;
                     ctx.FillRoundRect(rect, 5f, fill);
                     ctx.DrawRoundRect(rect, 5f, controlBorder);
 
@@ -575,7 +613,7 @@ public sealed class ToolbarRenderer
                 }
                 else if (item is ToolbarDropdown dd)
                 {
-                    ctx.FillRoundRect(rect, 5f, normalPaint);
+                    ctx.FillRoundRect(rect, 5f, ReferenceEquals(item, HoveredItem) ? hoverPaint : normalPaint);
                     ctx.DrawRoundRect(rect, 5f, controlBorder);
                     var display = dd.SelectedIndex >= 0 && dd.SelectedIndex < dd.Items.Count
                         ? dd.Items[dd.SelectedIndex]
@@ -1001,6 +1039,7 @@ public sealed class ToolbarRenderer
         var borderPaint = new EditorPaint { Color = SeparatorColor };
         var normalPaint = new EditorPaint { Color = new EditorColor(255, 255, 255, 18) };
         var activePaint = new EditorPaint { Color = ActiveColor };
+        var hoverPaint  = new EditorPaint { Color = HoverColor };
         var controlBorder = new EditorPaint { Color = SeparatorColor, Style = PaintStyle.Stroke, StrokeWidth = 1f };
         var textPaint   = new EditorPaint { Color = ButtonColor };
         var disabledTextPaint = new EditorPaint { Color = DisabledColor };
@@ -1028,7 +1067,9 @@ public sealed class ToolbarRenderer
 
             if (item is ToolbarButton btn)
             {
-                var fill = btn.IsActive ? activePaint : normalPaint;
+                var fill = btn.IsActive ? activePaint
+                         : ReferenceEquals(item, HoveredItem) ? hoverPaint
+                         : normalPaint;
                 ctx.FillRoundRect(rect, 5f, fill);
                 ctx.DrawRoundRect(rect, 5f, controlBorder);
                 var labelPaint = item.IsEnabled ? textPaint : disabledTextPaint;
@@ -1052,7 +1093,7 @@ public sealed class ToolbarRenderer
             }
             else if (item is ToolbarDropdown dd)
             {
-                ctx.FillRoundRect(rect, 5f, normalPaint);
+                ctx.FillRoundRect(rect, 5f, ReferenceEquals(item, HoveredItem) ? hoverPaint : normalPaint);
                 ctx.DrawRoundRect(rect, 5f, controlBorder);
                 var display = dd.SelectedIndex >= 0 && dd.SelectedIndex < dd.Items.Count ? dd.Items[dd.SelectedIndex] : dd.Label;
                 ctx.DrawTextInRect(display, rect.Inflate(-4, -2), textPaint, TextAlignment.Left, VerticalAlignment.Center);

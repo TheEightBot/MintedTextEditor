@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- `MintedEditorView.ShowFocusRing` (default `true`): a thin ring in the theme's `FocusRingColor` around the editor while it has keyboard focus.
+- `DocumentRenderer.SelectionTextColor` / `SelectionRects`, `DocumentRenderer.HoveredHyperlink` / `HyperlinkHoverColor`, `SelectionRenderer.GetSelectionRects`, `DocumentHitTester.HitTestHyperlink`, `ToolbarRenderer.HoverColor` / `HoveredItem` / `UpdateHover` / `ClearHover`, `TextLayoutEngine.DefaultLineSpacing` / `DefaultParagraphSpacing`, and `ParagraphStyle.IsLineSpacingSet` / `IsSpaceAfterSet`.
+
+### Changed
+- **Theme properties now take effect**: `SelectionTextColor` recolors selected text, `HyperlinkHoverColor` recolors the link under the mouse pointer, `ToolbarHoverColor` fills the hovered toolbar button or drop-down, `FocusRingColor` draws the focus ring, and `LineSpacing` / `ParagraphSpacing` set the spacing of paragraphs that don't set their own `ParagraphStyle.LineSpacing` / `SpaceAfter`. Hover needs a platform that reports mouse movement (Windows).
+- The built-in themes' `LineSpacing` is now 0 (was 2, unused), and `EditorStyle.ParagraphSpacing` defaults to 8, so existing documents lay out exactly as before.
+
+### Fixed
+- Changing the theme's `HyperlinkColor` now recolors links already laid out, instead of only links in paragraphs edited afterwards.
+
 ---
 
 ## [0.3.1] — 2026-10-21

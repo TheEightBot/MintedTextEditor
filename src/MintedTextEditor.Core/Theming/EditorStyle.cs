@@ -43,7 +43,9 @@ public sealed record EditorStyle
     /// <summary>Background highlight color of selected text.</summary>
     public EditorColor SelectionHighlightColor { get; init; }
 
-    /// <summary>Foreground color of selected text, or <c>Transparent</c> to keep original.</summary>
+    /// <summary>
+    /// Foreground color of selected text, or <c>Transparent</c> to keep each run's own color.
+    /// </summary>
     public EditorColor SelectionTextColor { get; init; }
 
     // ── Hyperlinks ──────────────────────────────────────────────────────
@@ -51,7 +53,10 @@ public sealed record EditorStyle
     /// <summary>Default hyperlink text color.</summary>
     public EditorColor HyperlinkColor { get; init; }
 
-    /// <summary>Hyperlink color when hovered.</summary>
+    /// <summary>
+    /// Hyperlink text color while the mouse pointer is over the link (desktop platforms that
+    /// report pointer hover), or <c>Transparent</c> to keep <see cref="HyperlinkColor"/>.
+    /// </summary>
     public EditorColor HyperlinkHoverColor { get; init; }
 
     // ── Toolbar ─────────────────────────────────────────────────────────
@@ -65,7 +70,7 @@ public sealed record EditorStyle
     /// <summary>Toolbar separator line color.</summary>
     public EditorColor ToolbarSeparatorColor { get; init; }
 
-    /// <summary>Toolbar button background when hovered.</summary>
+    /// <summary>Toolbar button and drop-down background while the mouse pointer is over it.</summary>
     public EditorColor ToolbarHoverColor { get; init; }
 
     /// <summary>Toolbar button background when active or toggled on.</summary>
@@ -104,16 +109,25 @@ public sealed record EditorStyle
     public float LineNumbersGutterWidth { get; init; } = 48f;
     // ── Focus ───────────────────────────────────────────────────────────
 
-    /// <summary>Focus ring outline color drawn around the focused editor control.</summary>
+    /// <summary>
+    /// Color of the focus ring drawn around the editor while it has keyboard focus, or
+    /// <c>Transparent</c> for no ring. The MAUI control's <c>ShowFocusRing</c> also turns it off.
+    /// </summary>
     public EditorColor FocusRingColor { get; init; }
 
     // ── Spacing ─────────────────────────────────────────────────────────
 
-    /// <summary>Extra space between lines within a paragraph, in logical pixels.</summary>
+    /// <summary>
+    /// Extra space between lines within a paragraph, in logical pixels. Applies to paragraphs
+    /// that don't set <see cref="Document.ParagraphStyle.LineSpacing"/>. Defaults to 0.
+    /// </summary>
     public float LineSpacing { get; init; }
 
-    /// <summary>Space below each paragraph in logical pixels.</summary>
-    public float ParagraphSpacing { get; init; }
+    /// <summary>
+    /// Space below each paragraph in logical pixels. Applies to paragraphs that don't set
+    /// <see cref="Document.ParagraphStyle.SpaceAfter"/>. Defaults to 8.
+    /// </summary>
+    public float ParagraphSpacing { get; init; } = 8f;
 
     // ── Padding ─────────────────────────────────────────────────────────
 

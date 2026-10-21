@@ -324,4 +324,103 @@ public class ToolbarTests
         Assert.NotNull(secondRowHit);
         Assert.IsType<ToolbarButton>(secondRowHit);
     }
+
+    // ── Hover ────────────────────────────────────────────────────────────────
+
+    private static (ToolbarRenderer Renderer, ToolbarButton Plain, ToolbarButton Active, ToolbarButton Disabled, ToolbarDropdown Dropdown)
+        MakeHoverToolbar()
+    {
+        var plain = new ToolbarButton { Label = "B", Icon = "bold" };
+        var active = new ToolbarButton { Label = "I", Icon = "italic", IsActive = true };
+        var disabled = new ToolbarButton { Label = "U", Icon = "underline", IsEnabled = false };
+        var dropdown = new ToolbarDropdown { Label = "Font", Items = new List<string> { "A" } };
+        var renderer = new ToolbarRenderer(ToolbarDefinition.CreateFromItems(
+            new List<ToolbarItem> { plain, active, disabled, dropdown }))
+        {
+            ButtonSize = 36f,
+            ButtonPadding = 5f,
+            HoverColor = new EditorColor(1, 2, 3),
+            ActiveColor = new EditorColor(4, 5, 6),
+        };
+        return (renderer, plain, active, disabled, dropdown);
+    }
+
+    // Items sit in one row: buttons at x = 5, 46, 87 (36 wide), the drop-down at x = 128.
+    private const float RowY = 20f;
+
+    [Fact]
+    public void ToolbarRenderer_UpdateHover_TracksItemUnderPointer()
+    {
+        var (renderer, plain, _, _, _) = MakeHoverToolbar();
+        renderer.Render(new MockDrawingContext(), new EditorRect(0, 0, 400, 100));
+
+        Assert.True(renderer.UpdateHover(20f, RowY));
+        Assert.Same(plain, renderer.HoveredItem);
+        Assert.False(renderer.UpdateHover(25f, RowY)); // same item: no redraw needed
+
+        Assert.True(renderer.UpdateHover(300f, RowY)); // empty toolbar space
+        Assert.Null(renderer.HoveredItem);
+        Assert.False(renderer.ClearHover());
+    }
+
+    [Fact]
+    public void ToolbarRenderer_HoveredButton_IsFilledWithHoverColor()
+    {
+        var (renderer, _, _, _, _) = MakeHoverToolbar();
+        var ctx = new MockDrawingContext();
+        renderer.Render(ctx, new EditorRect(0, 0, 400, 100));
+        Assert.DoesNotContain(ctx.FillRoundRectCalls, c => c.Paint.Color == renderer.HoverColor);
+
+        renderer.UpdateHover(20f, RowY);
+        ctx = new MockDrawingContext();
+        renderer.Render(ctx, new EditorRect(0, 0, 400, 100));
+
+        var fill = Assert.Single(ctx.FillRoundRectCalls, c => c.Paint.Color == renderer.HoverColor);
+        Assert.Equal(5f, fill.Rect.X);
+
+        Assert.True(renderer.ClearHover());
+        ctx = new MockDrawingContext();
+        renderer.Render(ctx, new EditorRect(0, 0, 400, 100));
+        Assert.DoesNotContain(ctx.FillRoundRectCalls, c => c.Paint.Color == renderer.HoverColor);
+    }
+
+    [Fact]
+    public void ToolbarRenderer_HoveredDropdown_IsFilledWithHoverColor()
+    {
+        var (renderer, _, _, _, dropdown) = MakeHoverToolbar();
+        renderer.Render(new MockDrawingContext(), new EditorRect(0, 0, 400, 100));
+
+        Assert.True(renderer.UpdateHover(150f, RowY));
+        Assert.Same(dropdown, renderer.HoveredItem);
+
+        var ctx = new MockDrawingContext();
+        renderer.Render(ctx, new EditorRect(0, 0, 400, 100));
+        var fill = Assert.Single(ctx.FillRoundRectCalls, c => c.Paint.Color == renderer.HoverColor);
+        Assert.Equal(128f, fill.Rect.X);
+    }
+
+    [Fact]
+    public void ToolbarRenderer_ActiveButton_KeepsActiveColorWhenHovered()
+    {
+        var (renderer, _, active, _, _) = MakeHoverToolbar();
+        renderer.Render(new MockDrawingContext(), new EditorRect(0, 0, 400, 100));
+
+        renderer.UpdateHover(60f, RowY);
+        Assert.Same(active, renderer.HoveredItem);
+
+        var ctx = new MockDrawingContext();
+        renderer.Render(ctx, new EditorRect(0, 0, 400, 100));
+        Assert.DoesNotContain(ctx.FillRoundRectCalls, c => c.Paint.Color == renderer.HoverColor);
+        Assert.Contains(ctx.FillRoundRectCalls, c => c.Paint.Color == renderer.ActiveColor && c.Rect.X == 46f);
+    }
+
+    [Fact]
+    public void ToolbarRenderer_DisabledButton_IsNotHovered()
+    {
+        var (renderer, _, _, _, _) = MakeHoverToolbar();
+        renderer.Render(new MockDrawingContext(), new EditorRect(0, 0, 400, 100));
+
+        Assert.False(renderer.UpdateHover(100f, RowY));
+        Assert.Null(renderer.HoveredItem);
+    }
 }

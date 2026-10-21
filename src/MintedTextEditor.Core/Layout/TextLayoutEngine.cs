@@ -24,6 +24,22 @@ public class TextLayoutEngine
     public bool UnderlineHyperlinks { get; set; } = true;
 
     /// <summary>
+    /// Extra space in logical pixels added between consecutive lines of a paragraph whose
+    /// <see cref="ParagraphStyle.LineSpacing"/> has not been set (see
+    /// <see cref="ParagraphStyle.IsLineSpacingSet"/>). Defaults to 0. The editor sets it from
+    /// <c>EditorStyle.LineSpacing</c>.
+    /// </summary>
+    public float DefaultLineSpacing { get; set; }
+
+    /// <summary>
+    /// Space in logical pixels below a paragraph whose <see cref="ParagraphStyle.SpaceAfter"/>
+    /// has not been set (see <see cref="ParagraphStyle.IsSpaceAfterSet"/>). Defaults to 8, the
+    /// same as <see cref="ParagraphStyle.SpaceAfter"/>. The editor sets it from
+    /// <c>EditorStyle.ParagraphSpacing</c>.
+    /// </summary>
+    public float DefaultParagraphSpacing { get; set; } = 8f;
+
+    /// <summary>
     /// Lay out the entire document for the given viewport width.
     /// </summary>
     public DocumentLayout Layout(Document.Document document, float viewportWidth, IDrawingContext context)
@@ -183,7 +199,9 @@ public class TextLayoutEngine
         }
 
         float spaceBefore = style.SpaceBefore;
-        float spaceAfter = style.SpaceAfter;
+        // A value set on the paragraph wins; otherwise the theme default applies.
+        float spaceAfter = style.IsSpaceAfterSet ? style.SpaceAfter : DefaultParagraphSpacing;
+        float lineGap = style.IsLineSpacingSet ? 0f : DefaultLineSpacing;
 
         var layoutBlock = new LayoutBlock { BlockIndex = blockIndex, ParagraphStyle = style };
 
@@ -212,9 +230,11 @@ public class TextLayoutEngine
             if (line.Runs.Count == 0)
                 line.DefaultCaretX = isRtl ? availableWidth : textStartX;
 
-            // Apply line spacing
+            // Apply line spacing (multiplier), plus the theme's extra gap between lines
             float lineHeight = line.Height * style.LineSpacing;
             lineY += lineHeight;
+            if (i < lines.Count - 1)
+                lineY += lineGap;
 
             layoutBlock.Lines.Add(line);
         }
