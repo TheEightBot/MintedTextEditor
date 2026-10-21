@@ -551,4 +551,165 @@ public class ContextMenuTests
         Assert.Equal(renderer.DisabledTextColor, mock.DrawTextInRectCalls.First(c => c.Text == "Cut").Paint.Color);
         Assert.Equal(theme.ContextMenuTextColor, mock.DrawTextInRectCalls.First(c => c.Text == "Paste").Paint.Color);
     }
+
+    // ── ContextMenuRenderer – size and scrolling ─────────────────────────────
+
+    private static ContextMenuDefinition MakeItems(int count, string prefix = "Item ")
+    {
+        var def = new ContextMenuDefinition();
+        for (int i = 0; i < count; i++)
+            def.Items.Add(new ContextMenuItem { Label = prefix + i });
+        return def;
+    }
+
+    [Fact]
+    public void Renderer_Open_TallerThanViewport_ShrinksToViewportAndScrolls()
+    {
+        var renderer = new ContextMenuRenderer();
+        var def      = MakeItems(10); // 4 + 10 * 28 + 4 = 288 tall
+        renderer.Open(def, 50, 60, new EditorRect(0, 0, 400, 100));
+
+        Assert.Equal(0, renderer.Y);
+        Assert.Equal(100, renderer.Bounds.Height);
+        Assert.Equal(188, renderer.MaxScrollOffset);
+        Assert.Equal(0, renderer.ScrollOffset);
+    }
+
+    [Fact]
+    public void Renderer_Open_FitsViewport_DoesNotScroll()
+    {
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(MakeItems(3), 0, 0, new EditorRect(0, 0, 400, 400));
+
+        Assert.Equal(0, renderer.MaxScrollOffset);
+        Assert.False(renderer.ScrollBy(50));
+        Assert.Equal(0, renderer.ScrollOffset);
+    }
+
+    [Fact]
+    public void Renderer_ScrollBy_ClampsToRange()
+    {
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(MakeItems(10), 0, 0, new EditorRect(0, 0, 400, 100));
+
+        Assert.True(renderer.ScrollBy(1000));
+        Assert.Equal(renderer.MaxScrollOffset, renderer.ScrollOffset);
+        Assert.True(renderer.ScrollBy(-1000));
+        Assert.Equal(0, renderer.ScrollOffset);
+        Assert.False(renderer.ScrollBy(-1));
+    }
+
+    [Fact]
+    public void Renderer_HitTest_UsesScrollOffset_AndIgnoresItemsScrolledOut()
+    {
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(MakeItems(10), 0, 0, new EditorRect(0, 0, 400, 100));
+        renderer.Render(new MockDrawingContext());
+
+        renderer.ScrollBy(renderer.MaxScrollOffset); // last item at the bottom
+        float lastMidY = 100 - renderer.Padding - renderer.ItemHeight / 2f;
+        Assert.Equal("Item 9", renderer.HitTest(50, lastMidY)?.Label);
+        Assert.Equal(9, renderer.FocusedIndex);
+
+        // Item 0 is scrolled out: its old position now shows a later item, and above the popup
+        // nothing is hit.
+        Assert.NotEqual("Item 0", renderer.HitTest(50, renderer.Padding + 1)?.Label);
+        Assert.Null(renderer.HitTest(50, -5));
+        Assert.Equal(-1, renderer.FocusedIndex);
+    }
+
+    [Fact]
+    public void Renderer_HitTest_BelowViewport_DoesNotHitClippedItems()
+    {
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(MakeItems(10), 0, 0, new EditorRect(0, 0, 400, 100));
+        renderer.Render(new MockDrawingContext());
+
+        // Item 4 starts at y = 116, below the 100-tall popup, until the menu is scrolled.
+        Assert.Null(renderer.HitTest(50, 120));
+        Assert.True(renderer.IsClickOutside(50, 120));
+    }
+
+    [Fact]
+    public void Renderer_HandleKey_ScrollsFocusedItemIntoView()
+    {
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(MakeItems(10), 0, 0, new EditorRect(0, 0, 400, 100));
+
+        renderer.HandleKey(ConsoleKey.UpArrow); // wraps to the last item
+        Assert.Equal(9, renderer.FocusedIndex);
+        Assert.Equal(renderer.MaxScrollOffset, renderer.ScrollOffset);
+
+        renderer.HandleKey(ConsoleKey.DownArrow); // wraps to the first item
+        Assert.Equal(0, renderer.FocusedIndex);
+        Assert.Equal(0, renderer.ScrollOffset);
+
+        for (int i = 0; i < 4; i++)
+            renderer.HandleKey(ConsoleKey.DownArrow);
+        // Item 4 spans 116..144 in the content; its bottom plus padding must be visible.
+        Assert.Equal(4, renderer.FocusedIndex);
+        Assert.Equal(4 + 5 * renderer.ItemHeight + 4 - 100, renderer.ScrollOffset);
+    }
+
+    [Fact]
+    public void Renderer_Render_ClipsAndOffsetsItemsByScroll()
+    {
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(MakeItems(10), 0, 0, new EditorRect(0, 0, 400, 100));
+        renderer.ScrollBy(40);
+
+        var mock = new MockDrawingContext();
+        renderer.Render(mock);
+
+        Assert.Equal(
+            new[] { "Save", "ClipRoundRect(0,0,180,100,6)", "Translate(0,-40)", "Restore" },
+            mock.TransformCalls);
+    }
+
+    [Fact]
+    public void Renderer_Open_WithMeasureContext_WidensToLongestLabel()
+    {
+        var renderer = new ContextMenuRenderer();
+        var def      = MakeItems(2);
+        def.Items.Add(new ContextMenuItem { Label = new string('x', 40) }); // 320 wide at 8 per char
+
+        renderer.Open(def, 0, 0, new EditorRect(0, 0, 800, 600), new MockDrawingContext());
+
+        float expected = renderer.Padding * 2 + renderer.IconWidth + 4 + 320 + renderer.TrailingPadding;
+        Assert.Equal(expected, renderer.Bounds.Width);
+    }
+
+    [Fact]
+    public void Renderer_Open_WithMeasureContext_ShortLabels_KeepsMinWidth()
+    {
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(MakeItems(2), 0, 0, new EditorRect(0, 0, 800, 600), new MockDrawingContext());
+
+        Assert.Equal(renderer.MinWidth, renderer.Bounds.Width);
+    }
+
+    [Fact]
+    public void Renderer_Open_WiderThanViewport_ClampsWidthAndPosition()
+    {
+        var renderer = new ContextMenuRenderer();
+        var def      = MakeItems(1, new string('x', 100)); // 800+ wide
+
+        renderer.Open(def, 120, 0, new EditorRect(0, 0, 300, 600), new MockDrawingContext());
+
+        Assert.Equal(0, renderer.X);
+        Assert.Equal(300, renderer.Bounds.Width);
+    }
+
+    [Fact]
+    public void Renderer_Close_ResetsScroll()
+    {
+        var renderer = new ContextMenuRenderer();
+        renderer.Open(MakeItems(10), 0, 0, new EditorRect(0, 0, 400, 100));
+        renderer.ScrollBy(50);
+
+        renderer.Close();
+
+        Assert.Equal(0, renderer.ScrollOffset);
+        Assert.Equal(0, renderer.MaxScrollOffset);
+    }
 }

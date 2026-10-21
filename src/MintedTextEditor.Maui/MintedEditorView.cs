@@ -99,6 +99,14 @@ public class MintedEditorView : ContentView
     // ── Context menu ─────────────────────────────────────────────────────────────
     private readonly ContextMenuRenderer _contextMenu = new();
     private long _contextMenuPressId = -1; // a press that started inside the open menu
+    // Where that press went down and the menu's scroll offset then; a finger that moves past the
+    // long-press slop scrolls a menu taller than the view instead of choosing an item.
+    private float _contextMenuPressY;
+    private float _contextMenuPressScroll;
+    private bool _contextMenuDragging;
+    // The default menu's own Insert Table command: only it prompts for a size. An
+    // InsertTableCommand a host adds in ContextMenuItemsRequested runs with its own size.
+    private InsertTableCommand? _defaultInsertTableCommand;
     // Set when the canvas handled a right-click itself, so the secondary-tap recognizer skips
     // the same click (Windows can report it both ways).
     private bool _skipNextSecondaryTap;
@@ -1701,8 +1709,10 @@ public class MintedEditorView : ContentView
                 if (_contextMenu.IsClickOutside(rawX, rawY))
                 {
                     // A press outside only dismisses the menu; a right-click below the toolbar
-                    // opens a new one there.
+                    // opens a new one there. The rest of that contact (moves and its release) is
+                    // ignored, so it cannot drag a selection, scroll or open a link.
                     CloseContextMenu();
+                    _ignoredTouchIds.Add(e.Id);
                     if (IsSecondaryClick(e) && !(ShowToolbar && rawY < toolbarH))
                         OpenContextMenuAtClick(rawX, rawY);
                     _keyboardProxy.Focus();
@@ -1710,12 +1720,31 @@ public class MintedEditorView : ContentView
                 else
                 {
                     _contextMenuPressId = e.Id;
+                    _contextMenuPressY = rawY;
+                    _contextMenuPressScroll = _contextMenu.ScrollOffset;
+                    _contextMenuDragging = false;
                     _contextMenu.HitTest(rawX, rawY);
                     InvalidateCanvas();
                 }
                 break;
 
             case SKTouchAction.Moved:
+                // A finger dragged inside a menu that does not fit scrolls it.
+                if (e.InContact && e.Id == _contextMenuPressId
+                    && e.DeviceType != SKTouchDeviceType.Mouse && _contextMenu.MaxScrollOffset > 0f)
+                {
+                    float dy = rawY - _contextMenuPressY;
+                    if (!_contextMenuDragging && Math.Abs(dy) > _longPress.Slop)
+                        _contextMenuDragging = true;
+                    if (_contextMenuDragging)
+                    {
+                        _contextMenu.ScrollBy(_contextMenuPressScroll - dy - _contextMenu.ScrollOffset);
+                        _contextMenu.HitTest(float.NaN, float.NaN); // clears the highlight
+                        InvalidateCanvas();
+                        break;
+                    }
+                }
+
                 // Mouse hover, or a finger/button held down after pressing inside the menu.
                 if (!e.InContact || e.Id == _contextMenuPressId)
                 {
@@ -1732,7 +1761,13 @@ public class MintedEditorView : ContentView
                 if (e.Id == _contextMenuPressId)
                 {
                     _contextMenuPressId = -1;
-                    if (_contextMenu.HitTest(rawX, rawY) is { IsEnabled: true } item)
+                    if (_contextMenuDragging)
+                    {
+                        // The end of a scroll drag does not choose an item.
+                        _contextMenuDragging = false;
+                        InvalidateCanvas();
+                    }
+                    else if (_contextMenu.HitTest(rawX, rawY) is { IsEnabled: true } item)
                         _ = ExecuteContextMenuItemAsync(item);
                     else
                         InvalidateCanvas();
@@ -1741,11 +1776,27 @@ public class MintedEditorView : ContentView
 
             case SKTouchAction.Cancelled:
                 if (e.Id == _contextMenuPressId)
+                {
                     _contextMenuPressId = -1;
+                    _contextMenuDragging = false;
+                }
                 break;
 
             case SKTouchAction.WheelChanged:
-                CloseContextMenu();
+                // The wheel scrolls a menu that does not fit when over it; otherwise it closes the menu.
+                if (_contextMenu.MaxScrollOffset > 0f && !_contextMenu.IsClickOutside(rawX, rawY))
+                {
+                    float step = _contextMenu.ItemHeight;
+                    if (_contextMenu.ScrollBy(Math.Clamp(-e.WheelDelta, -step, step)))
+                    {
+                        _contextMenu.HitTest(rawX, rawY);
+                        InvalidateCanvas();
+                    }
+                }
+                else
+                {
+                    CloseContextMenu();
+                }
                 break;
         }
     }
@@ -1825,6 +1876,8 @@ public class MintedEditorView : ContentView
 
         var ctx = GetEditorContext();
         var definition = ContextMenuFactory.CreateDefault(ctx);
+        _defaultInsertTableCommand = definition.Items
+            .Select(i => i.Command).OfType<InsertTableCommand>().FirstOrDefault();
         ContextMenuItemsRequested?.Invoke(this, new ContextMenuItemsRequestedEventArgs(definition, ctx));
         if (!definition.VisibleItems.Any())
         {
@@ -1834,14 +1887,17 @@ public class MintedEditorView : ContentView
 
         float width  = Width  > 0 ? (float)Width  : 400f;
         float height = Height > 0 ? (float)Height : 400f;
-        _contextMenu.Open(definition, rawX, rawY, new EditorRect(0, 0, width, height));
+        // Sized to fit its labels and kept inside the view; a menu taller than the view scrolls.
+        _contextMenu.Open(definition, rawX, rawY, new EditorRect(0, 0, width, height), GetMeasureContext());
         _contextMenuPressId = -1;
+        _contextMenuDragging = false;
         InvalidateCanvas();
     }
 
     private void CloseContextMenu()
     {
         _contextMenuPressId = -1;
+        _contextMenuDragging = false;
         if (!_contextMenu.IsOpen)
             return;
         _contextMenu.Close();
@@ -1889,7 +1945,8 @@ public class MintedEditorView : ContentView
     /// Closes the menu and runs <paramref name="item"/>. The built-in items go through the same
     /// paths as the toolbar: clipboard items use the input controller (so Cut is undoable), insert
     /// items prompt for their URL, source or size, and Open Hyperlink uses <see cref="HyperlinkHandler"/>.
-    /// Any other item runs its <see cref="ContextMenuItem.Command"/>.
+    /// Any other item, including an <see cref="InsertTableCommand"/> added by the host, runs its
+    /// <see cref="ContextMenuItem.Command"/> as given.
     /// </summary>
     private async Task ExecuteContextMenuItemAsync(ContextMenuItem item)
     {
@@ -1919,7 +1976,7 @@ public class MintedEditorView : ContentView
                 case InsertImageCommand { Source: "" }:
                     await HandleInsertImageAsync();
                     return;
-                case InsertTableCommand when item.Icon == "table":
+                case InsertTableCommand table when ReferenceEquals(table, _defaultInsertTableCommand):
                     await HandleInsertTableAsync();
                     return;
                 case OpenHyperlinkCommand open:
@@ -1963,9 +2020,13 @@ public class MintedEditorView : ContentView
             initialValue: link.Url,
             keyboard: Keyboard.Url);
 
-        if (string.IsNullOrWhiteSpace(url)) return;
+        if (string.IsNullOrWhiteSpace(url) || url == link.Url) return;
+        // The document may have changed while the prompt was open.
+        if (link.Parent is not Paragraph para || !_document.Blocks.Contains(para) || !para.Inlines.Contains(link))
+            return;
 
-        HyperlinkEngine.EditHyperlink(_document, link, url, link.Title);
+        var caret = _inputController.Selection.Active;
+        _undoManager.Push(new EditHyperlinkAction(_document, link, url, link.Title, caret));
         InvalidateCanvas();
         _keyboardProxy.Focus();
     }
@@ -2574,8 +2635,17 @@ public class MintedEditorView : ContentView
     /// </summary>
     private sealed class EditorImeSink(MintedEditorView editor) : IImeEditSink
     {
-        public void InsertText(string text) =>
+        public void InsertText(string text)
+        {
+            // Android keyboards often send Enter as a committed "\n" rather than a key event
+            // or editor action; while the menu is open it chooses the highlighted item.
+            if ((text is "\n" or "\r" or "\r\n") && editor._contextMenu.IsOpen && !editor.IsReadOnly)
+            {
+                editor.ActivateFocusedContextMenuItem();
+                return;
+            }
             Apply(() => editor._inputController.HandleTextInput(text, editor._document));
+        }
 
         public void DeleteBefore(int count) =>
             Apply(() => editor._inputController.DeleteImeTextBefore(count, editor._document));

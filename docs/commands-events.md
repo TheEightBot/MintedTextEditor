@@ -112,11 +112,12 @@ A tap (or a drag) that starts on the selection still collapses it to that point,
 
 - Tap or click an item to run it. Disabled items are dimmed and do nothing.
 - `Up`/`Down` highlight the previous/next enabled item, `Enter` runs the highlighted item, `Escape` closes the menu. Any other key closes the menu and is handled as usual.
-- A press outside the menu, a mouse-wheel scroll, a document change, `ScrollTo` and focus loss close it. The press that closes it does not move the caret.
+- The menu is as wide as its longest label (at least 180) and always fits inside the editor. When it is taller than the editor, its items scroll: drag them with a finger, use the mouse wheel over the menu, or move the highlight with `Up`/`Down`.
+- A press outside the menu, a mouse-wheel scroll outside it, a document change, `ScrollTo` and focus loss close it. The press that closes it does nothing else until it is released: it does not move the caret, select, scroll or open a link.
 
-**Default items** (from `ContextMenuFactory.CreateDefault`): Cut and Copy (enabled with a selection), Paste, Select All; Insert Hyperlink, or Edit / Remove / Open Hyperlink when the caret is on a link; Insert Image and Insert Table; and, in a table cell, Insert Row Above/Below, Delete Row, Insert Column Left/Right, Delete Column and Delete Table. Cut, Copy and Paste use the same clipboard path as the keyboard shortcuts (Cut can be undone). Insert and Edit items prompt for a URL, image source or table size like the toolbar does, and Open Hyperlink opens the URL through `HyperlinkHandler`.
+**Default items** (from `ContextMenuFactory.CreateDefault`): Cut and Copy (enabled with a selection), Paste, Select All; Insert Hyperlink, or Edit / Remove / Open Hyperlink when the caret is on a link; Insert Image and Insert Table; and, in a table cell, Insert Row Above/Below, Delete Row, Insert Column Left/Right, Delete Column and Delete Table. Cut, Copy and Paste use the same clipboard path as the keyboard shortcuts (Cut can be undone). Insert and Edit items prompt for a URL, image source or table size like the toolbar does (editing a link's URL can be undone), and Open Hyperlink opens the URL through `HyperlinkHandler`.
 
-**Customizing it**: handle `ContextMenuItemsRequested` (below). Every visible item you add runs its `Command` when chosen.
+**Customizing it**: handle `ContextMenuItemsRequested` (below). Every visible item you add runs its `Command` when chosen, as given: for example `new InsertTableCommand { Rows = 3, Columns = 4 }` inserts a 3×4 table without prompting (only the built-in Insert Table item asks for a size).
 
 ```csharp
 using MintedTextEditor.Core.Commands;
