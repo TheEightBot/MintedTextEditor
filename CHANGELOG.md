@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `SkiaSharpEngine`, a placeholder class whose only member, `IsAvailable`, always returned `true`.
 
 ### Fixed
+- **Hit-testing long lines that need font fallback** (performance): `SkiaDrawingContext` keeps the font-fallback segmentation (and segment offsets) of its most recently measured runs in a small bounded cache, instead of re-segmenting the whole run for every caret query, and finds a caret's segment by binary search, so lines that switch font hundreds of times stay fast too. Tapping in a long unwrapped line containing an emoji no longer takes quadratic time (40 taps on a 300×`a` + 😀 + 300×`b` line: ~1050 ms → ~11 ms).
 - `FindReplaceEngine` no longer returns bogus matches at the start of a table block when a table's text contains the query; only top-level paragraphs are searched.
 - **`ToolbarMaxRows` lost on toolbar rebuild**: assigning a new `ToolbarDefinition`, changing `ToolbarItems` or clearing them no longer drops the row limit set with `MintedEditorView.ToolbarMaxRows`, which previously showed every row again. Once set, `ToolbarMaxRows` now takes precedence over `ToolbarDefinition.MaxRows` (which still applies while `ToolbarMaxRows` is unset; setting or clearing it redraws the toolbar even when the number is unchanged) and is no longer written into the app's definition object. New `ToolbarRenderer.MaxRowsOverride` and `EffectiveMaxRows` expose the same behaviour in Core.
 

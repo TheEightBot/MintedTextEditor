@@ -333,6 +333,122 @@ public class SkiaDrawingContextTests : IDisposable
         Assert.Equal(_ctx.MeasureText(text, _paint).Width, previous, 0.01f);
     }
 
+    // A fresh context has no cached segmentation, so it gives the uncached result.
+    private float UncachedCaretOffset(string text, int index, EditorPaint paint)
+    {
+        using var ctx = new SkiaDrawingContext(_surface.Canvas);
+        return ctx.MeasureCaretOffset(text, index, paint);
+    }
+
+    [Fact]
+    public void MeasureCaretOffset_SegmentsEachTextOnce_AndResultsMatchUncached()
+    {
+        // Hit-testing asks for the caret offset of every cluster of a run in turn. A long
+        // run that needs font fallback must be segmented once, not once per query.
+        string text = new string('a', 300) + "😀" + new string('b', 300);
+
+        var offsets = new float[text.Length + 1];
+        for (int round = 0; round < 3; round++)
+            for (int i = 0; i <= text.Length; i++)
+                offsets[i] = _ctx.MeasureCaretOffset(text, i, _paint);
+        _ctx.MeasureText(text, _paint);
+        _ctx.DrawText(text, 0, 50, _paint);
+
+        Assert.Equal(1, _ctx.SegmentationCount);
+
+        for (int i = 0; i <= text.Length; i += 7)
+            Assert.Equal(UncachedCaretOffset(text, i, _paint), offsets[i], 0.001f);
+        foreach (int i in new[] { 299, 300, 301, 302, 303, text.Length })
+            Assert.Equal(UncachedCaretOffset(text, i, _paint), offsets[i], 0.001f);
+
+        // Plain text that needs no fallback is checked once too.
+        string plain = new('c', 500);
+        for (int i = 0; i <= plain.Length; i++)
+            _ctx.MeasureCaretOffset(plain, i, _paint);
+        Assert.Equal(2, _ctx.SegmentationCount);
+    }
+
+    [Fact]
+    public void MeasureCaretOffset_ManyFontSwitches_FindsTheRightSegment()
+    {
+        // Alternating text and emoji gives hundreds of segments; each caret query must land
+        // in the segment that holds its index. At a segment boundary the caret sits at the
+        // width of the text before it, which the prefix measures on its own.
+        const int repeats = 300;
+        var sb = new System.Text.StringBuilder();
+        for (int r = 0; r < repeats; r++) sb.Append("a😀");
+        string text = sb.ToString(); // 'a' at 3r, the emoji's surrogates at 3r+1 and 3r+2
+
+        var offsets = new float[text.Length + 1];
+        for (int i = 0; i <= text.Length; i++)
+            offsets[i] = _ctx.MeasureCaretOffset(text, i, _paint);
+        Assert.Equal(1, _ctx.SegmentationCount);
+
+        using var reference = new SkiaDrawingContext(_surface.Canvas);
+        float letter = reference.MeasureText("a", _paint).Width;
+        float emoji = reference.MeasureText("😀", _paint).Width;
+        Assert.True(letter > 0f && emoji > 0f);
+
+        for (int r = 0; r < repeats; r++)
+        {
+            int k = 3 * r;
+            Assert.Equal(r * (letter + emoji), offsets[k], 0.01f);
+            Assert.Equal(r * (letter + emoji) + letter, offsets[k + 1], 0.01f);
+            // Inside the surrogate pair the caret stays within the emoji.
+            Assert.InRange(offsets[k + 2], offsets[k + 1] - 0.01f, offsets[k + 3] + 0.01f);
+        }
+
+        Assert.Equal(repeats * (letter + emoji), offsets[text.Length], 0.01f);
+        Assert.Equal(reference.MeasureText(text, _paint).Width, offsets[text.Length], 0.01f);
+
+        foreach (int k in new[] { 3, 4, 151, 450, 451, 897, 898 })
+            Assert.Equal(reference.MeasureText(text[..k], _paint).Width, offsets[k], 0.01f);
+    }
+
+    [Fact]
+    public void MeasureCaretOffset_FontChange_IsSegmentedSeparately()
+    {
+        // The cache must not hand one font's segments (and widths) to another.
+        string text = "wide " + "😀" + " text";
+        var paints = new[]
+        {
+            _paint,
+            new EditorPaint { Color = _paint.Color, Font = new EditorFont { Size = 20f } },
+            new EditorPaint { Color = _paint.Color, Font = new EditorFont { Size = 32f, IsBold = true } },
+            new EditorPaint { Color = _paint.Color, Font = new EditorFont { Size = 32f, IsItalic = true } },
+            new EditorPaint { Color = _paint.Color, Font = new EditorFont { Family = "DejaVu Serif", Size = 32f } },
+        };
+
+        for (int round = 0; round < 2; round++)
+        {
+            foreach (var paint in paints)
+            {
+                for (int i = 0; i <= text.Length; i++)
+                    Assert.Equal(UncachedCaretOffset(text, i, paint), _ctx.MeasureCaretOffset(text, i, paint), 0.001f);
+                Assert.Equal(UncachedCaretOffset(text, text.Length, paint), _ctx.MeasureText(text, paint).Width, 0.001f);
+            }
+        }
+
+        Assert.Equal(paints.Length, _ctx.SegmentationCount);
+    }
+
+    [Fact]
+    public void Segmentation_CacheIsBounded()
+    {
+        // Measuring many distinct texts evicts the oldest; the most recent is kept.
+        string first = "first 😀";
+        _ctx.MeasureText(first, _paint);
+        for (int i = 0; i < 100; i++)
+            _ctx.MeasureText($"text {i} 😀", _paint);
+        int count = _ctx.SegmentationCount;
+
+        _ctx.MeasureText("text 99 😀", _paint);
+        Assert.Equal(count, _ctx.SegmentationCount);
+
+        _ctx.MeasureText(first, _paint);
+        Assert.Equal(count + 1, _ctx.SegmentationCount);
+    }
+
     // ── VS16 emoji presentation ─────────────────────────────────
 
     [Fact]
