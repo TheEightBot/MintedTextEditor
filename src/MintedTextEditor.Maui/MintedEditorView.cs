@@ -355,14 +355,31 @@ public class MintedEditorView : ContentView
             propertyChanged: static (b, _, nv) =>
             {
                 var v = (MintedEditorView)b;
-                v._toolbarRenderer.Definition.MaxRows = (int)nv!;
+                v.ApplyToolbarMaxRows();
                 v.InvalidateCanvas();
+            },
+            // Setting the current value again, or clearing a value equal to the default, raises
+            // no property change, yet it switches between the explicit limit and the definition's
+            // MaxRows. MAUI calls coerceValue on every SetValue and ClearValue (before IsSet is
+            // updated), so request a repaint here; painting re-applies the override.
+            coerceValue: static (b, value) =>
+            {
+                ((MintedEditorView)b).InvalidateCanvas();
+                return value;
             });
 
     /// <summary>
     /// Maximum number of toolbar rows to display before remaining items are collapsed
     /// into an overflow (…) button. 0 (the default) means unlimited.
     /// </summary>
+    /// <remarks>
+    /// Once set (to any value, including 0), this property takes precedence over
+    /// <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> and stays in effect when
+    /// <see cref="ToolbarDefinition"/>, <see cref="ToolbarItems"/> or <see cref="ToolbarIconPack"/>
+    /// change. While it has never been set (or after <c>ClearValue(ToolbarMaxRowsProperty)</c>),
+    /// the current definition's <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> is used.
+    /// The definition object itself is never modified.
+    /// </remarks>
     public int ToolbarMaxRows
     {
         get => (int)GetValue(ToolbarMaxRowsProperty);
@@ -408,7 +425,8 @@ public class MintedEditorView : ContentView
     /// <summary>
     /// Optional custom <see cref="Core.Toolbar.ToolbarDefinition"/>.
     /// When <see langword="null"/> the editor uses <see cref="Core.Toolbar.ToolbarDefinition.CreateDefault()"/>.
-    /// Ignored while <see cref="ToolbarItems"/> is non-empty.
+    /// Ignored while <see cref="ToolbarItems"/> is non-empty. The definition's
+    /// <see cref="Core.Toolbar.ToolbarDefinition.MaxRows"/> applies only while <see cref="ToolbarMaxRows"/> is unset.
     /// </summary>
     public ToolbarDefinition? ToolbarDefinition
     {
@@ -444,13 +462,7 @@ public class MintedEditorView : ContentView
             return;
         }
 
-        var definition = def ?? ToolbarDefinition.CreateDefault();
-        _toolbarRenderer = new ToolbarRenderer(definition);
-        _toolbarRenderer.IconPack = ToolbarIconPack;
-        _toolbarRenderer.IconResolver = key =>
-            _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
-        WireToolbarCallbacks(definition);
-        InvalidateCanvas();
+        ApplyToolbarDefinition(def ?? ToolbarDefinition.CreateDefault());
     }
 
     private void OnToolbarItemsChanged(IList<Core.Toolbar.ToolbarItem>? items)
@@ -466,13 +478,25 @@ public class MintedEditorView : ContentView
 
     private void ApplyToolbarDefinition(ToolbarDefinition definition)
     {
+        CreateToolbarRenderer(definition);
+        InvalidateCanvas();
+    }
+
+    // Every toolbar rebuild goes through here so view-level settings (icon pack,
+    // icon resolver, row limit) carry over to the new renderer.
+    private void CreateToolbarRenderer(ToolbarDefinition definition)
+    {
         _toolbarRenderer = new ToolbarRenderer(definition);
         _toolbarRenderer.IconPack = ToolbarIconPack;
         _toolbarRenderer.IconResolver = key =>
             _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
+        ApplyToolbarMaxRows();
         WireToolbarCallbacks(definition);
-        InvalidateCanvas();
     }
+
+    // ToolbarMaxRows wins once the app has set it; otherwise the definition's MaxRows applies.
+    private void ApplyToolbarMaxRows() =>
+        _toolbarRenderer.MaxRowsOverride = IsSet(ToolbarMaxRowsProperty) ? ToolbarMaxRows : null;
 
     private void WireToolbarCallbacks(ToolbarDefinition def)
     {
@@ -822,11 +846,7 @@ public class MintedEditorView : ContentView
         _caret.IsFocused = false;
         _inputController.ClipboardProvider = new MauiClipboardProvider();
 
-        _toolbarRenderer = new ToolbarRenderer(ToolbarDefinition.CreateDefault());
-        _toolbarRenderer.IconPack = ToolbarIconPack;
-        _toolbarRenderer.IconResolver = key =>
-            _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
-        WireToolbarCallbacks(_toolbarRenderer.Definition);
+        CreateToolbarRenderer(ToolbarDefinition.CreateDefault());
 
         var grid = new Grid();
         grid.Add(_canvas);
@@ -1305,6 +1325,7 @@ public class MintedEditorView : ContentView
             _toolbarRenderer.ActiveColor     = theme.ToolbarActiveColor;
             _toolbarRenderer.SeparatorColor  = theme.ToolbarSeparatorColor;
             _toolbarRenderer.DisabledColor   = theme.ToolbarSeparatorColor;
+            ApplyToolbarMaxRows(); // picks up set/clear transitions that raise no property change (see coerceValue)
             _toolbarRenderer.UpdateToggleStates(GetEditorContext());
             _toolbarRenderer.Render(dc, new EditorRect(0, 0, logicalW, logicalH));
             toolbarH = _toolbarRenderer.ToolbarHeight;

@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 - `FindReplaceEngine` no longer returns bogus matches at the start of a table block when a table's text contains the query; only top-level paragraphs are searched.
+- **`ToolbarMaxRows` lost on toolbar rebuild**: assigning a new `ToolbarDefinition`, changing `ToolbarItems` or clearing them no longer drops the row limit set with `MintedEditorView.ToolbarMaxRows`, which previously showed every row again. Once set, `ToolbarMaxRows` now takes precedence over `ToolbarDefinition.MaxRows` (which still applies while `ToolbarMaxRows` is unset; setting or clearing it redraws the toolbar even when the number is unchanged) and is no longer written into the app's definition object. New `ToolbarRenderer.MaxRowsOverride` and `EffectiveMaxRows` expose the same behaviour in Core.
 
 ---
 
