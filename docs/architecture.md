@@ -80,7 +80,7 @@ MintedTextEditor is structured in three layers, each with a clear responsibility
 
 The core layer is **fully platform-independent** — it targets `net10.0` only and has no dependency on MAUI, SkiaSharp, or any platform SDK. This makes it testable with a mock `IDrawingContext` in a plain xUnit project (`tests/MintedTextEditor.Core.Tests`). The toolbar icon SVGs (Lucide, Heroicons, Material Symbols) are embedded resources in this assembly.
 
-**Document Model**: `TextStyle` is an immutable class whose `With…` methods return new instances; `ParagraphStyle` is a mutable class. Undo works by recording actions that know how to reverse themselves, not by snapshotting styles.
+**Document Model**: `TextStyle` is an immutable class whose `With…` methods return new instances; `ParagraphStyle` is a mutable class. Undo works by recording actions that know how to reverse themselves; actions that restyle or delete text (`ApplyStyleAction`, `DeleteRangeAction`, …) snapshot the runs of the paragraphs they touch and restore them on undo.
 
 **TextLayoutEngine** converts a `Document` into a `DocumentLayout` of `LayoutBlock`s (or `TableLayoutBlock`s), each with `LayoutLine`s made of positioned `LayoutRun`s. Wrapping never splits a grapheme cluster (emoji ZWJ sequences, flags, combining marks), and very long unbroken text wraps in linear time. `LayoutCache` keeps the layout per block and re-lays out only the blocks a change touches. `DocumentHitTester` maps a point to a `DocumentPosition`.
 

@@ -178,7 +178,7 @@ public class EditorInputController
             case EditorKey.B when ctrl:
                 if (FormattingEngine != null)
                 {
-                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleBold(document, r));
+                    ApplyFormattingWithSelectionRestore(document, "Bold", r => FormattingEngine.ToggleBold(document, r));
                     return true;
                 }
                 return false;
@@ -186,7 +186,7 @@ public class EditorInputController
             case EditorKey.I when ctrl:
                 if (FormattingEngine != null)
                 {
-                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleItalic(document, r));
+                    ApplyFormattingWithSelectionRestore(document, "Italic", r => FormattingEngine.ToggleItalic(document, r));
                     return true;
                 }
                 return false;
@@ -194,7 +194,7 @@ public class EditorInputController
             case EditorKey.U when ctrl:
                 if (FormattingEngine != null)
                 {
-                    ApplyFormattingWithSelectionRestore(document, r => FormattingEngine.ToggleUnderline(document, r));
+                    ApplyFormattingWithSelectionRestore(document, "Underline", r => FormattingEngine.ToggleUnderline(document, r));
                     return true;
                 }
                 return false;
@@ -1076,11 +1076,20 @@ public class EditorInputController
     /// run splits and merges.  Uses <see cref="DocumentEditor.ApplyCharacterFormatting"/>
     /// so the selection is rebuilt from absolute character offsets after
     /// <see cref="DocumentEditor.NormalizeInlines"/> is called on all affected paragraphs.
+    /// A non-empty selection is recorded as one undo step; an empty one only changes the
+    /// pending style and is not recorded.
     /// </summary>
-    private void ApplyFormattingWithSelectionRestore(Document.Document document, Action<TextRange> applyOp)
+    private void ApplyFormattingWithSelectionRestore(Document.Document document, string description, Action<TextRange> applyOp)
     {
         var (newAnchor, newActive) = DocumentEditor.ApplyCharacterFormatting(
-            document, _selection.Anchor, _selection.Active, applyOp);
+            document, _selection.Anchor, _selection.Active,
+            range =>
+            {
+                if (range.IsEmpty || UndoManager is null)
+                    applyOp(range);
+                else
+                    UndoManager.Push(new ApplyStyleAction(document, range, applyOp, description));
+            });
         _selection.Set(newAnchor, newActive);
         _caret.MoveTo(newActive);
     }

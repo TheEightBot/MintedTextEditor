@@ -68,9 +68,9 @@ public static class HyperlinkEngine
     }
 
     /// <summary>
-    /// Removes the first <see cref="HyperlinkInline"/> that starts at
-    /// <paramref name="position"/>, preserving its plain text as a
-    /// <see cref="TextRun"/> in its place.
+    /// Removes the <see cref="HyperlinkInline"/> at <paramref name="position"/>, leaving
+    /// its text in place as <see cref="TextRun"/>s that keep their character formatting.
+    /// Not recorded for undo; use <see cref="Editing.RemoveHyperlinkAction"/> for that.
     /// </summary>
     public static void RemoveHyperlink(Document.Document doc, DocumentPosition position)
     {
@@ -81,9 +81,23 @@ public static class HyperlinkEngine
         int idx  = para.Inlines.IndexOf(hyperlink);
         if (idx < 0) return;
 
-        // Replace hyperlink with a plain TextRun containing the same text
-        para.Inlines.RemoveAt(idx);
-        para.Inlines.Insert(idx, new TextRun(hyperlink.GetText()) { Parent = para });
+        // Replace the hyperlink with copies of its text runs, keeping each run's style
+        para.RemoveInline(idx);
+        int insertAt = idx;
+        foreach (var child in hyperlink.Children)
+        {
+            if (child is TextRun run)
+            {
+                if (run.Length > 0)
+                    para.InsertInline(insertAt++, new TextRun(run.Text, run.Style));
+            }
+            else
+            {
+                para.InsertInline(insertAt++, child);
+            }
+        }
+        if (para.Inlines.Count == 0)
+            para.AppendRun(string.Empty);
 
         doc.NotifyChanged(new DocumentChangedEventArgs(
             DocumentChangeType.TextDeleted,

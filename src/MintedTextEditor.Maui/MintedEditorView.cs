@@ -500,7 +500,11 @@ public class MintedEditorView : ContentView
                         dd.OnSelectionChanged = idx =>
                         {
                             if ((uint)idx < (uint)dd.Items.Count)
-                                _fontFormattingEngine.ApplyFontFamily(_document, _inputController.Selection.Range, dd.Items[idx] == "Default" ? "" : dd.Items[idx]);
+                            {
+                                var family = dd.Items[idx] == "Default" ? "" : dd.Items[idx];
+                                ApplyToolbarCharacterFormatting("Font",
+                                    r => _fontFormattingEngine.ApplyFontFamily(_document, r, family));
+                            }
                             InvalidateCanvas();
                         };
                         break;
@@ -512,7 +516,10 @@ public class MintedEditorView : ContentView
                         dd.OnSelectionChanged = idx =>
                         {
                             if ((uint)idx < (uint)dd.Items.Count && float.TryParse(dd.Items[idx], out float sz))
-                                _fontFormattingEngine.ApplyFontSize(_document, _inputController.Selection.Range, sz);
+                            {
+                                ApplyToolbarCharacterFormatting("Font Size",
+                                    r => _fontFormattingEngine.ApplyFontSize(_document, r, sz));
+                            }
                             InvalidateCanvas();
                         };
                         break;
@@ -643,7 +650,8 @@ public class MintedEditorView : ContentView
                     case "text-color":
                         cp.OnColorSelected = color =>
                         {
-                            _fontFormattingEngine.ApplyTextColor(_document, _inputController.Selection.Range, color);
+                            ApplyToolbarCharacterFormatting("Text Color",
+                                r => _fontFormattingEngine.ApplyTextColor(_document, r, color));
                             InvalidateCanvas();
                         };
                         break;
@@ -651,13 +659,26 @@ public class MintedEditorView : ContentView
                     case "highlight-color":
                         cp.OnColorSelected = color =>
                         {
-                            _fontFormattingEngine.ApplyHighlightColor(_document, _inputController.Selection.Range, color);
+                            ApplyToolbarCharacterFormatting("Highlight Color",
+                                r => _fontFormattingEngine.ApplyHighlightColor(_document, r, color));
                             InvalidateCanvas();
                         };
                         break;
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Applies a toolbar dropdown or colour-picker format to the selection as one undo step
+    /// (or to the pending style when the selection is empty), keeping the selection on the same text.
+    /// </summary>
+    private void ApplyToolbarCharacterFormatting(string description, Action<TextRange> apply)
+    {
+        GetEditorContext().ApplyCharacterFormatting(description, apply);
+        _caret.MoveTo(_inputController.Selection.Active);
+        RaiseSelectionChanged();
+        NotifyImeSelectionChanged();
     }
 
     private void ExecuteToolbarCommand(IEditorCommand command)

@@ -40,7 +40,10 @@ public sealed class InsertHyperlinkCommand : IEditorCommand
 
 // ── Remove Hyperlink ──────────────────────────────────────────────────────────
 
-/// <summary>Removes the hyperlink at the caret position.</summary>
+/// <summary>
+/// Removes the hyperlink at the caret position, keeping its text and formatting.
+/// Recorded as one undo step.
+/// </summary>
 public sealed class RemoveHyperlinkCommand : IEditorCommand
 {
     /// <inheritdoc/>
@@ -49,8 +52,12 @@ public sealed class RemoveHyperlinkCommand : IEditorCommand
     public string Description => "Removes the hyperlink at the current caret position.";
 
     /// <inheritdoc/>
-    public void Execute(EditorContext ctx) =>
-        HyperlinkEngine.RemoveHyperlink(ctx.Document, ctx.Selection.Active);
+    public void Execute(EditorContext ctx)
+    {
+        if (HyperlinkEngine.GetHyperlinkAtPosition(ctx.Document, ctx.Selection.Active) is null) return;
+        var pos = ctx.UndoManager.Push(new RemoveHyperlinkAction(ctx.Document, ctx.Selection.Active));
+        ctx.Selection.CollapseTo(pos);
+    }
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) =>

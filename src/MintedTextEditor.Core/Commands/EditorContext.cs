@@ -1,3 +1,4 @@
+using MintedTextEditor.Core.Document;
 using MintedTextEditor.Core.Editing;
 using MintedTextEditor.Core.Formatting;
 
@@ -42,5 +43,32 @@ public sealed class EditorContext
         FormattingEngine = formattingEngine;
         FontFormattingEngine = fontFormattingEngine;
         Clipboard = clipboard;
+    }
+
+    /// <summary>
+    /// Applies a character-formatting operation to the current selection as one undo step,
+    /// keeping the selection on the same text afterwards.
+    /// </summary>
+    /// <remarks>
+    /// When the selection is empty, <paramref name="apply"/> runs directly and nothing is
+    /// recorded: the formatting engines only update their pending style in that case.
+    /// Otherwise an <see cref="ApplyStyleAction"/> is pushed to <see cref="UndoManager"/>.
+    /// </remarks>
+    /// <param name="description">Description of the undo step, e.g. "Bold".</param>
+    /// <param name="apply">
+    /// Formats the range it is given, e.g. <c>r =&gt; ctx.FormattingEngine.ToggleBold(ctx.Document, r)</c>.
+    /// </param>
+    public void ApplyCharacterFormatting(string description, Action<TextRange> apply)
+    {
+        var (anchor, active) = DocumentEditor.ApplyCharacterFormatting(
+            Document, Selection.Anchor, Selection.Active,
+            range =>
+            {
+                if (range.IsEmpty)
+                    apply(range);
+                else
+                    UndoManager.Push(new ApplyStyleAction(Document, range, apply, description));
+            });
+        Selection.Set(anchor, active);
     }
 }
