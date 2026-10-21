@@ -6,7 +6,7 @@ Architecture mirrors [KumikoUI](https://github.com/TheEightBot/KumikoUI): platfo
 
 > **Workflow:** Each phase is implemented, reviewed, and committed to git before proceeding to the next.
 
-> **Status (2026-10-21):** this plan drove the initial build-out and is kept for history. Shipped work is recorded in [CHANGELOG.md](CHANGELOG.md); new work is tracked in GitHub issues and pull requests. Items still unchecked below were not done as of 0.3.x: rich sub-document copy and rich (HTML) paste, Ctrl/Cmd+Shift+V plain-text paste, pointer cursor changes, the performance/large-document checks (frame-time profiling, zero-allocation paints, 50,000-paragraph documents, lazy off-screen layout), mouse-wheel/trackpad scrolling, the remaining toolbar icon polish (proportional vector icons, undo/redo arcs) the remaining toolbar-overflow and selection-normalisation tests.
+> **Status (2026-10-21):** this plan drove the initial build-out and is kept for history. Shipped work is recorded in [CHANGELOG.md](CHANGELOG.md); new work is tracked in GitHub issues and pull requests. Items still unchecked below were not done as of 0.3.x: rich sub-document copy and rich (HTML) paste, Ctrl/Cmd+Shift+V plain-text paste, pointer cursor changes, the performance/large-document checks (frame-time profiling, zero-allocation paints, 50,000-paragraph documents, lazy off-screen layout), mouse-wheel/trackpad scrolling, the remaining toolbar icon polish (proportional vector icons, undo/redo arcs), and the remaining toolbar-overflow and selection-normalisation tests.
 
 ---
 
