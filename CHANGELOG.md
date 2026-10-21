@@ -11,11 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 - `EditorStrings.CurrentChanged` (raised when `EditorStrings.Current` is replaced), `ToolbarItem.LocalizedLabel` for labels that follow `EditorStrings`, a `ContextMenuFactory.CreateDefault(ctx, strings)` overload, and new strings for the remaining built-in text: `Subscript`, `Superscript`, `HeadingLevel`, `EditMenu`, `ObjectMenu`, `TableMenu`, `DefaultFontFamily`, `RemoveImage`, `InsertTableEllipsis`, `HyperlinkDialogMessage`, `HyperlinkDialogInsert`, and the `ImageDialog*` and `TableDialog*` prompt strings.
 
-### Fixed
-- **Localization**: `EditorStrings` is now used by the editor. Built-in toolbar labels, the `MintedEditorView` toolbar menus (font "Default", heading levels, Edit/Object/Table menu options), the default context menu and the insert hyperlink/image/table prompts read `EditorStrings.Current`, and replacing it at runtime updates an editor already on screen. Toolbar dropdown lists now widen to fit their longest option.
-
 ### Changed
 - Default English labels of built-in toolbar and context menu items now match the `EditorStrings` defaults (sentence case, e.g. "Font family", "Select all", "Numbered list", "Edit hyperlink…"), and the heading dropdown lists "Normal text" and "Heading 1"–"Heading 6" instead of "Normal" and "H1"–"H6". Code that finds built-in items by `Label` should match on `Icon` instead.
+- The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.
+
+### Fixed
+- **Localization**: `EditorStrings` is now used by the editor. Built-in toolbar labels, the `MintedEditorView` toolbar menus (font "Default", heading levels, Edit/Object/Table menu options), the default context menu and the insert hyperlink/image/table prompts read `EditorStrings.Current`, and replacing it at runtime updates an editor already on screen. Toolbar dropdown lists now widen to fit their longest option.
 
 ---
 
