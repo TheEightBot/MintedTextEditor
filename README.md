@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" alt="MintedTextEditor logo" width="120" />
+  <img src="https://raw.githubusercontent.com/TheEightBot/MintedTextEditor/main/images/logo.png" alt="MintedTextEditor logo" width="120" />
 </p>
 
 # MintedTextEditor
@@ -7,7 +7,7 @@
 [![CI](https://github.com/TheEightBot/MintedTextEditor/actions/workflows/ci.yml/badge.svg)](https://github.com/TheEightBot/MintedTextEditor/actions/workflows/ci.yml)
 [![NuGet (Core)](https://img.shields.io/nuget/v/MintedTextEditor.Core.svg?label=NuGet%20Core)](https://www.nuget.org/packages/MintedTextEditor.Core)
 [![NuGet (MAUI)](https://img.shields.io/nuget/v/MintedTextEditor.Maui.svg?label=NuGet%20MAUI)](https://www.nuget.org/packages/MintedTextEditor.Maui)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/TheEightBot/MintedTextEditor/blob/main/LICENSE)
 
 Rich text editing for .NET MAUI, rendered entirely on a SkiaSharp canvas.
 
@@ -36,7 +36,7 @@ MintedTextEditor is organized into three packages:
 - Character formatting: bold, italic, underline, strikethrough, subscript, superscript, font family/size, text color, highlight.
 - Paragraph formatting: alignment, indentation, line spacing, headings, lists, block quote.
 - Inline content: hyperlinks, images, tables.
-- Editing primitives: caret navigation, selection, clipboard, undo/redo.
+- Editing primitives: caret navigation, selection, clipboard, undo/redo, find and replace.
 - Touch caret drag with a native-style magnifier (loupe), configurable or switchable off.
 - Text shaped with HarfBuzz (kerning, ligatures, complex scripts); emoji, ZWJ sequences and flags draw as one glyph and are never split by the caret, Backspace, wrapping or hit-testing.
 - Android soft-keyboard and IME support (composition, suggestions, dead keys on hardware keyboards).
@@ -126,7 +126,7 @@ Editor.LoadMarkdown("# Hello World\nThis is a paragraph.");
 string markdown = Editor.GetMarkdown();
 ```
 
-For full import/export options, including GitHub Flavored Markdown (GFM) support, see [docs/markdown-interop.md](docs/markdown-interop.md).
+For full import/export options, including GitHub Flavored Markdown (GFM) support, see [docs/markdown-interop.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/markdown-interop.md).
 
 ## Sample App
 
@@ -141,7 +141,7 @@ The repository includes a runnable MAUI sample with focused pages for:
 - localization
 - theming and toolbar icon packs
 
-Project: [samples/SampleApp.Maui](samples/SampleApp.Maui)
+Project: [samples/SampleApp.Maui](https://github.com/TheEightBot/MintedTextEditor/tree/main/samples/SampleApp.Maui)
 
 ## Configuration
 
@@ -209,32 +209,49 @@ Editor.EditorFocusChanged += (_, e) => { /* e.IsFocused */ };
 
 `EditorFocusChanged` fires once per real native focus change, including a tap into the editor or focus moving to another control. The editor starts unfocused.
 
+### Find and replace
+
+```csharp
+Editor.FindNext("draft");                       // select and scroll to the next match (wraps)
+Editor.FindPrevious("draft", matchCase: true);
+Editor.Replace("draft", "final");               // replace the selected match, select the next
+int replaced = Editor.ReplaceAll("draft", "final");   // one undo step
+Editor.FindReplaceCompleted += (_, e) => { /* e.MatchCount, e.CurrentMatchIndex */ };
+```
+
+There is no built-in find bar; see [docs/commands-events.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/commands-events.md#find-and-replace).
+
 ### Events
 
 ```csharp
 Editor.TextChanged += (_, e) => { /* document changed */ };
 Editor.SelectionChanged += (_, e) => { /* selection changed */ };
 Editor.HyperlinkClicked += (_, e) => { /* e.Url; set e.Cancel to stop the default open */ };
+Editor.FontAttributesChanged += (_, e) => { /* e.IsBold, e.IsItalic … at the caret/selection */ };
+Editor.ImageInserted += (_, e) => { /* e.Image */ };
+Editor.ContentLoaded += (_, e) => { /* after LoadHtml / LoadMarkdown */ };
 ```
 
-For deeper API details, see [docs/getting-started.md](docs/getting-started.md), [docs/commands-events.md](docs/commands-events.md), and [docs/toolbar-customization.md](docs/toolbar-customization.md).
+The formatting events (font, size, colours, bold/italic, underline/strikethrough, heading, alignment, list type) fire only when the formatting at the caret or selection actually changes; `Editor.CurrentFormatting` holds the latest values.
+
+For deeper API details, see [docs/getting-started.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/getting-started.md), [docs/commands-events.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/commands-events.md), and [docs/toolbar-customization.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/toolbar-customization.md).
 
 ## Documentation
 
 | Document | Description |
 |---|---|
-| [Getting Started](docs/getting-started.md) | Installation, setup, first editor |
-| [Document Model](docs/document-model.md) | Blocks, inlines, and text runs |
-| [Formatting](docs/formatting.md) | Character and paragraph formatting |
-| [Toolbar Customization](docs/toolbar-customization.md) | Toolbar groups and items |
-| [Theming](docs/theming.md) | Built-in and custom themes |
-| [Commands & Events](docs/commands-events.md) | Command and event reference |
-| [HTML Interop](docs/html-interop.md) | HTML import/export behavior |
-| [Markdown Interop](docs/markdown-interop.md) | Markdown import/export behavior |
-| [Images & Hyperlinks](docs/images-hyperlinks.md) | Inline media and links |
-| [Tables](docs/tables.md) | Table creation and editing |
-| [Accessibility](docs/accessibility.md) | Accessibility guidance |
-| [Architecture](docs/architecture.md) | Internal architecture overview |
+| [Getting Started](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/getting-started.md) | Installation, setup, first editor |
+| [Document Model](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/document-model.md) | Blocks, inlines, and text runs |
+| [Formatting](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/formatting.md) | Character and paragraph formatting |
+| [Toolbar Customization](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/toolbar-customization.md) | Toolbar groups and items |
+| [Theming](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/theming.md) | Built-in and custom themes |
+| [Commands & Events](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/commands-events.md) | Command and event reference |
+| [HTML Interop](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/html-interop.md) | HTML import/export behavior |
+| [Markdown Interop](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/markdown-interop.md) | Markdown import/export behavior |
+| [Images & Hyperlinks](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/images-hyperlinks.md) | Inline media and links |
+| [Tables](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/tables.md) | Table creation and editing |
+| [Accessibility](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/accessibility.md) | Accessibility guidance |
+| [Architecture](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/architecture.md) | Internal architecture overview |
 
 ## Build and Test
 
@@ -254,12 +271,12 @@ dotnet build samples/SampleApp.Maui/
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+Contributions are welcome. Please read [CONTRIBUTING.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/CONTRIBUTING.md) before opening a pull request.
 
 ## Code of Conduct
 
-This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
+This project follows the [Contributor Covenant Code of Conduct](https://github.com/TheEightBot/MintedTextEditor/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/TheEightBot/MintedTextEditor/blob/main/LICENSE)

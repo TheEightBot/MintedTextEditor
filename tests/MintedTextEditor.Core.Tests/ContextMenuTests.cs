@@ -75,9 +75,9 @@ public class ContextMenuTests
         var ctx = MakeCtx();
         var def = ContextMenuFactory.CreateDefault(ctx);
 
-        Assert.Contains(def.Items, i => i.Label == "Insert Hyperlink");
-        Assert.DoesNotContain(def.Items, i => i.Label == "Edit Hyperlink");
-        Assert.DoesNotContain(def.Items, i => i.Label == "Remove Hyperlink");
+        Assert.Contains(def.Items, i => i.Label == "Insert hyperlink");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Edit hyperlink…");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Remove hyperlink");
     }
 
     [Fact]
@@ -100,10 +100,10 @@ public class ContextMenuTests
         var ctx = MakeCtx(doc, sel);
         var def = ContextMenuFactory.CreateDefault(ctx);
 
-        Assert.Contains(def.Items, i => i.Label == "Edit Hyperlink");
-        Assert.Contains(def.Items, i => i.Label == "Remove Hyperlink");
-        Assert.Contains(def.Items, i => i.Label == "Open Hyperlink");
-        Assert.DoesNotContain(def.Items, i => i.Label == "Insert Hyperlink");
+        Assert.Contains(def.Items, i => i.Label == "Edit hyperlink…");
+        Assert.Contains(def.Items, i => i.Label == "Remove hyperlink");
+        Assert.Contains(def.Items, i => i.Label == "Open hyperlink");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Insert hyperlink");
     }
 
     [Fact]
@@ -112,9 +112,9 @@ public class ContextMenuTests
         var ctx = MakeCtx();
         var def = ContextMenuFactory.CreateDefault(ctx);
 
-        Assert.Contains(def.Items, i => i.Label == "Select All");
-        Assert.Contains(def.Items, i => i.Label == "Insert Image");
-        Assert.Contains(def.Items, i => i.Label == "Insert Table");
+        Assert.Contains(def.Items, i => i.Label == "Select all");
+        Assert.Contains(def.Items, i => i.Label == "Insert image");
+        Assert.Contains(def.Items, i => i.Label == "Insert table");
     }
 
     // ── Custom items via ContextMenuItemsRequestedEventArgs ──────────────────

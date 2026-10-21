@@ -6,6 +6,8 @@ Architecture mirrors [KumikoUI](https://github.com/TheEightBot/KumikoUI): platfo
 
 > **Workflow:** Each phase is implemented, reviewed, and committed to git before proceeding to the next.
 
+> **Status (2026-10-21):** this plan drove the initial build-out and is kept for history. Shipped work is recorded in [CHANGELOG.md](CHANGELOG.md); new work is tracked in GitHub issues and pull requests. Items still unchecked below were not done as of 0.3.x: rich sub-document copy and rich (HTML) paste, Ctrl/Cmd+Shift+V plain-text paste, pointer cursor changes, the performance/large-document checks (frame-time profiling, zero-allocation paints, 50,000-paragraph documents, lazy off-screen layout), mouse-wheel/trackpad scrolling, the remaining toolbar icon polish (proportional vector icons, undo/redo arcs), and the remaining toolbar-overflow and selection-normalisation tests.
+
 ---
 
 ## Table of Contents
@@ -177,7 +179,7 @@ Implement the blinking caret, hit-testing from pixel coordinates to document pos
 - [x] Document navigation: Ctrl+Home / Ctrl+End
 - [x] Page navigation: PageUp / PageDown (viewport-height steps)
 - [x] Pointer click: single-click positions caret via hit testing
-- [ ] Ensure caret remains visible: auto-scroll viewport when caret moves beyond visible area
+- [x] Ensure caret remains visible: auto-scroll viewport when caret moves beyond visible area
 
 ### Input Abstractions (`MintedTextEditor.Core/Input/`)
 - [x] `EditorPointerEventArgs` — (x, y, action, button, modifiers, clickCount, timestamp)
@@ -341,7 +343,7 @@ Apply inline text styles: bold, italic, underline, strikethrough, subscript, sup
 - [x] `DocumentRenderer` draws underline decoration (line below text baseline)
 - [x] `DocumentRenderer` draws strikethrough decoration (line through text center)
 - [x] `DocumentRenderer` handles superscript/subscript (reduced font size + baseline offset)
-- [ ] `SkiaDrawingContext` supports bold/italic font resolution via `SKTypeface`
+- [x] `SkiaDrawingContext` supports bold/italic font resolution via `SKTypeface`
 
 ### Tests
 - [x] Toggle bold on a range: verify `TextStyle.IsBold` on affected runs
@@ -1004,12 +1006,12 @@ Final optimization pass and quality improvements.
 - [ ] Mouse wheel / trackpad scroll
 - [x] Touch-based panning with velocity tracking — integrated in `MintedEditorView.OnCanvasTouch`
 - [x] Scrollbar rendering: vertical scrollbar (track + thumb) — `DocumentRenderer.RenderScrollbar`; optional via `ShowScrollbar` bindable property
-- [ ] Scroll-to-position API
+- [x] Scroll-to-position API
 
 ### Polish
 - [x] Word-wrap toggle — `TextLayoutEngine.WordWrap`; `IsWordWrap` bindable property on `MintedEditorView`
 - [x] Read-only mode — `IsReadOnly` property disables all editing (implemented in prior phase)
-- [ ] Placeholder text when document is empty
+- [x] Placeholder text when document is empty
 - [x] Line numbers (optional gutter) — `DocumentRenderer.RenderLineNumbersGutter`; `ShowLineNumbers` bindable property
 - [x] Find & Replace — `FindReplaceEngine` with `Find`, `FindNext`, `FindPrevious`, `FindAll`, `Replace`, `ReplaceAll`; `FindOptions` (MatchCase, WholeWord, WrapAround)
 - [x] Spell-check integration point — `ISpellCheckProvider` interface
@@ -1056,30 +1058,31 @@ Targeted fixes identified during end-to-end QA against Telerik/Syncfusion/CKEdit
 Targeted fixes identified during end-to-end QA on mobile (iOS/Android) and desktop targets.
 
 ### Toolbar Icon Rendering
-- [ ] Fix blurry/low-resolution toolbar icon rendering — use high-quality `SKPaint` filter when drawing `SKBitmap` icons in `SkiaDrawingContext.DrawImage`
-- [ ] Increase SVG rasterization target size from `max(64, 36×scale)` to `max(96, ButtonSize×2×scale)` so icons are always sharp at HiDPI density
-- [ ] Increase bitmap icon draw area from 56 % of button size to 72 % so icons are more legible
+- [x] Fix blurry/low-resolution toolbar icon rendering — use high-quality `SKPaint` filter when drawing `SKBitmap` icons in `SkiaDrawingContext.DrawImage`
+- [x] Increase SVG rasterization target size from `max(64, 36×scale)` to `max(96, ButtonSize×2×scale)` so icons are always sharp at HiDPI density (`MintedEditorView.LoadToolbarIconsAsync`)
+- [x] Increase bitmap icon draw area from 56 % of button size to 72 % so icons are more legible
 
 ### Toolbar Icon Clipping / Proportional Layout
 - [ ] Replace all hardcoded pixel offsets in vector icon helpers (`DrawVectorIcon`) with proportional fractions of the current `rect` so icons render correctly at every `ButtonSize`
-- [ ] Add a `Save`/`ClipRect`/`Restore` guard around each vector-icon drawing call to guarantee icons never draw outside their allocated button rectangle
+- [x] Add a `Save`/`ClipRect`/`Restore` guard around each vector-icon drawing call to guarantee icons never draw outside their allocated button rectangle
 - [ ] Fix undo/redo arc representation to use proportional curves rather than plain lines
 
 ### Toolbar Overflow — configurable max rows with ellipsis overflow button
-- [ ] Add `MaxRows` property to `ToolbarDefinition` (0 = unlimited) and parallel `MaxRows` property on `ToolbarRenderer`
-- [ ] When `LayoutMode == Wrap && MaxRows > 0`, items that would start on a row beyond `MaxRows` are collected as overflow items instead of being drawn
-- [ ] Reserve a fixed `OverflowButtonWidth` slot at the trailing edge of the last allowed row and render a `…` button there
-- [ ] Extend `HitTest` to return the synthetic overflow button; tapping it opens a drop-down panel listing all overflow items
-- [ ] Overflow panel items fire their normal commands just like regular toolbar items
-- [ ] Expose `ToolbarMaxRows` bindable property on `MintedEditorView` (default 0 = unlimited)
+- [x] Add `MaxRows` property to `ToolbarDefinition` (0 = unlimited); `ToolbarRenderer` reads `Definition.MaxRows` (no separate renderer property)
+- [x] When `LayoutMode == Wrap && MaxRows > 0`, items that would start on a row beyond `MaxRows` are collected as overflow items instead of being drawn
+- [x] Reserve a fixed `OverflowButtonWidth` slot at the trailing edge of the last allowed row and render a `…` button there
+- [x] Tapping the overflow button opens a drop-down panel listing all overflow items — shipped as a separate `ToolbarRenderer.HandleOverflowButtonTap`, which `MintedEditorView` calls before ordinary `HitTest` (`HitTest` itself does not return the overflow button)
+- [x] Overflow panel items fire their normal commands just like regular toolbar items
+- [x] Expose `ToolbarMaxRows` bindable property on `MintedEditorView` (default 0 = unlimited)
 
 ### Text Selection Stability After Formatting
-- [ ] Add `DocumentEditor.NormalizePosition(Document doc, DocumentPosition pos)` — converts a `DocumentPosition` to a canonical `(blockIndex, inlineIndex, offset)` by walking inline lengths so stale inline indices after run-splitting are corrected
-- [ ] Call `NormalizePosition` on `Selection.Anchor` and `Selection.Active` inside `MintedEditorView.ExecuteToolbarCommand` after every formatting command that touches the document
-- [ ] Guard `SelectionRenderer.Render` with an inline-length bounds check so an out-of-range offset never throws and visually shows the nearest valid position instead
+- [x] Add `DocumentEditor.NormalizePosition(Document doc, DocumentPosition pos)` — converts a `DocumentPosition` to a canonical `(blockIndex, inlineIndex, offset)` by walking inline lengths so stale inline indices after run-splitting are corrected
+- [x] Keep the selection valid after toolbar commands in `MintedEditorView.ExecuteToolbarCommand` — character-formatting commands go through `DocumentEditor.ApplyCharacterFormatting`, which returns the adjusted selection; other commands normalize `Selection.Anchor` / `Selection.Active` with `NormalizePosition`
+- [x] Guard `SelectionRenderer.Render` with an inline-length bounds check so an out-of-range offset never throws and visually shows the nearest valid position instead
 
 ### Tests
-- [ ] Toolbar overflow: `ToolbarRendererTests` — verify items beyond `MaxRows` are excluded and the overflow button rect is populated
+- [x] Toolbar overflow: tests in `NormalizePositionTests` check that a narrow toolbar reports `HasOverflow` with non-empty `OverflowItems`
+- [ ] Toolbar overflow: verify overflow items are excluded from the visible toolbar and the overflow button rect is populated
 - [ ] Selection normalization: add cases to `SelectionTests` verifying anchor/active remain correct after bold/italic/underline toggles that split runs
 
 ### Git
