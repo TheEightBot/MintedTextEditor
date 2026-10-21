@@ -1,9 +1,15 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace MintedTextEditor.Core.Editing;
 
 /// <summary>
-/// Integration point for platform print services.
-/// Implement this interface and pass it to the editor host to provide printing support.
+/// Planned integration point for platform print services.
 /// </summary>
+/// <remarks>
+/// Experimental (<c>MTE002</c>): the editor does not use this interface yet, so implementing it
+/// has no effect. Its shape may change once printing is wired into the control.
+/// </remarks>
+[Experimental("MTE002", UrlFormat = "https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/architecture.md#experimental-apis")]
 public interface IPrintProvider
 {
     /// <summary>
