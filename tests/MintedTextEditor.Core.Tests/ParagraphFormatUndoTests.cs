@@ -182,6 +182,53 @@ public class ParagraphFormatUndoTests
     }
 
     [Fact]
+    public void SelectionStartingAtTopLevelTable_FormatsEveryFollowingParagraph()
+    {
+        // [table, A, B] with Select All: the start endpoint is the table block itself.
+        var doc = MakeDoc("x", "A", "B");
+        doc.Blocks.RemoveAt(0);
+        doc.InsertBlock(0, new TableBlock(1, 1));
+        var sel = new Selection();
+        sel.Set(new DocumentPosition(0, 0, 0), new DocumentPosition(2, 0, 1));
+        var ctx = new EditorContext(doc, sel, new UndoManager(), new FormattingEngine(), new FontFormattingEngine());
+
+        new AlignCenterCommand().Execute(ctx);
+        Assert.Equal(TextAlignment.Center, Para(doc, 1).Style.Alignment);
+        Assert.Equal(TextAlignment.Center, Para(doc, 2).Style.Alignment);
+
+        ctx.UndoManager.Undo();
+        Assert.Equal(TextAlignment.Left, Para(doc, 1).Style.Alignment);
+        Assert.Equal(TextAlignment.Left, Para(doc, 2).Style.Alignment);
+
+        ctx.UndoManager.Redo();
+        Assert.Equal(TextAlignment.Center, Para(doc, 1).Style.Alignment);
+        Assert.Equal(TextAlignment.Center, Para(doc, 2).Style.Alignment);
+    }
+
+    [Fact]
+    public void SelectionEndingAtTopLevelTable_DoesNotFormatFollowingParagraph()
+    {
+        // [A, table, B] with the selection ending on the table block.
+        var doc = MakeDoc("A", "x", "B");
+        doc.Blocks.RemoveAt(1);
+        doc.InsertBlock(1, new TableBlock(1, 1));
+        var sel = new Selection();
+        sel.Set(new DocumentPosition(0, 0, 0), new DocumentPosition(1, 0, 0));
+        var ctx = new EditorContext(doc, sel, new UndoManager(), new FormattingEngine(), new FontFormattingEngine());
+
+        new AlignCenterCommand().Execute(ctx);
+        Assert.Equal(TextAlignment.Center, Para(doc, 0).Style.Alignment);
+        Assert.Equal(TextAlignment.Left, Para(doc, 2).Style.Alignment);
+
+        ctx.UndoManager.Undo();
+        Assert.Equal(TextAlignment.Left, Para(doc, 0).Style.Alignment);
+
+        ctx.UndoManager.Redo();
+        Assert.Equal(TextAlignment.Center, Para(doc, 0).Style.Alignment);
+        Assert.Equal(TextAlignment.Left, Para(doc, 2).Style.Alignment);
+    }
+
+    [Fact]
     public void Engine_IsNotRecordedOnUndoManager()
     {
         var doc = MakeDoc("Hello");

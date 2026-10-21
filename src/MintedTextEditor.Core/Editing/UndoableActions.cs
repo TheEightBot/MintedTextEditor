@@ -17,26 +17,46 @@ internal record ParagraphSnapshot(ParagraphStyle Style, IReadOnlyList<InlineSnap
 /// instead of an (inline index, offset) pair. Run splits and merges from formatting are not
 /// on the undo stack, so inline indices recorded by an action can go stale; paragraph
 /// offsets stay valid and are resolved back to a position when the action replays.
+/// A position that is not in a paragraph (e.g. a table block without cell coordinates)
+/// is kept as is, so it still names its own block rather than the document's last block.
 /// </summary>
 internal readonly struct ParagraphAnchor
 {
     private readonly DocumentPosition _context;
     private readonly int _offset;
+    private readonly bool _inParagraph;
 
     public ParagraphAnchor(Document.Document document, DocumentPosition position)
     {
         _context = position;
-        _offset = DocumentEditor.GetAbsoluteCharOffset(document, position);
+        _inParagraph = IsParagraphPosition(document, position);
+        _offset = _inParagraph ? DocumentEditor.GetAbsoluteCharOffset(document, position) : position.Offset;
     }
 
     public DocumentPosition Resolve(Document.Document document)
-        => DocumentEditor.AbsoluteCharOffsetToPosition(document, _context, _offset);
+        => _inParagraph && IsParagraphPosition(document, _context)
+            ? DocumentEditor.AbsoluteCharOffsetToPosition(document, _context, _offset)
+            : _context;
 
     public bool SameAs(ParagraphAnchor other)
         => _context.BlockIndex == other._context.BlockIndex
            && _context.CellRow == other._context.CellRow
            && _context.CellCol == other._context.CellCol
-           && _offset == other._offset;
+           && _inParagraph == other._inParagraph
+           && (_inParagraph ? _offset == other._offset : _context == other._context);
+
+    // Mirrors DocumentEditor.GetParagraph: a top-level paragraph, or the first paragraph of a table cell.
+    private static bool IsParagraphPosition(Document.Document document, DocumentPosition position)
+    {
+        if (position.BlockIndex < 0 || position.BlockIndex >= document.Blocks.Count)
+            return false;
+        var block = document.Blocks[position.BlockIndex];
+        if (!position.IsInTableCell)
+            return block is Paragraph;
+        return block is TableBlock table
+            && table.GetCell(position.CellRow, position.CellCol) is { Blocks.Count: > 0 } cell
+            && cell.Blocks[0] is Paragraph;
+    }
 }
 
 internal static class SnapshotHelper
