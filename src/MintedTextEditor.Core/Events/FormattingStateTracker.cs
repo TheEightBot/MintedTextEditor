@@ -116,50 +116,13 @@ public sealed record FormattingState
     private static List<TextStyle> CollectSelectedRunStyles(Document.Document document, TextRange range)
     {
         var styles = new List<TextStyle>();
-        var start = range.Start;
-        var end = range.End;
 
-        for (int bi = Math.Max(0, start.BlockIndex); bi <= end.BlockIndex && bi < document.Blocks.Count; bi++)
+        // Top-level paragraphs and the paragraphs of the visible table cells in the range.
+        foreach (var (paragraph, start, end) in DocumentEditor.GetParagraphsInRange(document, range))
         {
-            switch (document.Blocks[bi])
-            {
-                case Paragraph paragraph:
-                {
-                    int from = bi == start.BlockIndex && !start.IsInTableCell
-                        ? DocumentEditor.GetAbsoluteCharOffset(document, start) : 0;
-                    int to = bi == end.BlockIndex && !end.IsInTableCell
-                        ? DocumentEditor.GetAbsoluteCharOffset(document, end) : int.MaxValue;
-                    CollectFromInlines(paragraph.Inlines, 0, from, to, styles);
-                    break;
-                }
-                case TableBlock table:
-                {
-                    bool startsInTable = bi == start.BlockIndex && start.IsInTableCell;
-                    bool endsInTable = bi == end.BlockIndex && end.IsInTableCell;
-                    for (int r = 0; r < table.Rows.Count; r++)
-                    {
-                        for (int c = 0; c < table.Rows[r].Cells.Count; c++)
-                        {
-                            bool isStartCell = startsInTable && r == start.CellRow && c == start.CellCol;
-                            bool isEndCell = endsInTable && r == end.CellRow && c == end.CellCol;
-                            if (startsInTable && (r, c).CompareTo((start.CellRow, start.CellCol)) < 0) continue;
-                            if (endsInTable && (r, c).CompareTo((end.CellRow, end.CellCol)) > 0) continue;
-
-                            // Positions in a cell refer to its first paragraph.
-                            var blocks = table.Rows[r].Cells[c].Blocks;
-                            for (int k = 0; k < blocks.Count; k++)
-                            {
-                                if (blocks[k] is not Paragraph cellParagraph) continue;
-                                if (isEndCell && k > 0) break;
-                                int from = isStartCell && k == 0 ? DocumentEditor.GetAbsoluteCharOffset(document, start) : 0;
-                                int to = isEndCell ? DocumentEditor.GetAbsoluteCharOffset(document, end) : int.MaxValue;
-                                CollectFromInlines(cellParagraph.Inlines, 0, from, to, styles);
-                            }
-                        }
-                    }
-                    break;
-                }
-            }
+            int from = start is { } s ? DocumentEditor.GetAbsoluteCharOffset(document, s) : 0;
+            int to = end is { } e ? DocumentEditor.GetAbsoluteCharOffset(document, e) : int.MaxValue;
+            CollectFromInlines(paragraph.Inlines, 0, from, to, styles);
         }
 
         return styles;

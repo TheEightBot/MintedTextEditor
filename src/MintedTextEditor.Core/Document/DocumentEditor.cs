@@ -149,6 +149,18 @@ public static class DocumentEditor
             NotifyTextInserted(document, position, endPos);
             return endPos;
         }
+        else if (position.Offset <= 0 && position.InlineIndex == inlineIndex)
+        {
+            // At the start of a non-text inline (e.g. an ImageInline) the text goes before it:
+            // appended to the run before it when there is one, otherwise as a new run.
+            if (inlineIndex > 0 && paragraph.Inlines[inlineIndex - 1] is TextRun previous)
+                return InsertText(document, position.With(inlineIndex - 1, previous.Text.Length), text, style);
+
+            paragraph.InsertInline(inlineIndex, new TextRun(text, style));
+            var newPos = position.With(inlineIndex, text.Length);
+            NotifyTextInserted(document, position, newPos);
+            return newPos;
+        }
         else
         {
             // For non-text, non-hyperlink inlines (e.g. ImageInline), insert a new run after.
@@ -394,60 +406,124 @@ public static class DocumentEditor
     }
 
     /// <summary>
-    /// Applies a style transformation to all text runs within the given range.
+    /// Applies a style transformation to all text runs within the given range, including the
+    /// text of the table cells the range covers (see <see cref="GetParagraphsInRange"/>).
     /// </summary>
     public static void ApplyTextStyle(Document document, TextRange range, Func<TextStyle, TextStyle> transform)
     {
         if (range.IsEmpty) return;
 
+        foreach (var (paragraph, from, to) in GetParagraphsInRange(document, range))
+            ApplyTextStyleToParagraph(paragraph, from, to, transform);
+
+        document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.StyleChanged, range));
+    }
+
+    /// <summary>
+    /// Applies <paramref name="transform"/> to the text runs of <paramref name="paragraph"/> between
+    /// <paramref name="from"/> and <paramref name="to"/> (null: the paragraph's start or end).
+    /// </summary>
+    private static void ApplyTextStyleToParagraph(Paragraph paragraph, DocumentPosition? from, DocumentPosition? to, Func<TextStyle, TextStyle> transform)
+    {
+        // Traverse backwards: splitting a run inserts new runs after it, which would
+        // shift the indices of not-yet-processed runs (including the end run) in a
+        // forward loop and leave part of the selection unformatted.
+        for (int ii = paragraph.Inlines.Count - 1; ii >= 0; ii--)
+        {
+            if (paragraph.Inlines[ii] is not TextRun run) continue;
+
+            bool isFirst = from is { } f && ii == f.InlineIndex;
+            bool isLast = to is { } t && ii == t.InlineIndex;
+
+            if (isFirst && isLast)
+            {
+                // Range within a single run: split if needed. Nothing before it is in range.
+                ApplyStyleToRunSegment(paragraph, ii, from!.Value.Offset, to!.Value.Offset, transform);
+                break;
+            }
+            else if (isFirst)
+            {
+                ApplyStyleToRunSegment(paragraph, ii, from!.Value.Offset, run.Text.Length, transform);
+            }
+            else if (isLast)
+            {
+                ApplyStyleToRunSegment(paragraph, ii, 0, to!.Value.Offset, transform);
+            }
+            else
+            {
+                // A run that is neither the first nor the last in the range receives the
+                // transform only when it lies STRICTLY INSIDE the range: after the start
+                // boundary AND before the end boundary. Requiring both halves prevents the
+                // transform from leaking to runs past the end inline when the selection
+                // spans inlines in a single paragraph.
+                bool afterStart = from is not { } fs || ii > fs.InlineIndex;
+                bool beforeEnd = to is not { } te || ii < te.InlineIndex;
+                if (afterStart && beforeEnd)
+                    run.Style = transform(run.Style);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns the paragraphs that <paramref name="range"/> covers, in document order: top-level
+    /// paragraphs, and the paragraphs of the table cells in the range. Within a table the cells are
+    /// taken in reading order (row by row), from the range's start cell (or the first cell when the
+    /// range starts before the table) to its end cell (or the last cell when it ends after it).
+    /// <c>From</c> and <c>To</c> are the range's endpoints when they lie in that paragraph, and null
+    /// when the paragraph is covered from its start or to its end. A position in a cell refers to the
+    /// cell's first paragraph, so later paragraphs of the end cell are not included. Slots covered by a
+    /// merged cell's <see cref="TableCell.RowSpan"/> / <see cref="TableCell.ColumnSpan"/> are hidden, so
+    /// their cells are skipped (unless the range starts or ends in one).
+    /// </summary>
+    internal static List<(Paragraph Paragraph, DocumentPosition? From, DocumentPosition? To)> GetParagraphsInRange(
+        Document document, TextRange range)
+    {
+        var result = new List<(Paragraph, DocumentPosition?, DocumentPosition?)>();
         var start = range.Start;
         var end = range.End;
 
-        for (int bi = start.BlockIndex; bi <= end.BlockIndex && bi < document.Blocks.Count; bi++)
+        for (int bi = Math.Max(0, start.BlockIndex); bi <= end.BlockIndex && bi < document.Blocks.Count; bi++)
         {
-            var paragraph = document.Blocks[bi] as Paragraph;
-            if (paragraph == null) continue;
-
-            // Traverse backwards: splitting a run inserts new runs after it, which would
-            // shift the indices of not-yet-processed runs (including the end run) in a
-            // forward loop and leave part of the selection unformatted.
-            for (int ii = paragraph.Inlines.Count - 1; ii >= 0; ii--)
+            switch (document.Blocks[bi])
             {
-                if (paragraph.Inlines[ii] is not TextRun run) continue;
-
-                bool isFirst = bi == start.BlockIndex && ii == start.InlineIndex;
-                bool isLast = bi == end.BlockIndex && ii == end.InlineIndex;
-
-                if (isFirst && isLast)
-                {
-                    // Range within a single run: split if needed. Nothing before it is in range.
-                    ApplyStyleToRunSegment(paragraph, ii, start.Offset, end.Offset, transform);
+                case Paragraph paragraph:
+                    result.Add((paragraph,
+                        bi == start.BlockIndex && !start.IsInTableCell ? start : null,
+                        bi == end.BlockIndex && !end.IsInTableCell ? end : null));
                     break;
-                }
-                else if (isFirst)
-                {
-                    ApplyStyleToRunSegment(paragraph, ii, start.Offset, run.Text.Length, transform);
-                }
-                else if (isLast)
-                {
-                    ApplyStyleToRunSegment(paragraph, ii, 0, end.Offset, transform);
-                }
-                else
-                {
-                    // A run that is neither the first nor the last in the range receives the
-                    // transform only when it lies STRICTLY INSIDE the range: after the start
-                    // boundary AND before the end boundary. (Whole intermediate blocks are a
-                    // subset of this.) Requiring both halves prevents the transform from leaking
-                    // to runs past end.InlineIndex when the selection spans inlines in a single block.
-                    bool afterStart = bi > start.BlockIndex || (bi == start.BlockIndex && ii > start.InlineIndex);
-                    bool beforeEnd  = bi < end.BlockIndex   || (bi == end.BlockIndex   && ii < end.InlineIndex);
-                    if (afterStart && beforeEnd)
-                        run.Style = transform(run.Style);
-                }
+
+                case TableBlock table:
+                    bool startsInTable = bi == start.BlockIndex && start.IsInTableCell;
+                    bool endsInTable = bi == end.BlockIndex && end.IsInTableCell;
+                    // Slots covered by another cell's span are hidden (layout skips them too).
+                    var owners = table.BuildSpanOwners();
+                    for (int r = 0; r < table.Rows.Count; r++)
+                    {
+                        for (int c = 0; c < table.Rows[r].Cells.Count; c++)
+                        {
+                            if (startsInTable && (r, c).CompareTo((start.CellRow, start.CellCol)) < 0) continue;
+                            if (endsInTable && (r, c).CompareTo((end.CellRow, end.CellCol)) > 0) continue;
+                            bool isStartCell = startsInTable && r == start.CellRow && c == start.CellCol;
+                            bool isEndCell = endsInTable && r == end.CellRow && c == end.CellCol;
+                            bool covered = r < owners.Length && c < owners[r].Length && owners[r][c] != (r, c);
+                            if (covered && !isStartCell && !isEndCell) continue;
+
+                            var blocks = table.Rows[r].Cells[c].Blocks;
+                            for (int k = 0; k < blocks.Count; k++)
+                            {
+                                if (isEndCell && k > 0) break;
+                                if (blocks[k] is not Paragraph cellParagraph) continue;
+                                result.Add((cellParagraph,
+                                    isStartCell && k == 0 ? start : null,
+                                    isEndCell ? end : null));
+                            }
+                        }
+                    }
+                    break;
             }
         }
 
-        document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.StyleChanged, range));
+        return result;
     }
 
     /// <summary>
@@ -478,6 +554,19 @@ public static class DocumentEditor
         var end   = range.End;
         var sb    = new System.Text.StringBuilder();
 
+        if (start.IsInTableCell || end.IsInTableCell)
+        {
+            // Text in table cells: one line per covered paragraph (see GetParagraphsInRange).
+            var paragraphs = GetParagraphsInRange(document, range);
+            for (int i = 0; i < paragraphs.Count; i++)
+            {
+                if (i > 0) sb.Append('\n');
+                var (para, from, to) = paragraphs[i];
+                AppendText(sb, para, from, to);
+            }
+            return sb.ToString();
+        }
+
         for (int bi = start.BlockIndex; bi <= end.BlockIndex && bi < document.Blocks.Count; bi++)
         {
             if (bi > start.BlockIndex)
@@ -485,24 +574,69 @@ public static class DocumentEditor
 
             if (document.Blocks[bi] is not Paragraph para) continue;
 
-            int startInline = bi == start.BlockIndex ? start.InlineIndex : 0;
-            int endInline   = bi == end.BlockIndex   ? end.InlineIndex   : para.Inlines.Count - 1;
-
-            for (int ii = startInline; ii <= endInline && ii < para.Inlines.Count; ii++)
-            {
-                if (para.Inlines[ii] is not TextRun run) continue;
-
-                int startOffset = bi == start.BlockIndex && ii == startInline ? start.Offset : 0;
-                int endOffset   = bi == end.BlockIndex   && ii == endInline   ? end.Offset   : run.Text.Length;
-
-                startOffset = Math.Clamp(startOffset, 0, run.Text.Length);
-                endOffset   = Math.Clamp(endOffset,   0, run.Text.Length);
-                if (startOffset < endOffset)
-                    sb.Append(run.Text, startOffset, endOffset - startOffset);
-            }
+            AppendText(sb, para,
+                bi == start.BlockIndex ? start : null,
+                bi == end.BlockIndex ? end : null);
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Appends the text of <paramref name="para"/> from <paramref name="from"/> to <paramref name="to"/>
+    /// (positions within <paramref name="para"/>; null: its start or end): the text of its runs,
+    /// including those inside hyperlinks, with a newline for each line break. Images add no text.
+    /// An inline that is only partly selected contributes only its selected characters.
+    /// </summary>
+    private static void AppendText(System.Text.StringBuilder sb, Paragraph para, DocumentPosition? from, DocumentPosition? to)
+    {
+        int fromOffset = from is { } f ? OffsetInParagraph(para, f) : 0;
+        int toOffset = to is { } t ? OffsetInParagraph(para, t) : int.MaxValue;
+        if (fromOffset < toOffset)
+            AppendText(sb, para.Inlines, 0, fromOffset, toOffset);
+    }
+
+    /// <summary>
+    /// Appends the text of <paramref name="inlines"/>, which start at character <paramref name="offset"/>,
+    /// that lies in [<paramref name="from"/>, <paramref name="to"/>). Returns the offset after the last inline.
+    /// </summary>
+    private static int AppendText(System.Text.StringBuilder sb, IEnumerable<Inline> inlines, int offset, int from, int to)
+    {
+        foreach (var inline in inlines)
+        {
+            if (inline is HyperlinkInline link)
+            {
+                offset = AppendText(sb, link.Children, offset, from, to);
+                continue;
+            }
+
+            int length = inline.Length;
+            int start = Math.Max(from, offset) - offset;
+            int end = Math.Min(to, offset + length) - offset;
+            if (start < end)
+            {
+                if (inline is TextRun run)
+                    sb.Append(run.Text, start, end - start);
+                else if (inline is LineBreak)
+                    sb.Append('\n');
+            }
+            offset += length;
+        }
+        return offset;
+    }
+
+    /// <summary>
+    /// The character offset of <paramref name="position"/>'s inline index and offset within
+    /// <paramref name="para"/>, with the offset clamped to its inline.
+    /// </summary>
+    private static int OffsetInParagraph(Paragraph para, DocumentPosition position)
+    {
+        int offset = 0;
+        for (int i = 0; i < position.InlineIndex && i < para.Inlines.Count; i++)
+            offset += para.Inlines[i].Length;
+        if (position.InlineIndex >= 0 && position.InlineIndex < para.Inlines.Count)
+            offset += Math.Clamp(position.Offset, 0, para.Inlines[position.InlineIndex].Length);
+        return offset;
     }
 
     private static Paragraph GetParagraph(Document document, int blockIndex)
@@ -516,7 +650,7 @@ public static class DocumentEditor
     /// <summary>
     /// Returns the paragraph for the given position, routing through table-cell context when needed.
     /// </summary>
-    private static Paragraph GetParagraph(Document document, DocumentPosition position)
+    internal static Paragraph GetParagraph(Document document, DocumentPosition position)
     {
         if (position.IsInTableCell)
         {
@@ -836,15 +970,11 @@ public static class DocumentEditor
         if (range.IsEmpty)
             return (anchor, active);
 
-        // 3. Normalize inlines in every paragraph touched by the range (re-merge same-style
-        //    adjacent runs, drop empties) so the inline structure is clean before we remap.
-        var start = range.Start;
-        var end   = range.End;
-        for (int bi = start.BlockIndex; bi <= end.BlockIndex && bi < document.Blocks.Count; bi++)
-        {
-            if (document.Blocks[bi] is Paragraph para)
-                NormalizeInlines(para);
-        }
+        // 3. Normalize inlines in every paragraph touched by the range, table cells included
+        //    (re-merge same-style adjacent runs, drop empties) so the inline structure is clean
+        //    before we remap.
+        foreach (var (para, _, _) in GetParagraphsInRange(document, range))
+            NormalizeInlines(para);
 
         // 4. Rebuild Anchor and Active from the captured absolute offsets.
         var newAnchor = AbsoluteCharOffsetToPosition(document, anchor, anchorAbs);
@@ -922,6 +1052,28 @@ public static class DocumentEditor
         if (i < 0 || i + 1 >= paragraph.Inlines.Count || position.Offset < paragraph.Inlines[i].Length)
             return position;
         if (paragraph.Inlines[i + 1] is not HyperlinkInline next || (link is not null && !ReferenceEquals(next, link)))
+            return position;
+        return position.With(i + 1, 0);
+    }
+
+    /// <summary>
+    /// When <paramref name="position"/> is at the end of a hyperlink that is followed by an inline other
+    /// than a hyperlink (a run, an image, a line break), returns the same place expressed as the start of
+    /// that inline, so text inserted there stays outside the link. Otherwise returns
+    /// <paramref name="position"/> unchanged.
+    /// </summary>
+    internal static DocumentPosition PreferAfterHyperlinkEnd(Document document, DocumentPosition position)
+    {
+        Paragraph paragraph;
+        try { paragraph = GetParagraph(document, position); }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException) { return position; }
+
+        int i = position.InlineIndex;
+        if (i < 0 || i + 1 >= paragraph.Inlines.Count)
+            return position;
+        if (paragraph.Inlines[i] is not HyperlinkInline link || position.Offset < link.Length)
+            return position;
+        if (paragraph.Inlines[i + 1] is HyperlinkInline)
             return position;
         return position.With(i + 1, 0);
     }
