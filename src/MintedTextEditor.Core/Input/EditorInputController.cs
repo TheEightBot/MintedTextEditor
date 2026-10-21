@@ -151,7 +151,7 @@ public class EditorInputController
                     if (UndoManager?.CanRedo == true)
                     {
                         var redoPos = UndoManager.Redo();
-                        if (redoPos.HasValue) { _selection.CollapseTo(redoPos.Value); _caret.MoveTo(redoPos.Value); }
+                        if (redoPos.HasValue) ApplyCaret(document, redoPos.Value, extend: false);
                         return true;
                     }
                     return false;
@@ -161,7 +161,7 @@ public class EditorInputController
                     if (UndoManager?.CanUndo == true)
                     {
                         var undoPos = UndoManager.Undo();
-                        if (undoPos.HasValue) { _selection.CollapseTo(undoPos.Value); _caret.MoveTo(undoPos.Value); }
+                        if (undoPos.HasValue) ApplyCaret(document, undoPos.Value, extend: false);
                         return true;
                     }
                     return false;
@@ -171,7 +171,7 @@ public class EditorInputController
                 if (UndoManager?.CanRedo == true)
                 {
                     var yRedoPos = UndoManager.Redo();
-                    if (yRedoPos.HasValue) { _selection.CollapseTo(yRedoPos.Value); _caret.MoveTo(yRedoPos.Value); }
+                    if (yRedoPos.HasValue) ApplyCaret(document, yRedoPos.Value, extend: false);
                     return true;
                 }
                 return false;
@@ -271,6 +271,7 @@ public class EditorInputController
     /// </summary>
     private void InsertLiteralText(string text, Document.Document document)
     {
+        SyncToVisibleCell(document);
         DocumentPosition insertPos = _caret.Position;
         bool replacesSelection = !_selection.IsEmpty;
         if (replacesSelection)
@@ -408,6 +409,7 @@ public class EditorInputController
         string? pasteText = await ClipboardProvider.GetTextAsync();
         if (string.IsNullOrEmpty(pasteText)) return;
 
+        SyncToVisibleCell(document);
         DocumentPosition insertPos = _caret.Position;
         bool replacesSelection = !_selection.IsEmpty;
         if (replacesSelection)
@@ -472,6 +474,7 @@ public class EditorInputController
 
     private void HandleBackspace(Document.Document document)
     {
+        SyncToVisibleCell(document);
         if (!_selection.IsEmpty)
         {
             var pos = PushOrExecute(new DeleteRangeAction(document, _selection.Range));
@@ -508,6 +511,7 @@ public class EditorInputController
 
     private void HandleDelete(Document.Document document)
     {
+        SyncToVisibleCell(document);
         if (!_selection.IsEmpty)
         {
             var pos = PushOrExecute(new DeleteRangeAction(document, _selection.Range));
@@ -553,6 +557,7 @@ public class EditorInputController
 
     private void HandleEnter(Document.Document document)
     {
+        SyncToVisibleCell(document);
         DocumentPosition insertPos = _caret.Position;
         if (!_selection.IsEmpty)
         {
@@ -573,6 +578,7 @@ public class EditorInputController
     /// </summary>
     public ImeTextContext GetImeTextContext(Document.Document document)
     {
+        SyncToVisibleCell(document);
         var caretPos = _caret.Position;
         string text = GetParagraph(document, caretPos).GetText();
 
@@ -603,6 +609,7 @@ public class EditorInputController
     public void DeleteImeTextBefore(int count, Document.Document document)
     {
         if (count <= 0) return;
+        SyncToVisibleCell(document);
 
         if (!_selection.IsEmpty)
         {
@@ -646,6 +653,7 @@ public class EditorInputController
     public void DeleteImeTextAfter(int count, Document.Document document)
     {
         if (count <= 0) return;
+        SyncToVisibleCell(document);
 
         if (!_selection.IsEmpty)
         {
@@ -715,6 +723,7 @@ public class EditorInputController
     /// <summary>Sets the selection to paragraph-relative offsets in the caret's paragraph (clamped).</summary>
     public void SetImeSelection(int start, int end, Document.Document document)
     {
+        SyncToVisibleCell(document);
         var para = _caret.Position;
         int len = GetParagraph(document, para).Length;
         RestoreImeSelection(document, para, Math.Clamp(start, 0, len), Math.Clamp(end, 0, len));
@@ -782,10 +791,61 @@ public class EditorInputController
         _caret.MoveTo(active);
     }
 
+    // ── Merged table cells ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Maps a position in a table slot covered by a merged cell to the cell that covers it, with the
+    /// inline index and offset clamped to that cell's content. Other positions are returned unchanged.
+    /// </summary>
+    internal static DocumentPosition ToVisibleCell(Document.Document document, DocumentPosition pos)
+    {
+        if (!TryGetCurrentTable(document, pos, out var table))
+            return pos;
+
+        var (row, col) = table.GetSpanAnchor(pos.CellRow, pos.CellCol);
+        if (row == pos.CellRow && col == pos.CellCol)
+            return pos;
+
+        var anchor = new DocumentPosition(pos.BlockIndex, 0, 0, row, col);
+        var paragraph = GetParagraph(document, anchor);
+        if (paragraph.Inlines.Count == 0)
+            return anchor;
+        if (pos.InlineIndex >= paragraph.Inlines.Count)
+        {
+            int last = paragraph.Inlines.Count - 1;
+            return anchor.With(last, paragraph.Inlines[last].Length);
+        }
+        int inline = Math.Max(0, pos.InlineIndex);
+        return anchor.With(inline, Math.Clamp(pos.Offset, 0, paragraph.Inlines[inline].Length));
+    }
+
+    /// <summary>
+    /// Moves the caret and selection out of any slot covered by a merged cell (e.g. after the caret
+    /// was set directly), so edits go to the visible cell rather than the hidden one.
+    /// </summary>
+    private void SyncToVisibleCell(Document.Document document)
+    {
+        var anchor = ToVisibleCell(document, _selection.Anchor);
+        var active = ToVisibleCell(document, _selection.Active);
+        var caret = ToVisibleCell(document, _caret.Position);
+        if (anchor == _selection.Anchor && active == _selection.Active && caret == _caret.Position)
+            return;
+
+        if (_selection.IsEmpty || anchor == active)
+            _selection.CollapseTo(caret);
+        else
+            _selection.Set(anchor, active);
+        _caret.MoveTo(caret);
+    }
+
     // ── ApplyCaret: unified caret + selection update ───────────────────
 
-    private void ApplyCaret(DocumentPosition newPos, bool extend, bool preserveX = false)
+    private void ApplyCaret(Document.Document? document, DocumentPosition newPos, bool extend, bool preserveX = false)
     {
+        // A slot covered by a merged cell is never a caret target: use the cell that occupies it.
+        if (document is not null)
+            newPos = ToVisibleCell(document, newPos);
+
         if (extend)
             _selection.ExtendTo(newPos);
         else
@@ -815,7 +875,7 @@ public class EditorInputController
             // Move back one grapheme cluster (never into the middle of an emoji)
             int abs = GetAbsoluteOffset(document, pos);
             int step = abs - PreviousGraphemeBoundary(GetParagraph(document, pos).GetText(), abs);
-            ApplyCaret(step <= pos.Offset
+            ApplyCaret(document, step <= pos.Offset
                 ? pos.With(pos.InlineIndex, pos.Offset - step)
                 : AbsoluteOffsetToPosition(document, pos, abs - step), extend);
         }
@@ -824,7 +884,7 @@ public class EditorInputController
             // Move to end of previous inline
             var paragraph = GetParagraph(document, pos);
             var prevInline = paragraph.Inlines[pos.InlineIndex - 1];
-            ApplyCaret(pos.With(pos.InlineIndex - 1, prevInline.Length), extend);
+            ApplyCaret(document, pos.With(pos.InlineIndex - 1, prevInline.Length), extend);
         }
         else if (!pos.IsInTableCell && pos.BlockIndex > 0)
         {
@@ -832,7 +892,7 @@ public class EditorInputController
             var prevParagraph = GetParagraph(document, pos.BlockIndex - 1);
             int lastInlineIndex = Math.Max(0, prevParagraph.Inlines.Count - 1);
             int lastOffset = prevParagraph.Inlines.Count > 0 ? prevParagraph.Inlines[lastInlineIndex].Length : 0;
-            ApplyCaret(new DocumentPosition(pos.BlockIndex - 1, lastInlineIndex, lastOffset), extend);
+            ApplyCaret(document, new DocumentPosition(pos.BlockIndex - 1, lastInlineIndex, lastOffset), extend);
         }
     }
 
@@ -851,7 +911,7 @@ public class EditorInputController
             {
                 // Move forward one grapheme cluster (never into the middle of an emoji)
                 int step = NextGraphemeBoundary(paragraph.GetText(), absOffset) - absOffset;
-                ApplyCaret(pos.Offset + step <= inline.Length
+                ApplyCaret(document, pos.Offset + step <= inline.Length
                     ? pos.With(pos.InlineIndex, pos.Offset + step)
                     : AbsoluteOffsetToPosition(document, pos, absOffset + step), extend);
                 return;
@@ -861,7 +921,7 @@ public class EditorInputController
         // At end of current inline — move to next inline
         if (pos.InlineIndex + 1 < paragraph.Inlines.Count)
         {
-            ApplyCaret(pos.With(pos.InlineIndex + 1, 0), extend);
+            ApplyCaret(document, pos.With(pos.InlineIndex + 1, 0), extend);
         }
         else if (pos.IsInTableCell && absOffset >= paragraphLength)
         {
@@ -870,7 +930,7 @@ public class EditorInputController
         else if (!pos.IsInTableCell && pos.BlockIndex + 1 < document.Blocks.Count)
         {
             // Move to start of next block
-            ApplyCaret(new DocumentPosition(pos.BlockIndex + 1, 0, 0), extend);
+            ApplyCaret(document, new DocumentPosition(pos.BlockIndex + 1, 0, 0), extend);
         }
     }
 
@@ -891,7 +951,7 @@ public class EditorInputController
                 var prevParagraph = GetParagraph(document, pos.BlockIndex - 1);
                 int lastInlineIdx = Math.Max(0, prevParagraph.Inlines.Count - 1);
                 int lastOffset = prevParagraph.Inlines.Count > 0 ? prevParagraph.Inlines[lastInlineIdx].Length : 0;
-                ApplyCaret(new DocumentPosition(pos.BlockIndex - 1, lastInlineIdx, lastOffset), extend);
+                ApplyCaret(document, new DocumentPosition(pos.BlockIndex - 1, lastInlineIdx, lastOffset), extend);
             }
             return;
         }
@@ -904,7 +964,7 @@ public class EditorInputController
             newOffset--;
 
         var newPos = AbsoluteOffsetToPosition(document, pos.BlockIndex, newOffset);
-        ApplyCaret(newPos, extend);
+        ApplyCaret(document, newPos, extend);
     }
 
     /// <summary>Moves the caret to the end of the next word.</summary>
@@ -919,7 +979,7 @@ public class EditorInputController
             // At end of block — move to start of next block
             if (!pos.IsInTableCell && pos.BlockIndex + 1 < document.Blocks.Count)
             {
-                ApplyCaret(new DocumentPosition(pos.BlockIndex + 1, 0, 0), extend);
+                ApplyCaret(document, new DocumentPosition(pos.BlockIndex + 1, 0, 0), extend);
             }
             return;
         }
@@ -932,7 +992,7 @@ public class EditorInputController
             newOffset++;
 
         var newPos = AbsoluteOffsetToPosition(document, pos.BlockIndex, newOffset);
-        ApplyCaret(newPos, extend);
+        ApplyCaret(document, newPos, extend);
     }
 
     // ── Line Navigation ─────────────────────────────────────────────
@@ -949,7 +1009,7 @@ public class EditorInputController
             // Move to previous line in same block
             var prevLine = layout.Blocks[blockIdx].Lines[lineIdx - 1];
             var hit = DocumentHitTester.HitTest(_caret.PreferredX, layout.Blocks[blockIdx].Y + prevLine.Y + prevLine.Height / 2, layout, document, context);
-            ApplyCaret(hit.Position, extend, preserveX: true);
+            ApplyCaret(document, hit.Position, extend, preserveX: true);
         }
         else if (blockIdx > 0)
         {
@@ -959,7 +1019,7 @@ public class EditorInputController
             {
                 var lastLine = prevBlock.Lines[^1];
                 var hit = DocumentHitTester.HitTest(_caret.PreferredX, prevBlock.Y + lastLine.Y + lastLine.Height / 2, layout, document, context);
-                ApplyCaret(hit.Position, extend, preserveX: true);
+                ApplyCaret(document, hit.Position, extend, preserveX: true);
             }
         }
     }
@@ -977,7 +1037,7 @@ public class EditorInputController
             // Move to next line in same block
             var nextLine = block.Lines[lineIdx + 1];
             var hit = DocumentHitTester.HitTest(_caret.PreferredX, block.Y + nextLine.Y + nextLine.Height / 2, layout, document, context);
-            ApplyCaret(hit.Position, extend, preserveX: true);
+            ApplyCaret(document, hit.Position, extend, preserveX: true);
         }
         else if (blockIdx + 1 < layout.Blocks.Count)
         {
@@ -987,7 +1047,7 @@ public class EditorInputController
             {
                 var firstLine = nextBlock.Lines[0];
                 var hit = DocumentHitTester.HitTest(_caret.PreferredX, nextBlock.Y + firstLine.Y + firstLine.Height / 2, layout, document, context);
-                ApplyCaret(hit.Position, extend, preserveX: true);
+                ApplyCaret(document, hit.Position, extend, preserveX: true);
             }
         }
     }
@@ -1005,11 +1065,11 @@ public class EditorInputController
         {
             var firstRun = line.Runs[0];
             var pos = RunStartToDocumentPosition(firstRun, blockIdx, document);
-            ApplyCaret(pos, extend);
+            ApplyCaret(document, pos, extend);
         }
         else
         {
-            ApplyCaret(new DocumentPosition(blockIdx, 0, 0), extend);
+            ApplyCaret(document, new DocumentPosition(blockIdx, 0, 0), extend);
         }
     }
 
@@ -1024,11 +1084,11 @@ public class EditorInputController
         {
             var lastRun = line.Runs[^1];
             var pos = RunEndToDocumentPosition(lastRun, blockIdx, document);
-            ApplyCaret(pos, extend);
+            ApplyCaret(document, pos, extend);
         }
         else
         {
-            ApplyCaret(new DocumentPosition(blockIdx, 0, 0), extend);
+            ApplyCaret(document, new DocumentPosition(blockIdx, 0, 0), extend);
         }
     }
 
@@ -1037,7 +1097,7 @@ public class EditorInputController
     /// <summary>Moves the caret to the very beginning of the document.</summary>
     public void MoveDocStart(bool extend = false)
     {
-        ApplyCaret(new DocumentPosition(0, 0, 0), extend);
+        ApplyCaret(null, new DocumentPosition(0, 0, 0), extend);
     }
 
     /// <summary>Moves the caret to the very end of the document.</summary>
@@ -1045,40 +1105,11 @@ public class EditorInputController
     {
         if (document.Blocks.Count == 0)
         {
-            ApplyCaret(new DocumentPosition(0, 0, 0), extend);
+            ApplyCaret(document, new DocumentPosition(0, 0, 0), extend);
             return;
         }
 
-        int lastBlockIdx = document.Blocks.Count - 1;
-
-        if (document.Blocks[lastBlockIdx] is TableBlock lastTable && lastTable.Rows.Count > 0)
-        {
-            int lastRow = lastTable.Rows.Count - 1;
-            int lastCol = lastTable.Rows[lastRow].Cells.Count - 1;
-            var cell = lastTable.GetCell(lastRow, lastCol);
-            if (cell?.Blocks.Count > 0 && cell.Blocks[^1] is Paragraph cellParagraph && cellParagraph.Inlines.Count > 0)
-            {
-                int cellLastInlineIdx = cellParagraph.Inlines.Count - 1;
-                int cellLastOffset = cellParagraph.Inlines[cellLastInlineIdx].Length;
-                ApplyCaret(new DocumentPosition(lastBlockIdx, cellLastInlineIdx, cellLastOffset, lastRow, lastCol), extend);
-            }
-            else
-            {
-                ApplyCaret(new DocumentPosition(lastBlockIdx, 0, 0, lastRow, lastCol), extend);
-            }
-            return;
-        }
-
-        var paragraph = GetParagraph(document, lastBlockIdx);
-        if (paragraph.Inlines.Count == 0)
-        {
-            ApplyCaret(new DocumentPosition(lastBlockIdx, 0, 0), extend);
-            return;
-        }
-
-        int lastInlineIdx = paragraph.Inlines.Count - 1;
-        int lastOffset = paragraph.Inlines[lastInlineIdx].Length;
-        ApplyCaret(new DocumentPosition(lastBlockIdx, lastInlineIdx, lastOffset), extend);
+        ApplyCaret(document, GetBlockEndPosition(document, document.Blocks.Count - 1), extend);
     }
 
     // ── Page Up / Down ────────────────────────────────────────────────
@@ -1185,40 +1216,55 @@ public class EditorInputController
 
         int row = Math.Clamp(pos.CellRow, 0, table.RowCount - 1);
         int col = Math.Clamp(pos.CellCol, 0, table.Rows[row].Cells.Count - 1);
+        var owners = table.BuildSpanOwners();
 
-        if (reverse)
+        // Step cell by cell in reading order, skipping slots covered by another cell's span.
+        // Leaving the table is decided from the terminal slot reached, which may itself be covered.
+        while (true)
         {
-            if (col > 0)
+            if (reverse)
             {
-                ApplyCaret(new DocumentPosition(pos.BlockIndex, 0, 0, row, col - 1), extend: false);
-                return true;
+                if (col > 0)
+                {
+                    col--;
+                }
+                else if (row > 0)
+                {
+                    row--;
+                    col = Math.Max(0, table.Rows[row].Cells.Count - 1);
+                }
+                else
+                {
+                    return TryMoveOutOfTable(document, AtCell(pos, row, col), toAfter: false, extend: false);
+                }
+            }
+            else
+            {
+                if (col + 1 < table.Rows[row].Cells.Count)
+                {
+                    col++;
+                }
+                else if (row + 1 < table.RowCount)
+                {
+                    row++;
+                    col = 0;
+                }
+                else
+                {
+                    return TryMoveOutOfTable(document, AtCell(pos, row, col), toAfter: true, extend: false);
+                }
             }
 
-            if (row > 0)
+            if (col >= table.ColumnCount || owners[row][col] == (row, col))
             {
-                int prevRow = row - 1;
-                int prevCol = Math.Max(0, table.Rows[prevRow].Cells.Count - 1);
-                ApplyCaret(new DocumentPosition(pos.BlockIndex, 0, 0, prevRow, prevCol), extend: false);
+                ApplyCaret(document, new DocumentPosition(pos.BlockIndex, 0, 0, row, col), extend: false);
                 return true;
             }
-
-            return TryMoveOutOfTable(document, pos, toAfter: false, extend: false);
         }
-
-        if (col + 1 < table.Rows[row].Cells.Count)
-        {
-            ApplyCaret(new DocumentPosition(pos.BlockIndex, 0, 0, row, col + 1), extend: false);
-            return true;
-        }
-
-        if (row + 1 < table.RowCount)
-        {
-            ApplyCaret(new DocumentPosition(pos.BlockIndex, 0, 0, row + 1, 0), extend: false);
-            return true;
-        }
-
-        return TryMoveOutOfTable(document, pos, toAfter: true, extend: false);
     }
+
+    private static DocumentPosition AtCell(DocumentPosition pos, int row, int col)
+        => new(pos.BlockIndex, pos.InlineIndex, pos.Offset, row, col);
 
     private bool TryInsertTableRow(Document.Document document, bool below)
     {
@@ -1237,8 +1283,7 @@ public class EditorInputController
             : Math.Clamp(pos.CellRow, 0, table.RowCount - 1);
         int targetCol = Math.Clamp(pos.CellCol, 0, table.Rows[targetRow].Cells.Count - 1);
         var target = new DocumentPosition(blockIndex, 0, 0, targetRow, targetCol);
-        _selection.CollapseTo(target);
-        _caret.MoveTo(target);
+        ApplyCaret(document, target, extend: false);
         return true;
     }
 
@@ -1255,8 +1300,7 @@ public class EditorInputController
         int targetRow = Math.Clamp(pos.CellRow, 0, table.RowCount - 1);
         int targetCol = Math.Clamp(pos.CellCol, 0, table.Rows[targetRow].Cells.Count - 1);
         var target = new DocumentPosition(blockIndex, 0, 0, targetRow, targetCol);
-        _selection.CollapseTo(target);
-        _caret.MoveTo(target);
+        ApplyCaret(document, target, extend: false);
         return true;
     }
 
@@ -1277,8 +1321,7 @@ public class EditorInputController
             : Math.Clamp(pos.CellCol, 0, table.ColumnCount - 1);
         int targetRow = Math.Clamp(pos.CellRow, 0, table.RowCount - 1);
         var target = new DocumentPosition(blockIndex, 0, 0, targetRow, targetCol);
-        _selection.CollapseTo(target);
-        _caret.MoveTo(target);
+        ApplyCaret(document, target, extend: false);
         return true;
     }
 
@@ -1295,8 +1338,7 @@ public class EditorInputController
         int targetRow = Math.Clamp(pos.CellRow, 0, table.RowCount - 1);
         int targetCol = Math.Clamp(pos.CellCol, 0, table.ColumnCount - 1);
         var target = new DocumentPosition(blockIndex, 0, 0, targetRow, targetCol);
-        _selection.CollapseTo(target);
-        _caret.MoveTo(target);
+        ApplyCaret(document, target, extend: false);
         return true;
     }
 
@@ -1307,8 +1349,7 @@ public class EditorInputController
             return false;
 
         var target = PushOrExecute(new DeleteTableAction(document, table));
-        _selection.CollapseTo(target);
-        _caret.MoveTo(target);
+        ApplyCaret(document, target, extend: false);
         return true;
     }
 
@@ -1327,7 +1368,7 @@ public class EditorInputController
             var target = toAfter
                 ? new DocumentPosition(targetBlock, 0, 0)
                 : GetBlockEndPosition(document, targetBlock);
-            ApplyCaret(target, extend);
+            ApplyCaret(document, target, extend);
             return true;
         }
 
@@ -1338,7 +1379,7 @@ public class EditorInputController
         document.NotifyChanged(new DocumentChangedEventArgs(
             DocumentChangeType.TextInserted,
             new TextRange(insertedPos, insertedPos)));
-        ApplyCaret(insertedPos, extend);
+        ApplyCaret(document, insertedPos, extend);
         return true;
     }
 
@@ -1364,7 +1405,10 @@ public class EditorInputController
         if (table.RowCount == 0) return false;
         int lastRow = table.RowCount - 1;
         int lastCol = Math.Max(0, table.Rows[lastRow].Cells.Count - 1);
-        return pos.CellRow == lastRow && pos.CellCol == lastCol;
+        if (pos.CellRow == lastRow && pos.CellCol == lastCol)
+            return true;
+        // The cell covering the last slot (a merged cell) is the last cell too.
+        return table.GetSpanAnchor(lastRow, lastCol) == (pos.CellRow, pos.CellCol);
     }
 
     private static DocumentPosition GetBlockEndPosition(Document.Document document, int blockIndex)
@@ -1374,8 +1418,9 @@ public class EditorInputController
 
         if (document.Blocks[blockIndex] is TableBlock table && table.RowCount > 0)
         {
+            // The last slot may be covered by a merged cell; the end is then the end of that cell.
             int lastRow = table.RowCount - 1;
-            int lastCol = Math.Max(0, table.Rows[lastRow].Cells.Count - 1);
+            (lastRow, int lastCol) = table.GetSpanAnchor(lastRow, Math.Max(0, table.Rows[lastRow].Cells.Count - 1));
             var cell = table.GetCell(lastRow, lastCol);
             if (cell?.Blocks.Count > 0 && cell.Blocks[^1] is Paragraph cellParagraph && cellParagraph.Inlines.Count > 0)
             {

@@ -234,13 +234,12 @@ public static class DocumentHitTester
         float x, float y, TableLayoutBlock tableBlock,
         Document.Document document, IDrawingContext context, bool isAfterLastBlock)
     {
-        const float borderWidth = 1f;
+        float borderWidth = tableBlock.BorderWidth;
         int blockIdx = tableBlock.BlockIndex;
         float localY = y - tableBlock.Y;
 
-        // Find the row
+        // Find the row slot
         int row = tableBlock.RowHeights.Length - 1;
-        float rowStartY = borderWidth;
         {
             float accY = borderWidth;
             for (int r = 0; r < tableBlock.RowHeights.Length; r++)
@@ -248,16 +247,14 @@ public static class DocumentHitTester
                 if (localY < accY + tableBlock.RowHeights[r] || r == tableBlock.RowHeights.Length - 1)
                 {
                     row = r;
-                    rowStartY = accY;
                     break;
                 }
                 accY += tableBlock.RowHeights[r] + borderWidth;
             }
         }
 
-        // Find the column
+        // Find the column slot
         int col = tableBlock.ColumnWidths.Length - 1;
-        float colStartX = borderWidth;
         {
             float accX = borderWidth;
             for (int c = 0; c < tableBlock.ColumnWidths.Length; c++)
@@ -265,12 +262,17 @@ public static class DocumentHitTester
                 if (x < accX + tableBlock.ColumnWidths[c] || c == tableBlock.ColumnWidths.Length - 1)
                 {
                     col = c;
-                    colStartX = accX;
                     break;
                 }
                 accX += tableBlock.ColumnWidths[c] + borderWidth;
             }
         }
+
+        // A slot covered by a span belongs to the spanning cell, whose content starts at its top-left slot.
+        (row, col) = tableBlock.GetOwningCell(row, col);
+        var cellBounds = tableBlock.GetCellBounds(row, col);
+        float rowStartY = cellBounds.Y;
+        float colStartX = cellBounds.X;
 
         var cellBlock = tableBlock.Cells[row][col];
 
