@@ -1,6 +1,7 @@
 using MintedTextEditor.Core.Commands;
 using MintedTextEditor.Core.Document;
 using MintedTextEditor.Core.Editing;
+using MintedTextEditor.Core.Events;
 using MintedTextEditor.Core.Formatting;
 
 namespace MintedTextEditor.Core.Tests;
@@ -172,6 +173,72 @@ public class TableEditingFixesTests
 
         Assert.Equal("1", DocumentEditor.GetSelectedText(doc, new TextRange(Cell(0, 0, 1, 0, 1), Cell(0, 0, 1, 0, 2))));
         Assert.Equal("1\nA2\nB", DocumentEditor.GetSelectedText(doc, new TextRange(Cell(0, 0, 1, 0, 1), Cell(0, 1, 1, 0, 1))));
+    }
+
+    /// <summary>A 1x1 table whose cell holds "A", a link showing "BD", "C", a line break and "E".</summary>
+    private static TableBlock TableWithLink()
+    {
+        var table = new TableBlock(1, 1);
+        var p = CellParagraph(table, 0, 0);
+        p.AppendRun("A");
+        var link = new HyperlinkInline("https://x.y");
+        link.AddChild(new TextRun("BD"));
+        p.AddInline(link);
+        p.AppendRun("C");
+        p.AddInline(new LineBreak());
+        p.AppendRun("E");
+        return table;
+    }
+
+    [Fact]
+    public void GetSelectedText_InTableCell_IncludesHyperlinkTextAndLineBreaks()
+    {
+        var doc = new EditorDocument([TableWithLink()]);
+
+        Assert.Equal("ABDC\nE", DocumentEditor.GetSelectedText(doc, new TextRange(Cell(0, 0, 0, 0, 0), Cell(0, 0, 0, 4, 1))));
+        // Partly selected link: only its selected characters.
+        Assert.Equal("DC\nE", DocumentEditor.GetSelectedText(doc, new TextRange(Cell(0, 0, 0, 1, 1), Cell(0, 0, 0, 4, 1))));
+        Assert.Equal("B", DocumentEditor.GetSelectedText(doc, new TextRange(Cell(0, 0, 0, 1, 0), Cell(0, 0, 0, 1, 1))));
+    }
+
+    [Fact]
+    public void GetSelectedText_TopLevelParagraph_IncludesHyperlinkText()
+    {
+        var p = new Paragraph("A");
+        var link = new HyperlinkInline("https://x.y");
+        link.AddChild(new TextRun("BD"));
+        p.AddInline(link);
+        p.AppendRun("C");
+        var doc = new EditorDocument([p]);
+
+        Assert.Equal("ABDC", DocumentEditor.GetSelectedText(doc, new TextRange(new(0, 0, 0), new(0, 2, 1))));
+        Assert.Equal("DC", DocumentEditor.GetSelectedText(doc, new TextRange(new(0, 1, 1), new(0, 2, 1))));
+    }
+
+    [Fact]
+    public void CutCommand_LinkedTextInTableCell_CopiesIt()
+    {
+        var doc = new EditorDocument([TableWithLink()]);
+        var clipboard = new MockClipboardProvider();
+        var sel = new Selection();
+        sel.Set(Cell(0, 0, 0, 1, 0), Cell(0, 0, 0, 1, 2));
+        var ctx = new EditorContext(doc, sel, new UndoManager(), new FormattingEngine(), new FontFormattingEngine(), clipboard);
+
+        new CutCommand().Execute(ctx);
+
+        Assert.Equal("BD", clipboard.Contents);
+        Assert.Equal("AC\nE", ((TableBlock)doc.Blocks[0]).GetCell(0, 0)!.GetText());
+    }
+
+    [Fact]
+    public void InsertHyperlink_OverLinkedTextInTableCell_KeepsText()
+    {
+        var doc = new EditorDocument([TableWithLink()]);
+
+        var link = HyperlinkEngine.InsertHyperlink(doc, new TextRange(Cell(0, 0, 0, 1, 0), Cell(0, 0, 0, 1, 2)), "https://new.z");
+
+        Assert.Equal("BD", link.GetText());
+        Assert.Equal("ABDC\nE", ((TableBlock)doc.Blocks[0]).GetCell(0, 0)!.GetText());
     }
 
     // ── 3. Character formatting in table cells ────────────────────────────────

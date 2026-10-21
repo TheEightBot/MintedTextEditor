@@ -57,7 +57,11 @@ public static class HyperlinkEngine
         else
         {
             linkText  = hasDisplayText ? displayText! : DocumentEditor.GetSelectedText(doc, range);
-            insertPos = DocumentEditor.DeleteRange(doc, range);
+            // The delete can remove and merge inlines (e.g. a whole link between two runs), so
+            // the start's inline index may be stale afterwards; re-resolve its character offset.
+            int startOffset = DocumentEditor.GetAbsoluteCharOffset(doc, range.Start);
+            var deletedAt = DocumentEditor.DeleteRange(doc, range);
+            insertPos = DocumentEditor.AbsoluteCharOffsetToPosition(doc, deletedAt, startOffset);
         }
 
         var hyperlink = new HyperlinkInline(url, title);

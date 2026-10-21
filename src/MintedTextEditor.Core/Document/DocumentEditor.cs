@@ -556,9 +556,7 @@ public static class DocumentEditor
             {
                 if (i > 0) sb.Append('\n');
                 var (para, from, to) = paragraphs[i];
-                AppendRunText(sb, para,
-                    from ?? new DocumentPosition(0, 0, 0),
-                    to ?? new DocumentPosition(0, para.Inlines.Count - 1, int.MaxValue));
+                AppendText(sb, para, from, to);
             }
             return sb.ToString();
         }
@@ -570,32 +568,69 @@ public static class DocumentEditor
 
             if (document.Blocks[bi] is not Paragraph para) continue;
 
-            AppendRunText(sb, para,
-                bi == start.BlockIndex ? start : new DocumentPosition(bi, 0, 0),
-                bi == end.BlockIndex ? end : new DocumentPosition(bi, para.Inlines.Count - 1, int.MaxValue));
+            AppendText(sb, para,
+                bi == start.BlockIndex ? start : null,
+                bi == end.BlockIndex ? end : null);
         }
 
         return sb.ToString();
     }
 
     /// <summary>
-    /// Appends the text of the text runs of <paramref name="para"/> from <paramref name="from"/>
-    /// to <paramref name="to"/> (inline index and offset pairs within <paramref name="para"/>).
+    /// Appends the text of <paramref name="para"/> from <paramref name="from"/> to <paramref name="to"/>
+    /// (positions within <paramref name="para"/>; null: its start or end): the text of its runs,
+    /// including those inside hyperlinks, with a newline for each line break. Images add no text.
+    /// An inline that is only partly selected contributes only its selected characters.
     /// </summary>
-    private static void AppendRunText(System.Text.StringBuilder sb, Paragraph para, DocumentPosition from, DocumentPosition to)
+    private static void AppendText(System.Text.StringBuilder sb, Paragraph para, DocumentPosition? from, DocumentPosition? to)
     {
-        for (int ii = from.InlineIndex; ii <= to.InlineIndex && ii < para.Inlines.Count; ii++)
+        int fromOffset = from is { } f ? OffsetInParagraph(para, f) : 0;
+        int toOffset = to is { } t ? OffsetInParagraph(para, t) : int.MaxValue;
+        if (fromOffset < toOffset)
+            AppendText(sb, para.Inlines, 0, fromOffset, toOffset);
+    }
+
+    /// <summary>
+    /// Appends the text of <paramref name="inlines"/>, which start at character <paramref name="offset"/>,
+    /// that lies in [<paramref name="from"/>, <paramref name="to"/>). Returns the offset after the last inline.
+    /// </summary>
+    private static int AppendText(System.Text.StringBuilder sb, IEnumerable<Inline> inlines, int offset, int from, int to)
+    {
+        foreach (var inline in inlines)
         {
-            if (para.Inlines[ii] is not TextRun run) continue;
+            if (inline is HyperlinkInline link)
+            {
+                offset = AppendText(sb, link.Children, offset, from, to);
+                continue;
+            }
 
-            int startOffset = ii == from.InlineIndex ? from.Offset : 0;
-            int endOffset   = ii == to.InlineIndex   ? to.Offset   : run.Text.Length;
-
-            startOffset = Math.Clamp(startOffset, 0, run.Text.Length);
-            endOffset   = Math.Clamp(endOffset,   0, run.Text.Length);
-            if (startOffset < endOffset)
-                sb.Append(run.Text, startOffset, endOffset - startOffset);
+            int length = inline.Length;
+            int start = Math.Max(from, offset) - offset;
+            int end = Math.Min(to, offset + length) - offset;
+            if (start < end)
+            {
+                if (inline is TextRun run)
+                    sb.Append(run.Text, start, end - start);
+                else if (inline is LineBreak)
+                    sb.Append('\n');
+            }
+            offset += length;
         }
+        return offset;
+    }
+
+    /// <summary>
+    /// The character offset of <paramref name="position"/>'s inline index and offset within
+    /// <paramref name="para"/>, with the offset clamped to its inline.
+    /// </summary>
+    private static int OffsetInParagraph(Paragraph para, DocumentPosition position)
+    {
+        int offset = 0;
+        for (int i = 0; i < position.InlineIndex && i < para.Inlines.Count; i++)
+            offset += para.Inlines[i].Length;
+        if (position.InlineIndex >= 0 && position.InlineIndex < para.Inlines.Count)
+            offset += Math.Clamp(position.Offset, 0, para.Inlines[position.InlineIndex].Length);
+        return offset;
     }
 
     private static Paragraph GetParagraph(Document document, int blockIndex)
