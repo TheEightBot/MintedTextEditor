@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Basic screen-reader support**: `MintedEditorView` now sets `SemanticProperties.Description` (editor label, "read only" state, and the placeholder while empty) and `SemanticProperties.Hint` from `EditorStrings`, keeps them up to date as `IsReadOnly`, `PlaceholderText` and the document change, announces read-only changes, and hides its internal canvas and keyboard-input views from the accessibility tree. Values the app sets itself are left alone. Document content and toolbar buttons are still not exposed to screen readers.
+- `EditorAccessibility.ForEditor` and `EditorAccessibility.IsEmpty` in `MintedTextEditor.Core.Accessibility`, which compute that description and hint, and `EditorStrings.EditorReadOnlyAccessibilityState` ("read only").
+
 ---
 
 ## [0.3.1] — 2026-10-21

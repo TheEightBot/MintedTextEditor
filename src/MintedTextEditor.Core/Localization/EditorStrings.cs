@@ -133,6 +133,8 @@ public class EditorStrings
     public virtual string EditorAccessibilityLabel    => "Rich text editor";
     /// <summary>Accessibility hint of the editor surface. Default: "Double-tap to edit text"</summary>
     public virtual string EditorAccessibilityHint     => "Double-tap to edit text";
+    /// <summary>State appended to the editor's accessibility label while it is read-only. Default: "read only"</summary>
+    public virtual string EditorReadOnlyAccessibilityState => "read only";
     /// <summary>Accessibility label of the formatting toolbar. Default: "Formatting toolbar"</summary>
     public virtual string ToolbarAccessibilityLabel   => "Formatting toolbar";
     /// <summary>Accessibility label of the context menu. Default: "Context menu"</summary>

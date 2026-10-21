@@ -4,18 +4,41 @@ MintedTextEditor draws all of its content, including the toolbar, on a single Sk
 
 ## Screen Reader Support
 
-The editor does not yet expose its content to screen readers (TalkBack, VoiceOver, Narrator): the text, caret, selection and toolbar buttons are pixels on a canvas, and the native accessibility tree contains only the canvas view and a hidden keyboard-input view.
+Screen readers (TalkBack, VoiceOver, Narrator) see the editor as **one labelled element**. They cannot yet read the document text, the caret position or the selection, and the toolbar's buttons are not individually reachable.
 
-### Customize Accessible Labels
+### What works
 
-`MintedEditorView` is a regular MAUI view, so you can describe it as a whole with MAUI's semantic properties:
+`MintedEditorView` sets MAUI's `SemanticProperties` on itself:
+
+| Property | Value |
+|---|---|
+| `SemanticProperties.Description` | `EditorStrings.EditorAccessibilityLabel` ("Rich text editor"), then `EditorStrings.EditorReadOnlyAccessibilityState` ("read only") when `IsReadOnly` is true, then `PlaceholderText` while the document is empty. Parts are joined with ", ", e.g. "Rich text editor, read only" or "Rich text editor, Start typing…". |
+| `SemanticProperties.Hint` | `EditorStrings.EditorAccessibilityHint` ("Double-tap to edit text"); no hint while read-only. |
+
+- The values are updated when `IsReadOnly` or `PlaceholderText` changes and when the document becomes empty or non-empty.
+- When `IsReadOnly` changes, the new description is announced with `SemanticScreenReader.Announce`.
+- The SkiaSharp canvas and the hidden keyboard-input view are excluded from the accessibility tree (`AutomationProperties.IsInAccessibleTree = false`), so the editor shows up as a single element instead of unlabelled child views.
+- Strings come from `EditorStrings.Current` (see [Localization](#localization)), read again on each of the updates above and when the view gets its handler. Assign a custom `EditorStrings` before the editor is created or shown.
+
+The text is built by `MintedTextEditor.Core.Accessibility.EditorAccessibility.ForEditor(isReadOnly, isEmpty, placeholderText, strings)`, which returns an `AccessibilityProperties` (`Label`, `Hint`). You can call it to describe a custom host the same way.
+
+### Your own labels
+
+If you set `SemanticProperties.Description` or `SemanticProperties.Hint` on the editor yourself, the editor keeps your value and stops updating that property:
 
 ```csharp
-SemanticProperties.SetDescription(editor, "Main document editor");
-SemanticProperties.SetHint(editor, "Double-tap to edit text");
+SemanticProperties.SetDescription(editor, "Message body");
+SemanticProperties.SetHint(editor, "Double-tap to write your message");
 ```
 
-`MintedTextEditor.Core.Accessibility.AccessibilityProperties` and the accessibility strings on `EditorStrings` (`EditorAccessibilityLabel`, `EditorAccessibilityHint`, `ToolbarAccessibilityLabel`, `ContextMenuAccessibilityLabel`) are building blocks for this; the control does not apply them yet.
+### What does not work yet
+
+- **Document content**: the text, caret, selection, formatting, links, images and tables are drawn on a canvas and are not exposed. A screen reader announces only the description above, not what has been typed.
+- **Toolbar**: the toolbar is drawn on the same canvas, so its buttons, dropdowns and colour pickers are not separate accessible elements and cannot be reached or activated with a screen reader. `EditorStrings.ToolbarAccessibilityLabel` and `ContextMenuAccessibilityLabel` are not applied. To make formatting accessible, hide the built-in toolbar (`ShowToolbar = false`) and build your own from native MAUI buttons that call the editor's commands (see [Commands & Events](commands-events.md)); keyboard shortcuts also work (below).
+- **Activation**: what a double-tap (or Narrator's default action) does on the editor element is left to each platform's default handling of the view; it has not been verified on every platform that this focuses the editor and opens the keyboard.
+- `AccessibilityProperties.IsHidden` and `LiveRegion` are not used by the control.
+
+Exposing the content properly needs a platform accessibility-node tree (an Android `AccessibilityNodeProvider`, iOS `UIAccessibilityElement`s / `UITextInput`, WinUI automation peers with a text pattern). That is planned follow-up work.
 
 ## Keyboard-Only Operation
 

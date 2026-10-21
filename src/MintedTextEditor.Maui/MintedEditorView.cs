@@ -1,3 +1,4 @@
+using MintedTextEditor.Core.Accessibility;
 using MintedTextEditor.Core.Commands;
 using MintedTextEditor.Core.Document;
 using MintedTextEditor.Core.Editing;
@@ -102,6 +103,12 @@ public class MintedEditorView : ContentView
     private const int DefaultSvgRasterSize = 512;
     private int _iconLoadVersion;
 
+    // ── Accessibility ────────────────────────────────────────────────────────────
+    // Last SemanticProperties values this view applied to itself. A different current value
+    // means the app set its own, which is then left alone.
+    private string? _appliedSemanticDescription;
+    private string? _appliedSemanticHint;
+
 
 
     // ── Bindable Properties ──────────────────────────────────────────────────────
@@ -160,6 +167,7 @@ public class MintedEditorView : ContentView
                 // Touch is ignored while read-only, so a release could never end the gesture.
                 if ((bool)nv)
                     v.CancelCaretGesture();
+                v.UpdateSemantics(announce: true);
                 v.InvalidateCanvas();
             });
 
@@ -170,7 +178,12 @@ public class MintedEditorView : ContentView
             typeof(string),
             typeof(MintedEditorView),
             "Start typing…",
-            propertyChanged: static (b, _, _) => ((MintedEditorView)b).InvalidateCanvas());
+            propertyChanged: static (b, _, _) =>
+            {
+                var v = (MintedEditorView)b;
+                v.UpdateSemantics();
+                v.InvalidateCanvas();
+            });
 
     /// <summary>
     /// Visual theme applied to the editor. Defaults to the built-in light theme.
@@ -818,10 +831,17 @@ public class MintedEditorView : ContentView
             _iconCache.TryGetValue(key, out var bmp) ? bmp : null;
         WireToolbarCallbacks(_toolbarRenderer.Definition);
 
+        // The editor is announced as one element (this view); the canvas and the hidden
+        // keyboard-capture view would otherwise show up as unlabeled nodes.
+        AutomationProperties.SetIsInAccessibleTree(_canvas, false);
+        AutomationProperties.SetIsInAccessibleTree(_keyboardProxy, false);
+
         var grid = new Grid();
         grid.Add(_canvas);
         grid.Add(_keyboardProxy);
         Content = grid;
+
+        UpdateSemantics();
     }
 
     // ── HTML API ─────────────────────────────────────────────────────────────────
@@ -1024,6 +1044,8 @@ public class MintedEditorView : ContentView
             // handler lifetime — an idle editor should not repaint 10x per second.
             if (_isEditorFocused)
                 StartBlinkTimer();
+            // Picks up an EditorStrings.Current assigned after construction.
+            UpdateSemantics();
             _ = LoadToolbarIconsAsync();
         }
         else
@@ -1242,8 +1264,7 @@ public class MintedEditorView : ContentView
         RenderDocumentLayer(dc, viewport);
 
         // Placeholder — shown only when the document is an empty single paragraph
-        if (_document.Blocks.Count == 1
-            && _document.Blocks[0] is Paragraph p && p.Inlines.Count == 0
+        if (EditorAccessibility.IsEmpty(_document)
             && !string.IsNullOrEmpty(PlaceholderText))
         {
             var placeholder = new EditorPaint
@@ -1746,7 +1767,40 @@ public class MintedEditorView : ContentView
     {
         _layoutCache.OnDocumentChanged(_document, e);
         TextChanged?.Invoke(this, new EditorTextChangedEventArgs(e.AffectedRange));
+        UpdateSemantics();
         InvalidateCanvas();
+    }
+
+    // ── Accessibility ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Applies the editor's screen-reader description and hint (see
+    /// <see cref="EditorAccessibility.ForEditor"/>) to this view's <see cref="SemanticProperties"/>,
+    /// unless the app has set its own value. With <paramref name="announce"/>, a changed
+    /// description is also announced (used when <see cref="IsReadOnly"/> toggles).
+    /// </summary>
+    private void UpdateSemantics(bool announce = false)
+    {
+        var props = EditorAccessibility.ForEditor(
+            IsReadOnly, EditorAccessibility.IsEmpty(_document), PlaceholderText);
+        string? description = string.IsNullOrEmpty(props.Label) ? null : props.Label;
+        string? hint = string.IsNullOrEmpty(props.Hint) ? null : props.Hint;
+
+        if (SemanticProperties.GetDescription(this) == _appliedSemanticDescription
+            && description != _appliedSemanticDescription)
+        {
+            _appliedSemanticDescription = description;
+            SemanticProperties.SetDescription(this, description);
+            if (announce && description is not null && Handler is not null)
+                Microsoft.Maui.Accessibility.SemanticScreenReader.Default.Announce(description);
+        }
+
+        if (SemanticProperties.GetHint(this) == _appliedSemanticHint
+            && hint != _appliedSemanticHint)
+        {
+            _appliedSemanticHint = hint;
+            SemanticProperties.SetHint(this, hint);
+        }
     }
 
     private void RaiseSelectionChanged()
