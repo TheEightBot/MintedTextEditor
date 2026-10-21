@@ -287,7 +287,7 @@ public class UndoRedoTests
         Assert.Equal(2, doc.Blocks.Count);
 
         undo.Undo();
-        Assert.Equal(1, doc.Blocks.Count);
+        Assert.Single(doc.Blocks);
         Assert.Equal("HelloWorld", doc.GetText());
     }
 
@@ -299,7 +299,7 @@ public class UndoRedoTests
 
         undo.Push(new SplitBlockAction(doc, new DocumentPosition(0, 0, 5)));
         undo.Undo();
-        Assert.Equal(1, doc.Blocks.Count);
+        Assert.Single(doc.Blocks);
 
         undo.Redo();
         Assert.Equal(2, doc.Blocks.Count);
@@ -316,7 +316,7 @@ public class UndoRedoTests
         var undo = new UndoManager();
 
         undo.Push(new MergeBlocksAction(doc, 0));
-        Assert.Equal(1, doc.Blocks.Count);
+        Assert.Single(doc.Blocks);
         Assert.Equal("HelloWorld", doc.GetText());
     }
 
@@ -345,7 +345,7 @@ public class UndoRedoTests
         Assert.Equal(2, doc.Blocks.Count);
 
         undo.Redo();
-        Assert.Equal(1, doc.Blocks.Count);
+        Assert.Single(doc.Blocks);
         Assert.Equal("HelloWorld", doc.GetText());
     }
 

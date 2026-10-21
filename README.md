@@ -241,10 +241,9 @@ For deeper API details, see [docs/getting-started.md](docs/getting-started.md), 
 git clone https://github.com/TheEightBot/MintedTextEditor.git
 cd MintedTextEditor
 
-# Build and test the platform-independent projects (any OS)
-dotnet build src/MintedTextEditor.SkiaSharp/
-dotnet test tests/MintedTextEditor.Core.Tests/
-dotnet test tests/MintedTextEditor.SkiaSharp.Tests/
+# Build and test the platform-independent projects (any OS, no MAUI workload)
+dotnet build MintedTextEditor.Core.slnf
+dotnet test MintedTextEditor.Core.slnf
 
 # Build MAUI project and sample app (needs the MAUI workload; iOS/Mac Catalyst need macOS)
 dotnet workload install maui

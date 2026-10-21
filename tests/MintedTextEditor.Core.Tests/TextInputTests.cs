@@ -228,7 +228,7 @@ public class TextInputTests
 
         ctrl.UndoManager.Undo();
 
-        Assert.Equal(1, doc.Blocks.Count);
+        Assert.Single(doc.Blocks);
         Assert.Equal("HelloWorld", doc.GetText());
     }
 
@@ -255,7 +255,7 @@ public class TextInputTests
         ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
 
         Assert.Equal("Hi", doc.GetText());
-        Assert.Equal(1, doc.Blocks.Count);
+        Assert.Single(doc.Blocks);
     }
 
     [Fact]
@@ -266,7 +266,7 @@ public class TextInputTests
 
         ctrl.HandleKeyDown(Key(EditorKey.Backspace), doc, layout, _context);
 
-        Assert.Equal(1, doc.Blocks.Count);
+        Assert.Single(doc.Blocks);
         Assert.Equal("HelloWorld", doc.GetText());
     }
 
@@ -306,7 +306,7 @@ public class TextInputTests
         ctrl.HandleKeyDown(Key(EditorKey.Delete), doc, layout, _context);
 
         Assert.Equal("Hi", doc.GetText());
-        Assert.Equal(1, doc.Blocks.Count);
+        Assert.Single(doc.Blocks);
     }
 
     [Fact]
@@ -317,7 +317,7 @@ public class TextInputTests
 
         ctrl.HandleKeyDown(Key(EditorKey.Delete), doc, layout, _context);
 
-        Assert.Equal(1, doc.Blocks.Count);
+        Assert.Single(doc.Blocks);
         Assert.Equal("HelloWorld", doc.GetText());
     }
 

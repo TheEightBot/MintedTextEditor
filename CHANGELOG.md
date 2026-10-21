@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.
+
 ### Fixed
 - **HTML round-trip of colors and table spans**: the HTML importer now reads `rgba(...)` colors (alpha as 0–1 or a percentage), `#rgba`/`#rrggbbaa`, space-separated `rgb(r g b / a)` and percentage channels, so text and highlight colors with transparency survive export and re-import. `colspan`/`rowspan` are read into `TableCell.ColumnSpan`/`RowSpan` with merged placeholder cells, matching `TableEngine.MergeCells`, and a table nested in a cell no longer ends the outer table. The exporter now writes the `rgba` alpha with a `.` decimal separator in every culture.
 
