@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 - The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.
 
+### Fixed
+- **Hit-testing long lines that need font fallback** (performance): `SkiaDrawingContext` keeps the font-fallback segmentation (and segment offsets) of its most recently measured runs in a small bounded cache, instead of re-segmenting the whole run for every caret query. Tapping in a long unwrapped line containing an emoji no longer takes quadratic time (40 taps on a 300×`a` + 😀 + 300×`b` line: ~1050 ms → ~11 ms).
+
 ---
 
 ## [0.3.1] — 2026-10-21
