@@ -7,6 +7,7 @@ using MintedTextEditor.Core.Html;
 using MintedTextEditor.Core.Markdown;
 using MintedTextEditor.Core.Input;
 using MintedTextEditor.Core.Layout;
+using MintedTextEditor.Core.Localization;
 using MintedTextEditor.Core.Rendering;
 using MintedTextEditor.Core.Theming;
 using MintedTextEditor.Core.Toolbar;
@@ -102,6 +103,8 @@ public class MintedEditorView : ContentView
     private readonly Dictionary<string, SKBitmap> _imageCache = new();
     private const int DefaultSvgRasterSize = 512;
     private int _iconLoadVersion;
+    // Weak, so an editor that is discarded without being unloaded can still be collected.
+    private IDisposable? _stringsSubscription;
 
 
 
@@ -494,23 +497,90 @@ public class MintedEditorView : ContentView
         WireToolbarCallbacks(definition);
     }
 
+    // Font families offered by the font-family dropdown after the localized "Default" entry.
+    private static readonly string[] s_fontFamilies =
+    [
+        "Arial", "Times New Roman", "Courier New",
+        "Georgia", "Verdana", "Trebuchet MS", "Comic Sans MS",
+    ];
+
+    /// <summary>
+    /// Fills the options of the built-in dropdowns (font family, heading level, edit, object and
+    /// table menus) from <see cref="EditorStrings.Current"/>, keeping each selection. Called when the
+    /// toolbar is wired and again whenever <see cref="EditorStrings.Current"/> changes.
+    /// </summary>
+    private static void ApplyLocalizedDropdownItems(ToolbarDefinition def)
+    {
+        var s = EditorStrings.Current;
+        foreach (var dd in def.AllItems.OfType<ToolbarDropdown>())
+        {
+            string[]? items = dd.Icon switch
+            {
+                "font-family"    => [s.DefaultFontFamily, .. s_fontFamilies],
+                "heading"        => [s.NormalText, s.Heading1, s.Heading2, s.Heading3, s.Heading4, s.Heading5, s.Heading6],
+                "edit-actions"   => [s.Copy, s.Cut, s.Paste, s.SelectAll],
+                "object-actions" => [s.OpenLink, s.RemoveLink, s.RemoveImage],
+                "table-actions"  =>
+                [
+                    s.InsertTableEllipsis, s.InsertRowAbove, s.InsertRowBelow, s.DeleteRow,
+                    s.InsertColumnLeft, s.InsertColumnRight, s.DeleteColumn, s.DeleteTable,
+                ],
+                _ => null,
+            };
+            if (items is null) continue;
+
+            dd.Items.Clear();
+            foreach (var text in items) dd.Items.Add(text);
+        }
+    }
+
+    private void OnEditorStringsChanged()
+    {
+        // EditorStrings.Current may be replaced from any thread.
+        Dispatcher.Dispatch(RefreshLocalizedStrings);
+    }
+
+    private void RefreshLocalizedStrings()
+    {
+        ApplyLocalizedDropdownItems(_toolbarRenderer.Definition);
+        InvalidateCanvas();
+    }
+
+    /// <summary>
+    /// Starts listening for <see cref="EditorStrings.CurrentChanged"/> (if not already) and applies
+    /// strings that were replaced while the editor was not listening.
+    /// </summary>
+    private void SubscribeToEditorStrings()
+    {
+        if (_stringsSubscription is not null) return;
+        _stringsSubscription = EditorStrings.SubscribeCurrentChangedWeak(
+            this, static view => view.OnEditorStringsChanged());
+        RefreshLocalizedStrings();
+    }
+
+    private void UnsubscribeFromEditorStrings()
+    {
+        _stringsSubscription?.Dispose();
+        _stringsSubscription = null;
+    }
+
+    private void OnViewLoaded(object? sender, EventArgs e) => SubscribeToEditorStrings();
+
+    private void OnViewUnloaded(object? sender, EventArgs e) => UnsubscribeFromEditorStrings();
+
     // ToolbarMaxRows wins once the app has set it; otherwise the definition's MaxRows applies.
     private void ApplyToolbarMaxRows() =>
         _toolbarRenderer.MaxRowsOverride = IsSet(ToolbarMaxRowsProperty) ? ToolbarMaxRows : null;
 
     private void WireToolbarCallbacks(ToolbarDefinition def)
     {
-        string[] fontFamilies =
-        [
-            "Default", "Arial", "Times New Roman", "Courier New",
-            "Georgia", "Verdana", "Trebuchet MS", "Comic Sans MS",
-        ];
         string[] fontSizes =
         [
             "8", "9", "10", "11", "12", "14", "16", "18",
             "20", "24", "28", "32", "36", "48", "72",
         ];
-        string[] headingLevels = ["Normal", "H1", "H2", "H3", "H4", "H5", "H6"];
+
+        ApplyLocalizedDropdownItems(def);
 
         foreach (var item in def.AllItems)
         {
@@ -519,13 +589,12 @@ public class MintedEditorView : ContentView
                 switch (dd.Icon)
                 {
                     case "font-family":
-                        dd.Items.Clear();
-                        foreach (var f in fontFamilies) dd.Items.Add(f);
                         dd.SelectedIndex = 0;
                         dd.OnSelectionChanged = idx =>
                         {
+                            // Index 0 is the localized "Default" entry, which clears the font family.
                             if ((uint)idx < (uint)dd.Items.Count)
-                                _fontFormattingEngine.ApplyFontFamily(_document, _inputController.Selection.Range, dd.Items[idx] == "Default" ? "" : dd.Items[idx]);
+                                _fontFormattingEngine.ApplyFontFamily(_document, _inputController.Selection.Range, idx == 0 ? "" : dd.Items[idx]);
                             InvalidateCanvas();
                         };
                         break;
@@ -543,8 +612,6 @@ public class MintedEditorView : ContentView
                         break;
 
                     case "heading":
-                        dd.Items.Clear();
-                        foreach (var h in headingLevels) dd.Items.Add(h);
                         dd.SelectedIndex = 0;
                         dd.OnSelectionChanged = idx =>
                         {
@@ -555,11 +622,6 @@ public class MintedEditorView : ContentView
                         break;
 
                     case "edit-actions":
-                        dd.Items.Clear();
-                        dd.Items.Add("Copy");
-                        dd.Items.Add("Cut");
-                        dd.Items.Add("Paste");
-                        dd.Items.Add("Select All");
                         dd.SelectedIndex = -1;
                         dd.OnSelectionChanged = async idx =>
                         {
@@ -584,10 +646,6 @@ public class MintedEditorView : ContentView
                         break;
 
                     case "object-actions":
-                        dd.Items.Clear();
-                        dd.Items.Add("Open Link");
-                        dd.Items.Add("Remove Link");
-                        dd.Items.Add("Remove Image");
                         dd.SelectedIndex = -1;
                         dd.OnSelectionChanged = idx =>
                         {
@@ -616,15 +674,6 @@ public class MintedEditorView : ContentView
                         break;
 
                     case "table-actions":
-                        dd.Items.Clear();
-                        dd.Items.Add("Insert Table...");
-                        dd.Items.Add("Insert Row Above");
-                        dd.Items.Add("Insert Row Below");
-                        dd.Items.Add("Delete Row");
-                        dd.Items.Add("Insert Column Left");
-                        dd.Items.Add("Insert Column Right");
-                        dd.Items.Add("Delete Column");
-                        dd.Items.Add("Delete Table");
                         dd.SelectedIndex = -1;
                         dd.OnSelectionChanged = async idx =>
                         {
@@ -852,6 +901,9 @@ public class MintedEditorView : ContentView
         grid.Add(_canvas);
         grid.Add(_keyboardProxy);
         Content = grid;
+
+        Loaded += OnViewLoaded;
+        Unloaded += OnViewUnloaded;
     }
 
     // ── HTML API ─────────────────────────────────────────────────────────────────
@@ -1034,11 +1086,12 @@ public class MintedEditorView : ContentView
         var page = GetHostPage();
         if (page == null) return;
 
+        var strings = EditorStrings.Current;
         string? url = await page.DisplayPromptAsync(
-            "Insert Hyperlink",
-            "Enter URL:",
-            accept: "Insert",
-            cancel: "Cancel",
+            strings.HyperlinkDialogTitle,
+            strings.HyperlinkDialogMessage,
+            accept: strings.HyperlinkDialogInsert,
+            cancel: strings.HyperlinkDialogCancel,
             placeholder: "https://",
             keyboard: Keyboard.Url);
 
@@ -1064,11 +1117,12 @@ public class MintedEditorView : ContentView
             var page = GetHostPage();
             if (page == null) return;
 
+            var strings = EditorStrings.Current;
             source = await page.DisplayPromptAsync(
-                "Insert Image",
-                "Enter image URL or path:",
-                accept: "Insert",
-                cancel: "Cancel",
+                strings.ImageDialogTitle,
+                strings.ImageDialogMessage,
+                accept: strings.ImageDialogInsert,
+                cancel: strings.ImageDialogCancel,
                 placeholder: "https://",
                 keyboard: Keyboard.Url);
         }
@@ -1087,11 +1141,12 @@ public class MintedEditorView : ContentView
         var page = GetHostPage();
         if (page == null) return;
 
+        var strings = EditorStrings.Current;
         string? rowsInput = await page.DisplayPromptAsync(
-            "Insert Table",
-            "Rows:",
-            accept: "Next",
-            cancel: "Cancel",
+            strings.TableDialogTitle,
+            strings.TableDialogRows,
+            accept: strings.TableDialogNext,
+            cancel: strings.TableDialogCancel,
             initialValue: "2",
             keyboard: Keyboard.Numeric);
 
@@ -1099,10 +1154,10 @@ public class MintedEditorView : ContentView
             return;
 
         string? colsInput = await page.DisplayPromptAsync(
-            "Insert Table",
-            "Columns:",
-            accept: "Insert",
-            cancel: "Cancel",
+            strings.TableDialogTitle,
+            strings.TableDialogColumns,
+            accept: strings.TableDialogInsert,
+            cancel: strings.TableDialogCancel,
             initialValue: "2",
             keyboard: Keyboard.Numeric);
 
@@ -1135,14 +1190,20 @@ public class MintedEditorView : ContentView
 
     /// <inheritdoc/>
     /// <remarks>
-    /// When a handler is attached, loads the toolbar icons and starts the caret blink timer if the
-    /// editor is focused; when it is removed, stops the blink timer.
+    /// When a handler is attached, loads the toolbar icons, starts the caret blink timer if the
+    /// editor is focused, and starts listening for <see cref="EditorStrings.CurrentChanged"/>; when
+    /// it is removed, stops the blink timer and the listener. The listener is also started on
+    /// <see cref="VisualElement.Loaded"/> and stopped on <see cref="VisualElement.Unloaded"/>, and
+    /// holds the view only weakly, so an editor that is discarded without either can still be
+    /// garbage collected.
     /// </remarks>
     protected override void OnHandlerChanged()
     {
         base.OnHandlerChanged();
         if (Handler is not null)
         {
+            // Also picks up strings replaced while the view had no handler.
+            SubscribeToEditorStrings();
             // The blink timer is driven by focus (OnNativeFocusChanged), not by the
             // handler lifetime — an idle editor should not repaint 10x per second.
             if (_isEditorFocused)
@@ -1152,6 +1213,7 @@ public class MintedEditorView : ContentView
         else
         {
             StopBlinkTimer();
+            UnsubscribeFromEditorStrings();
         }
     }
 

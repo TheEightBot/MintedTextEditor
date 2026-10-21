@@ -9,9 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- `EditorStrings.CurrentChanged` (raised when `EditorStrings.Current` is replaced) and `EditorStrings.SubscribeCurrentChangedWeak` (listens without keeping the listener alive), `ToolbarItem.LocalizedLabel` for labels that follow `EditorStrings`, a `ContextMenuFactory.CreateDefault(ctx, strings)` overload, and new strings for the remaining built-in text: `Subscript`, `Superscript`, `HeadingLevel`, `EditMenu`, `ObjectMenu`, `TableMenu`, `DefaultFontFamily`, `RemoveImage`, `InsertTableEllipsis`, `HyperlinkDialogMessage`, `HyperlinkDialogInsert`, and the `ImageDialog*` and `TableDialog*` prompt strings.
 - **Find and replace on `MintedEditorView`**: `FindNext`, `FindPrevious`, `Replace` and `ReplaceAll` select and scroll to matches (wrapping by default, with match-case and whole-word options), and a `FindReplaceCompleted` event reports the match count and current match. Each `Replace`/`ReplaceAll` call is a single undo step and keeps the match's formatting. The logic lives in the new Core class `EditorFindReplace`. There is no built-in find UI.
 
 ### Changed
+- Default English labels of built-in toolbar and context menu items now match the `EditorStrings` defaults (sentence case, e.g. "Font family", "Select all", "Numbered list", "Edit hyperlink…"), and the heading dropdown lists "Normal text" and "Heading 1"–"Heading 6" instead of "Normal" and "H1"–"H6". Code that finds built-in items by `Label` should match on `Icon` instead.
 - The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.
 - `ISpellCheckProvider` (`MTE001`), `IPrintProvider` (`MTE002`) and `ITextShaper` / `ShapedTextResult` / `DefaultTextShaper` (`MTE003`) are now marked `[Experimental]`: the editor does not use them yet, so code that references them now reports the diagnostic and must suppress it. See [Experimental APIs](docs/architecture.md#experimental-apis).
 
@@ -19,11 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `SkiaSharpEngine`, a placeholder class whose only member, `IsAvailable`, always returned `true`.
 
 ### Fixed
+- **Localization**: `EditorStrings` is now used by the editor. Built-in toolbar labels, the `MintedEditorView` toolbar menus (font "Default", heading levels, Edit/Object/Table menu options), the default context menu and the insert hyperlink/image/table prompts read `EditorStrings.Current`, and replacing it at runtime updates an editor already on screen. Toolbar dropdown lists now widen to fit their longest option.
 - **Hit-testing long lines that need font fallback** (performance): `SkiaDrawingContext` keeps the font-fallback segmentation (and segment offsets) of its most recently measured runs in a small bounded cache, instead of re-segmenting the whole run for every caret query, and finds a caret's segment by binary search, so lines that switch font hundreds of times stay fast too. Tapping in a long unwrapped line containing an emoji no longer takes quadratic time (40 taps on a 300×`a` + 😀 + 300×`b` line: ~1050 ms → ~11 ms).
 - `FindReplaceEngine` no longer returns bogus matches at the start of a table block when a table's text contains the query; only top-level paragraphs are searched.
 - **`ToolbarMaxRows` lost on toolbar rebuild**: assigning a new `ToolbarDefinition`, changing `ToolbarItems` or clearing them no longer drops the row limit set with `MintedEditorView.ToolbarMaxRows`, which previously showed every row again. Once set, `ToolbarMaxRows` now takes precedence over `ToolbarDefinition.MaxRows` (which still applies while `ToolbarMaxRows` is unset; setting or clearing it redraws the toolbar even when the number is unchanged) and is no longer written into the app's definition object. New `ToolbarRenderer.MaxRowsOverride` and `EffectiveMaxRows` expose the same behaviour in Core.
-
-### Fixed
 - **HTML round-trip of colors and table spans**: the HTML importer now reads `rgba(...)` colors (alpha as 0–1 or a percentage), `#rgba`/`#rrggbbaa`, space-separated `rgb(r g b / a)` and percentage channels, so text and highlight colors with transparency survive export and re-import. `colspan`/`rowspan` are read into `TableCell.ColumnSpan`/`RowSpan` with merged placeholder cells, matching `TableEngine.MergeCells`, and rows are padded to the widest row, and a table nested in a cell no longer ends the outer table. The exporter now writes the `rgba` alpha with a `.` decimal separator in every culture.
 
 ---
