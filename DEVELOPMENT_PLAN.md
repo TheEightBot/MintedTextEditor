@@ -6,7 +6,7 @@ Architecture mirrors [KumikoUI](https://github.com/TheEightBot/KumikoUI): platfo
 
 > **Workflow:** Each phase is implemented, reviewed, and committed to git before proceeding to the next.
 
-> **Status (2026-10-21):** this plan drove the initial build-out and is kept for history. Shipped work is recorded in [CHANGELOG.md](CHANGELOG.md); new work is tracked in GitHub issues and pull requests. Items still unchecked below were not done as of 0.3.x: rich sub-document copy and rich (HTML) paste, Ctrl/Cmd+Shift+V plain-text paste, pointer cursor changes, the performance/large-document checks (frame-time profiling, zero-allocation paints, 50,000-paragraph documents, lazy off-screen layout), mouse-wheel/trackpad scrolling, the remaining toolbar icon polish (proportional vector icons, undo/redo arcs) and the selection-normalisation tests.
+> **Status (2026-10-21):** this plan drove the initial build-out and is kept for history. Shipped work is recorded in [CHANGELOG.md](CHANGELOG.md); new work is tracked in GitHub issues and pull requests. Items still unchecked below were not done as of 0.3.x: rich sub-document copy and rich (HTML) paste, Ctrl/Cmd+Shift+V plain-text paste, pointer cursor changes, the performance/large-document checks (frame-time profiling, zero-allocation paints, 50,000-paragraph documents, lazy off-screen layout), mouse-wheel/trackpad scrolling, the remaining toolbar icon polish (proportional vector icons, undo/redo arcs) the remaining toolbar-overflow and selection-normalisation tests.
 
 ---
 
@@ -1068,7 +1068,7 @@ Targeted fixes identified during end-to-end QA on mobile (iOS/Android) and deskt
 - [ ] Fix undo/redo arc representation to use proportional curves rather than plain lines
 
 ### Toolbar Overflow — configurable max rows with ellipsis overflow button
-- [x] Add `MaxRows` property to `ToolbarDefinition` (0 = unlimited) and parallel `MaxRows` property on `ToolbarRenderer`
+- [x] Add `MaxRows` property to `ToolbarDefinition` (0 = unlimited); `ToolbarRenderer` reads `Definition.MaxRows` (no separate renderer property)
 - [x] When `LayoutMode == Wrap && MaxRows > 0`, items that would start on a row beyond `MaxRows` are collected as overflow items instead of being drawn
 - [x] Reserve a fixed `OverflowButtonWidth` slot at the trailing edge of the last allowed row and render a `…` button there
 - [x] Tapping the overflow button opens a drop-down panel listing all overflow items — shipped as a separate `ToolbarRenderer.HandleOverflowButtonTap`, which `MintedEditorView` calls before ordinary `HitTest` (`HitTest` itself does not return the overflow button)
@@ -1081,7 +1081,8 @@ Targeted fixes identified during end-to-end QA on mobile (iOS/Android) and deskt
 - [x] Guard `SelectionRenderer.Render` with an inline-length bounds check so an out-of-range offset never throws and visually shows the nearest valid position instead
 
 ### Tests
-- [x] Toolbar overflow: `ToolbarRendererTests` — verify items beyond `MaxRows` are excluded and the overflow button rect is populated
+- [x] Toolbar overflow: tests in `NormalizePositionTests` check that a narrow toolbar reports `HasOverflow` with non-empty `OverflowItems`
+- [ ] Toolbar overflow: verify overflow items are excluded from the visible toolbar and the overflow button rect is populated
 - [ ] Selection normalization: add cases to `SelectionTests` verifying anchor/active remain correct after bold/italic/underline toggles that split runs
 
 ### Git
