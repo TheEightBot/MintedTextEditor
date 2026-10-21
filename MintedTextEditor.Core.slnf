@@ -1,0 +1,11 @@
+{
+  "solution": {
+    "path": "MintedTextEditor.slnx",
+    "projects": [
+      "src/MintedTextEditor.Core/MintedTextEditor.Core.csproj",
+      "src/MintedTextEditor.SkiaSharp/MintedTextEditor.SkiaSharp.csproj",
+      "tests/MintedTextEditor.Core.Tests/MintedTextEditor.Core.Tests.csproj",
+      "tests/MintedTextEditor.SkiaSharp.Tests/MintedTextEditor.SkiaSharp.Tests.csproj"
+    ]
+  }
+}
