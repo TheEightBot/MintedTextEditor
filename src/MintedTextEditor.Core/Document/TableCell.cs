@@ -17,16 +17,22 @@ public class TableCell
     /// <summary>Number of rows this cell spans (1 = normal, >1 = merged).</summary>
     public int RowSpan { get; set; } = 1;
 
-    /// <summary>Optional background colour for this cell.</summary>
+    /// <summary>Optional background colour for this cell, filled behind its content (and over its whole span).</summary>
     public EditorColor? Background { get; set; }
 
-    /// <summary>Per-side border widths (in pixels). null means inherit from <see cref="TableStyle"/>.</summary>
+    /// <summary>
+    /// Per-side border widths (in pixels), drawn in <see cref="TableStyle.BorderColor"/>. null uses
+    /// <see cref="TableStyle.BorderWidth"/> on every side. Where two cells share an edge, the wider border is drawn.
+    /// </summary>
     public EditorBorder? Border { get; set; }
 
     /// <summary>The parent row that owns this cell.</summary>
     public TableRow? Parent { get; internal set; }
 
-    /// <summary>Whether this cell has been absorbed into a merged span and should be skipped during layout.</summary>
+    /// <summary>
+    /// Whether this cell has been absorbed into a merged span (set by <c>TableEngine.MergeCells</c>).
+    /// Layout skips any slot covered by another cell's <see cref="RowSpan"/> / <see cref="ColumnSpan"/>.
+    /// </summary>
     public bool IsMerged { get; internal set; }
 
     /// <summary>Creates a cell containing a single empty paragraph.</summary>

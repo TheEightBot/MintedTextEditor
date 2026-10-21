@@ -2558,44 +2558,36 @@ public class MintedEditorView : ContentView
 
     private bool TryBeginTableColumnResize(float x, float y)
     {
-        const float borderWidth = 1f;
         const float grabRadius = 6f;
 
         foreach (var block in _lastLayout.Blocks)
         {
             if (block is not TableLayoutBlock tableLayout)
                 continue;
-            if (y < tableLayout.Y || y > tableLayout.Y + tableLayout.TotalHeight)
+
+            // Boundaries hidden inside a merged cell in the pointer's row are not offered.
+            int col = tableLayout.FindColumnResizeBoundary(x, y - tableLayout.Y, grabRadius);
+            if (col < 0)
                 continue;
 
-            float borderX = borderWidth;
-            for (int col = 0; col < tableLayout.ColumnWidths.Length - 1; col++)
+            if (_document.Blocks[tableLayout.BlockIndex] is not TableBlock modelTable)
+                return false;
+
+            if (modelTable.ColumnWidths.Count != tableLayout.ColumnWidths.Length)
             {
-                borderX += tableLayout.ColumnWidths[col];
-                if (Math.Abs(x - borderX) <= grabRadius)
-                {
-                    if (_document.Blocks[tableLayout.BlockIndex] is not TableBlock modelTable)
-                        return false;
-
-                    if (modelTable.ColumnWidths.Count != tableLayout.ColumnWidths.Length)
-                    {
-                        modelTable.ColumnWidths.Clear();
-                        foreach (var w in tableLayout.ColumnWidths)
-                            modelTable.ColumnWidths.Add(w);
-                    }
-
-                    _isResizingTableColumn = true;
-                    _resizingTable = modelTable;
-                    _resizingTableBlockIndex = tableLayout.BlockIndex;
-                    _resizingColumnIndex = col;
-                    _tableResizeStartX = x;
-                    _tableLeftStartWidth = modelTable.ColumnWidths[col];
-                    _tableRightStartWidth = modelTable.ColumnWidths[col + 1];
-                    return true;
-                }
-
-                borderX += borderWidth;
+                modelTable.ColumnWidths.Clear();
+                foreach (var w in tableLayout.ColumnWidths)
+                    modelTable.ColumnWidths.Add(w);
             }
+
+            _isResizingTableColumn = true;
+            _resizingTable = modelTable;
+            _resizingTableBlockIndex = tableLayout.BlockIndex;
+            _resizingColumnIndex = col;
+            _tableResizeStartX = x;
+            _tableLeftStartWidth = modelTable.ColumnWidths[col];
+            _tableRightStartWidth = modelTable.ColumnWidths[col + 1];
+            return true;
         }
 
         return false;
@@ -2603,7 +2595,6 @@ public class MintedEditorView : ContentView
 
     private bool TryBeginTableRowResize(float x, float y)
     {
-        const float borderWidth = 1f;
         const float grabRadius = 6f;
 
         foreach (var block in _lastLayout.Blocks)
@@ -2611,35 +2602,22 @@ public class MintedEditorView : ContentView
             if (block is not TableLayoutBlock tableLayout)
                 continue;
 
-            float tableBottom = tableLayout.Y + tableLayout.TotalHeight;
-            if (y < tableLayout.Y || y > tableBottom)
+            // Boundaries hidden inside a merged cell in the pointer's column are not offered.
+            int row = tableLayout.FindRowResizeBoundary(x, y - tableLayout.Y, grabRadius);
+            if (row < 0)
                 continue;
 
-            float tableRight = borderWidth + tableLayout.ColumnWidths.Sum() + tableLayout.ColumnWidths.Length * borderWidth;
-            if (x < 0f || x > tableRight)
-                continue;
+            if (_document.Blocks[tableLayout.BlockIndex] is not TableBlock modelTable)
+                return false;
 
-            float borderY = tableLayout.Y + borderWidth;
-            for (int row = 0; row < tableLayout.RowHeights.Length - 1; row++)
-            {
-                borderY += tableLayout.RowHeights[row];
-                if (Math.Abs(y - borderY) <= grabRadius)
-                {
-                    if (_document.Blocks[tableLayout.BlockIndex] is not TableBlock modelTable)
-                        return false;
-
-                    _isResizingTableRow = true;
-                    _resizingTable = modelTable;
-                    _resizingTableBlockIndex = tableLayout.BlockIndex;
-                    _resizingRowIndex = row;
-                    _tableResizeStartY = y;
-                    _tableTopStartHeight = tableLayout.RowHeights[row];
-                    _tableBottomStartHeight = tableLayout.RowHeights[row + 1];
-                    return true;
-                }
-
-                borderY += borderWidth;
-            }
+            _isResizingTableRow = true;
+            _resizingTable = modelTable;
+            _resizingTableBlockIndex = tableLayout.BlockIndex;
+            _resizingRowIndex = row;
+            _tableResizeStartY = y;
+            _tableTopStartHeight = tableLayout.RowHeights[row];
+            _tableBottomStartHeight = tableLayout.RowHeights[row + 1];
+            return true;
         }
 
         return false;

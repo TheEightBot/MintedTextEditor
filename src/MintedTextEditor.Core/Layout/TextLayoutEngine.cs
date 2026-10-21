@@ -94,8 +94,9 @@ public class TextLayoutEngine
         if (rowCount == 0 || colCount == 0)
             return new TableLayoutBlock { BlockIndex = blockIndex, TotalHeight = 0 };
 
-        const float cellPadding = 4f;
-        const float borderWidth = 1f;
+        var style = table.Style;
+        float cellPadding = Math.Max(0f, style.CellPadding);
+        float borderWidth = Math.Max(0f, style.BorderWidth);
         const float minCellHeight = 20f;
 
         float[] colWidths;
@@ -112,8 +113,47 @@ public class TextLayoutEngine
             Array.Fill(colWidths, colWidth);
         }
 
+        // Resolve spans: each slot maps to the cell that occupies it.
+        var owners = table.BuildSpanOwners();
+        var info = new TableLayoutCell[rowCount][];
+        for (int r = 0; r < rowCount; r++)
+        {
+            info[r] = new TableLayoutCell[colCount];
+            for (int c = 0; c < colCount; c++)
+            {
+                var (ownerRow, ownerCol) = owners[r][c];
+                if (ownerRow != r || ownerCol != c)
+                {
+                    info[r][c] = new TableLayoutCell { AnchorRow = ownerRow, AnchorColumn = ownerCol, RowSpan = 0, ColumnSpan = 0 };
+                    continue;
+                }
+
+                int colSpan = 1;
+                while (c + colSpan < colCount && owners[r][c + colSpan] == (r, c)) colSpan++;
+                int rowSpan = 1;
+                while (r + rowSpan < rowCount && owners[r + rowSpan][c] == (r, c)) rowSpan++;
+
+                var cell = table.GetCell(r, c);
+                var background = cell?.Background;
+                if (background is null && r == 0 && style.HasHeaderRow)
+                    background = style.HeaderBackground ?? TableStyle.DefaultHeaderBackground;
+
+                info[r][c] = new TableLayoutCell
+                {
+                    AnchorRow = r,
+                    AnchorColumn = c,
+                    RowSpan = rowSpan,
+                    ColumnSpan = colSpan,
+                    Background = background,
+                    Border = cell?.Border
+                };
+            }
+        }
+
         var cells = new LayoutBlock[rowCount][];
         var rowHeights = new float[rowCount];
+        // Content heights of row-spanning cells, applied once the rows they cover are sized.
+        var spanningCells = new List<(int Row, int RowSpan, float Height)>();
 
         for (int r = 0; r < rowCount; r++)
         {
@@ -122,10 +162,18 @@ public class TextLayoutEngine
 
             for (int c = 0; c < colCount; c++)
             {
-                var cell = table.GetCell(r, c);
+                var slot = info[r][c];
                 var cellLayout = new LayoutBlock { BlockIndex = blockIndex };
+                cells[r][c] = cellLayout;
+                if (slot.IsCovered)
+                    continue;
+
+                var cell = table.GetCell(r, c);
                 float cellContentHeight = 0f;
-                float cellInnerWidth = Math.Max(1f, colWidths[c] - 2f * cellPadding);
+                float spannedWidth = (slot.ColumnSpan - 1) * borderWidth;
+                for (int sc = c; sc < c + slot.ColumnSpan; sc++)
+                    spannedWidth += colWidths[sc];
+                float cellInnerWidth = Math.Max(1f, spannedWidth - 2f * cellPadding);
 
                 if (cell is not null)
                 {
@@ -144,8 +192,11 @@ public class TextLayoutEngine
 
                 cellContentHeight = Math.Max(cellContentHeight, minCellHeight);
                 cellLayout.TotalHeight = cellContentHeight;
-                cells[r][c] = cellLayout;
-                maxCellContentHeight = Math.Max(maxCellContentHeight, cellContentHeight);
+
+                if (slot.RowSpan > 1)
+                    spanningCells.Add((r, slot.RowSpan, cellContentHeight + 2f * cellPadding));
+                else
+                    maxCellContentHeight = Math.Max(maxCellContentHeight, cellContentHeight);
             }
 
             float computedRowHeight = maxCellContentHeight + 2f * cellPadding;
@@ -153,6 +204,16 @@ public class TextLayoutEngine
             rowHeights[r] = explicitRowHeight > 1f
                 ? Math.Max(explicitRowHeight, computedRowHeight)
                 : computedRowHeight;
+        }
+
+        // A row-spanning cell taller than the rows it covers grows the last of them.
+        foreach (var (row, rowSpan, height) in spanningCells)
+        {
+            float available = (rowSpan - 1) * borderWidth;
+            for (int r = row; r < row + rowSpan; r++)
+                available += rowHeights[r];
+            if (height > available)
+                rowHeights[row + rowSpan - 1] += height - available;
         }
 
         float tableHeight = rowHeights.Sum() + borderWidth * (rowCount + 1);
@@ -163,7 +224,10 @@ public class TextLayoutEngine
             ColumnWidths = colWidths,
             RowHeights = rowHeights,
             Cells = cells,
+            CellInfo = info,
             CellPadding = cellPadding,
+            BorderWidth = borderWidth,
+            BorderColor = style.BorderColor,
             TotalHeight = tableHeight
         };
     }

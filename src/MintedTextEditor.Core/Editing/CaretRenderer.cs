@@ -147,21 +147,14 @@ public class CaretRenderer
         DocumentPosition position, float tableBlockY,
         TableLayoutBlock tableLayout, Document.Document document, IDrawingContext context)
     {
-        const float borderWidth = 1f;
         int row = Math.Clamp(position.CellRow, 0, tableLayout.Cells.Length - 1);
         int col = Math.Clamp(position.CellCol, 0, tableLayout.Cells[row].Length - 1);
 
-        // Compute row content origin Y (relative to table block)
-        float cellOriginY = borderWidth;
-        for (int r = 0; r < row; r++)
-            cellOriginY += tableLayout.RowHeights[r] + borderWidth;
-        cellOriginY += tableLayout.CellPadding;
-
-        // Compute col content origin X
-        float cellOriginX = borderWidth;
-        for (int c = 0; c < col; c++)
-            cellOriginX += tableLayout.ColumnWidths[c] + borderWidth;
-        cellOriginX += tableLayout.CellPadding;
+        // Content origin of the cell (the spanning cell, for a slot covered by a span), relative to the table block
+        (row, col) = tableLayout.GetOwningCell(row, col);
+        var cellBounds = tableLayout.GetCellBounds(row, col);
+        float cellOriginY = cellBounds.Y + tableLayout.CellPadding;
+        float cellOriginX = cellBounds.X + tableLayout.CellPadding;
 
         var cellBlock = tableLayout.Cells[row][col];
         if (cellBlock.Lines.Count == 0)
