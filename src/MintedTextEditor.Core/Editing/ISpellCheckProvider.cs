@@ -1,9 +1,15 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace MintedTextEditor.Core.Editing;
 
 /// <summary>
-/// Integration point for spell-check engines.
-/// Implement this interface and assign it to the editor to highlight misspelled words.
+/// Planned integration point for spell-check engines.
 /// </summary>
+/// <remarks>
+/// Experimental (<c>MTE001</c>): the editor does not use this interface yet, so implementing it
+/// has no effect. Its shape may change once spell checking is wired into the control.
+/// </remarks>
+[Experimental("MTE001", UrlFormat = "https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/architecture.md#experimental-apis")]
 public interface ISpellCheckProvider
 {
     /// <summary>
