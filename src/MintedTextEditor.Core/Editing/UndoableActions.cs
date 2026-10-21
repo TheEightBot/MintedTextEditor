@@ -393,30 +393,55 @@ public sealed class MergeBlocksAction : IUndoableAction
 // ── ApplyStyleAction ────────────────────────────────────────────────────────
 
 /// <summary>
-/// Records a style change. Snapshots all affected paragraph inlines before applying
-/// so the originals can be restored on undo.
+/// Records a character-formatting change over a range. Snapshots the inlines of every
+/// affected paragraph before applying, so undo restores the original runs with their exact
+/// styles. Redo applies the change again to the restored runs.
 /// </summary>
+/// <remarks>
+/// Undo restores only the paragraphs' inlines and leaves their <see cref="ParagraphStyle"/>
+/// alone, since character formatting never changes it. Runs split by the change are merged
+/// back with same-styled neighbours after it is applied.
+/// </remarks>
 public sealed class ApplyStyleAction : IUndoableAction
 {
     private readonly Document.Document _document;
     private TextRange _range;
     private readonly ParagraphAnchor _startAnchor;
     private readonly ParagraphAnchor _endAnchor;
-    private readonly Func<TextStyle, TextStyle> _transform;
-    private List<ParagraphSnapshot> _snapshots = [];
+    private readonly Action<TextRange> _apply;
+    private readonly List<(int BlockIndex, ParagraphSnapshot Snapshot)> _snapshots = [];
 
     /// <summary>Creates an action that applies <paramref name="transform"/> to the style of the text in <paramref name="range"/>.</summary>
     public ApplyStyleAction(Document.Document document, TextRange range, Func<TextStyle, TextStyle> transform)
+        : this(document, range, r => DocumentEditor.ApplyTextStyle(document, r, transform), "Apply Style")
+    {
+    }
+
+    /// <summary>
+    /// Creates an action that runs <paramref name="apply"/> over <paramref name="range"/>. Use it for
+    /// formatting operations that choose their own transform, such as the <see cref="FormattingEngine"/>
+    /// toggles, which add a format unless the whole range already has it.
+    /// </summary>
+    /// <param name="document">The document to format.</param>
+    /// <param name="range">The range to format.</param>
+    /// <param name="apply">
+    /// Formats the range it is given. It may split and restyle the text runs of the paragraphs the
+    /// range covers, but must not add, remove or move text or blocks. It runs again on redo, against
+    /// the same runs it saw the first time.
+    /// </param>
+    /// <param name="description">Description of the undo step, e.g. "Bold".</param>
+    public ApplyStyleAction(Document.Document document, TextRange range, Action<TextRange> apply, string description)
     {
         _document = document;
         _range = range;
         _startAnchor = new ParagraphAnchor(document, range.Start);
         _endAnchor = new ParagraphAnchor(document, range.End);
-        _transform = transform;
+        _apply = apply;
+        Description = description;
     }
 
     /// <inheritdoc/>
-    public string Description => "Apply Style";
+    public string Description { get; }
 
     /// <inheritdoc/>
     public DocumentPosition Execute()
@@ -426,19 +451,40 @@ public sealed class ApplyStyleAction : IUndoableAction
         for (int i = _range.Start.BlockIndex; i <= _range.End.BlockIndex && i < _document.Blocks.Count; i++)
         {
             if (_document.Blocks[i] is Paragraph p)
-                _snapshots.Add(SnapshotHelper.Capture(p));
+                _snapshots.Add((i, SnapshotHelper.Capture(p)));
         }
-        DocumentEditor.ApplyTextStyle(_document, _range, _transform);
-        return _range.Start;
+
+        _apply(_range);
+
+        foreach (var (blockIndex, _) in _snapshots)
+        {
+            if (blockIndex < _document.Blocks.Count && _document.Blocks[blockIndex] is Paragraph p)
+                DocumentEditor.NormalizeInlines(p);
+        }
+        return _endAnchor.Resolve(_document);
     }
 
     /// <inheritdoc/>
     public DocumentPosition Undo()
     {
-        // Each snapshot restores its own paragraph, so a table inside the range cannot shift them.
-        SnapshotHelper.RestoreBlocks(_document, _range.Start.BlockIndex, _snapshots);
+        foreach (var (blockIndex, snapshot) in _snapshots)
+        {
+            if (blockIndex < _document.Blocks.Count && _document.Blocks[blockIndex] is Paragraph p)
+                RestoreInlines(p, snapshot);
+        }
         _document.NotifyChanged(new DocumentChangedEventArgs(DocumentChangeType.StyleChanged, _range));
-        return _range.Start;
+        return _endAnchor.Resolve(_document);
+    }
+
+    /// <summary>
+    /// Restores the inlines recorded in <paramref name="snapshot"/> but keeps <paramref name="p"/>'s
+    /// current paragraph style, which inline-only changes never alter.
+    /// </summary>
+    internal static void RestoreInlines(Paragraph p, ParagraphSnapshot snapshot)
+    {
+        var style = p.Style;
+        SnapshotHelper.Restore(p, snapshot);
+        p.Style = style;
     }
 
     /// <inheritdoc/>
@@ -885,6 +931,65 @@ public sealed class InsertHyperlinkAction : IUndoableAction
         _document.NotifyChanged(new DocumentChangedEventArgs(
             reinserted ? DocumentChangeType.BlockSplit : DocumentChangeType.TextDeleted, _range));
         return _startAnchor.Resolve(_document);
+    }
+
+    /// <inheritdoc/>
+    public DocumentPosition Redo() => Execute();
+
+    /// <inheritdoc/>
+    public bool MergeWith(IUndoableAction next) => false;
+}
+
+// ── RemoveHyperlinkAction ───────────────────────────────────────────────────
+
+/// <summary>
+/// Records the removal of a hyperlink, whose text stays in place with its formatting.
+/// Snapshots the paragraph's inlines so undo restores the link exactly.
+/// </summary>
+public sealed class RemoveHyperlinkAction : IUndoableAction
+{
+    private readonly Document.Document _document;
+    private readonly DocumentPosition _position;
+    private readonly ParagraphAnchor _anchor;
+    private ParagraphSnapshot? _snapshot;
+
+    /// <summary>Creates an action that removes the hyperlink at <paramref name="position"/>.</summary>
+    public RemoveHyperlinkAction(Document.Document document, DocumentPosition position)
+    {
+        _document = document;
+        _position = position;
+        _anchor = new ParagraphAnchor(document, position);
+    }
+
+    /// <inheritdoc/>
+    public string Description => "Remove Hyperlink";
+
+    /// <inheritdoc/>
+    public DocumentPosition Execute()
+    {
+        _snapshot = null;
+        if (HyperlinkEngine.GetHyperlinkAtPosition(_document, _position) is not null &&
+            _document.Blocks[_position.BlockIndex] is Paragraph para)
+        {
+            _snapshot = SnapshotHelper.Capture(para);
+            HyperlinkEngine.RemoveHyperlink(_document, _position);
+        }
+        return _anchor.Resolve(_document);
+    }
+
+    /// <inheritdoc/>
+    public DocumentPosition Undo()
+    {
+        if (_snapshot is not null &&
+            _position.BlockIndex < _document.Blocks.Count &&
+            _document.Blocks[_position.BlockIndex] is Paragraph para)
+        {
+            ApplyStyleAction.RestoreInlines(para, _snapshot);
+            _document.NotifyChanged(new DocumentChangedEventArgs(
+                DocumentChangeType.TextInserted,
+                new TextRange(_position, _position)));
+        }
+        return _anchor.Resolve(_document);
     }
 
     /// <inheritdoc/>

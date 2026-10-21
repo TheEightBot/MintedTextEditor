@@ -138,8 +138,11 @@ if (link is not null)
 
 ### Removing a Hyperlink
 
+The link's text stays in place with its character formatting (bold, colours, …). From code, use the undoable `RemoveHyperlinkCommand`, which acts on the link at the caret, or call the engine directly, without undo:
+
 ```csharp
-HyperlinkEngine.RemoveHyperlink(editor.Document, editor.Selection.Active);   // keeps the text
+new RemoveHyperlinkCommand().Execute(ctx);                                    // undoable
+HyperlinkEngine.RemoveHyperlink(editor.Document, editor.Selection.Active);   // not recorded for undo
 ```
 
 The toolbar's Object menu also has Open Link and Remove Link.

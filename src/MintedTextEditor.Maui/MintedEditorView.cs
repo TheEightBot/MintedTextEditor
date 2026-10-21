@@ -643,7 +643,8 @@ public class MintedEditorView : ContentView
                             if ((uint)idx < (uint)dd.Items.Count)
                             {
                                 string family = idx == 0 ? "" : dd.Items[idx];
-                                ApplyFontFormatting(range => _fontFormattingEngine.ApplyFontFamily(_document, range, family));
+                                ApplyToolbarCharacterFormatting("Font",
+                                    r => _fontFormattingEngine.ApplyFontFamily(_document, r, family));
                             }
                             else
                             {
@@ -659,7 +660,10 @@ public class MintedEditorView : ContentView
                         dd.OnSelectionChanged = idx =>
                         {
                             if ((uint)idx < (uint)dd.Items.Count && float.TryParse(dd.Items[idx], out float sz))
-                                ApplyFontFormatting(range => _fontFormattingEngine.ApplyFontSize(_document, range, sz));
+                            {
+                                ApplyToolbarCharacterFormatting("Font Size",
+                                    r => _fontFormattingEngine.ApplyFontSize(_document, r, sz));
+                            }
                             else
                                 InvalidateCanvas();
                         };
@@ -772,14 +776,16 @@ public class MintedEditorView : ContentView
                     case "text-color":
                         cp.OnColorSelected = color =>
                         {
-                            ApplyFontFormatting(range => _fontFormattingEngine.ApplyTextColor(_document, range, color));
+                            ApplyToolbarCharacterFormatting("Text Color",
+                                r => _fontFormattingEngine.ApplyTextColor(_document, r, color));
                         };
                         break;
 
                     case "highlight-color":
                         cp.OnColorSelected = color =>
                         {
-                            ApplyFontFormatting(range => _fontFormattingEngine.ApplyHighlightColor(_document, range, color));
+                            ApplyToolbarCharacterFormatting("Highlight Color",
+                                r => _fontFormattingEngine.ApplyHighlightColor(_document, r, color));
                         };
                         break;
                 }
@@ -788,21 +794,15 @@ public class MintedEditorView : ContentView
     }
 
     /// <summary>
-    /// Applies a font family, size or colour change to the selection. Like character commands in
-    /// <see cref="ExecuteToolbarCommand"/>, it goes through
-    /// <see cref="DocumentEditor.ApplyCharacterFormatting"/> so the selection is rebuilt after runs
-    /// are split, and the formatting state is then read from the formatted text rather than from
-    /// stale endpoints.
+    /// Applies a toolbar dropdown or colour-picker format to the selection as one undo step
+    /// (or to the pending style when the selection is empty), keeping the selection on the same text,
+    /// then reads the formatting state back from the formatted text.
     /// </summary>
-    private void ApplyFontFormatting(Action<TextRange> apply)
+    private void ApplyToolbarCharacterFormatting(string description, Action<TextRange> apply)
     {
-        var (newAnchor, newActive) = DocumentEditor.ApplyCharacterFormatting(
-            _document,
-            _inputController.Selection.Anchor,
-            _inputController.Selection.Active,
-            apply);
-        _inputController.Selection.Set(newAnchor, newActive);
+        GetEditorContext().ApplyCharacterFormatting(description, apply);
         _caret.MoveTo(_inputController.Selection.Active);
+        RaiseSelectionChanged();
         NotifyImeSelectionChanged();
         UpdateFormattingState();
         InvalidateCanvas();

@@ -53,7 +53,7 @@ font.RemoveHighlightColor(doc, range);
 
 ### Programmatic (DocumentEditor + UndoManager)
 
-The engines above change the document directly and are not recorded for undo. For undo-aware programmatic formatting, push an `ApplyStyleAction`; `UndoManager.Push` executes it and records it:
+The engines above change the document directly and are not recorded for undo. The toolbar, the keyboard shortcuts and the character-formatting commands (`ToggleBoldCommand` … `ClearFormattingCommand`, `ApplyFontFamilyCommand`, `ApplyFontSizeCommand`, `ApplyTextColorCommand`, `ApplyHighlightColorCommand`) are: each records one undo step. From code, run one of those commands with an `EditorContext` (see [Commands & Events](commands-events.md)), or push an `ApplyStyleAction`; `UndoManager.Push` executes it and records it:
 
 ```csharp
 using MintedTextEditor.Core.Editing;
@@ -63,7 +63,13 @@ var action = new ApplyStyleAction(doc, range, s => s
     .WithFontSize(14f));
 
 editor.UndoManager.Push(action);   // executes and records undo
+
+// Or wrap an engine call, e.g. a toggle that decides on/off from the current text
+editor.UndoManager.Push(new ApplyStyleAction(doc, range,
+    r => editor.Formatting.ToggleBold(doc, r), "Bold"));
 ```
+
+Undo restores the runs exactly as they were, styles included. Push an `ApplyStyleAction` only for a non-empty range; with a collapsed caret, call the engine directly to set the pending style.
 
 ### Querying Current Formatting
 
@@ -158,7 +164,7 @@ DocumentEditor.ApplyParagraphStyle(doc, range, s => s.Direction = TextDirection.
 
 ## Undo / Redo Integration
 
-Typing, deleting, pasting, the insert commands (hyperlink, image, table, rows and columns) and the paragraph commands (alignment, lists, indent, headings, paragraph format) are recorded by the `UndoManager`. The formatting engines (`FormattingEngine`, `FontFormattingEngine`, `ParagraphFormattingEngine`) are not; push an `ApplyStyleAction` or `ApplyParagraphStyleAction` (above) when formatting from code must be undoable.
+Typing, deleting, pasting, the insert commands (hyperlink, image, table, rows and columns), removing a hyperlink, the paragraph commands (alignment, lists, indent, headings, paragraph format), and character formatting from the toolbar (buttons, font family and size dropdowns, text and highlight colour pickers), keyboard shortcuts and commands are recorded by the `UndoManager`, one step per action. Toggling a format with a collapsed caret only sets the pending style and is not recorded. The formatting engines (`FormattingEngine`, `FontFormattingEngine`, `ParagraphFormattingEngine`) are not recorded; push an `ApplyStyleAction` or `ApplyParagraphStyleAction` (above) when formatting from code must be undoable.
 
 ```csharp
 editor.Undo();   // or editor.UndoManager.Undo()
