@@ -67,3 +67,20 @@ jobs:
           fi
 
           echo "Found $added new line(s) under [Unreleased]."
+
+  readme-links:
+    name: README links are absolute
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # README.md ships inside every NuGet package; relative links break on nuget.org.
+      - name: Reject relative links in README.md
+        run: |
+          if grep -nE '\]\((\.?/)?[A-Za-z0-9_.-]+(/[^)]*)?\)|src="(\.?/)?[A-Za-z0-9_.-]+(/[^"]*)?"' README.md | grep -vE '\]\((https?:|mailto:|#)|src="https?:'; then
+            echo "::error file=README.md::README.md is shown on nuget.org, where relative links break. Use absolute https://github.com/TheEightBot/MintedTextEditor/blob/main/... links."
+            exit 1
+          fi
+          echo "All README links are absolute."

@@ -85,6 +85,10 @@ dotnet build -t:Run -f net10.0-android       # Android (emulator required)
 
 8. **Open a Pull Request** against the `main` branch, describing what changed and why.
 
+## README links
+
+`README.md` is packed into every NuGet package and shown on nuget.org, where relative links don't resolve. Use absolute `https://github.com/TheEightBot/MintedTextEditor/blob/main/...` links (and `https://raw.githubusercontent.com/...` for images) in the README; CI rejects relative ones. Pages under `docs/` can link to each other relatively.
+
 ## Changelog
 
 Every pull request that changes anything under `src/` must add an entry to [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]`, in the matching `### Added`, `### Changed`, `### Fixed` or `### Removed` section (add the section if it isn't there yet). Write it for users of the packages: what changed and how it affects them.
