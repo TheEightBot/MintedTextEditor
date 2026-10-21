@@ -56,7 +56,8 @@ jobs:
 
           # Count lines this PR adds inside that section (ignoring blank lines and rules).
           added=$(git diff -U0 "$base" "$HEAD_SHA" -- CHANGELOG.md | awk -v s="$start" -v e="$end" '
-            /^@@/ { split($3, a, ","); line = substr(a[1], 2); next }
+            BEGIN { s += 0; e += 0 }
+            /^@@/ { split($3, a, ","); line = substr(a[1], 2) + 0; next }
             /^\+\+\+/ { next }
             /^\+/ { if (line > s && line < e && $0 !~ /^\+[[:space:]]*(---)?[[:space:]]*$/) n++; line++; next }
             END { print n + 0 }')
