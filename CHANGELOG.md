@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- `ISpellCheckProvider` (`MTE001`), `IPrintProvider` (`MTE002`) and `ITextShaper` / `ShapedTextResult` / `DefaultTextShaper` (`MTE003`) are now marked `[Experimental]`: the editor does not use them yet, so code that references them now reports the diagnostic and must suppress it. See [Experimental APIs](docs/architecture.md#experimental-apis).
+- The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.
+
+### Removed
+- `SkiaSharpEngine`, a placeholder class whose only member, `IsAvailable`, always returned `true`.
+
 ### Fixed
 - **`ToolbarMaxRows` lost on toolbar rebuild**: assigning a new `ToolbarDefinition`, changing `ToolbarItems` or clearing them no longer drops the row limit set with `MintedEditorView.ToolbarMaxRows`, which previously showed every row again. Once set, `ToolbarMaxRows` now takes precedence over `ToolbarDefinition.MaxRows` (which still applies while `ToolbarMaxRows` is unset) and is no longer written into the app's definition object. New `ToolbarRenderer.MaxRowsOverride` and `EffectiveMaxRows` expose the same behaviour in Core.
 
