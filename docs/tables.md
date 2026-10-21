@@ -115,7 +115,7 @@ TableEngine.MergeCells(table, startRow: 0, startCol: 0, rowSpan: 2, colSpan: 3);
 TableEngine.SplitCell(table, table.GetCell(0, 0)!);
 ```
 
-A cell with `ColumnSpan`/`RowSpan` greater than 1 is drawn over the combined area of the slots it covers, including the grid lines between them, and taps anywhere in that area place the caret in it. The covered cells stay in `Row.Cells` (so the grid stays rectangular) but are not drawn, and `Tab`/`Shift+Tab` skip them. `TableBlock.GetSpanAnchor(row, col)` returns the cell that occupies a slot. A spanning cell taller than the rows it covers makes the last of those rows taller. Spans that run past the table's edge, or into a slot an earlier cell already covers, are cut short.
+A cell with `ColumnSpan`/`RowSpan` greater than 1 is drawn over the combined area of the slots it covers, including the grid lines between them, and taps anywhere in that area place the caret in it. The covered cells stay in `Row.Cells` (so the grid stays rectangular) but are not drawn, `Tab`/`Shift+Tab` skip them, and a caret placed in one (for example by `Ctrl+End` when the last slot is covered) moves to the spanning cell, so typing never goes into a hidden cell. Grid lines inside a spanning cell can't be dragged to resize. `TableBlock.GetSpanAnchor(row, col)` returns the cell that occupies a slot. A spanning cell taller than the rows it covers makes the last of those rows taller. Spans that run past the table's edge, or into a slot an earlier cell already covers, are cut short.
 
 Merges are exported to HTML as `colspan`/`rowspan`.
 

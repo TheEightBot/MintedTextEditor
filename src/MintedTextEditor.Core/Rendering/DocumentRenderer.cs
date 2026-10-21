@@ -319,11 +319,13 @@ public class DocumentRenderer
         }
 
         // Horizontal lines: runs of equal-width edges are drawn as one rectangle spanning the
-        // grid-line junctions at both ends.
+        // grid-line junctions at both ends. Lines grow down from the grid line, except the outer
+        // bottom line, which grows up so it stays inside the table's height.
         for (int r = 0; r <= rowCount; r++)
         {
-            float y = tableY + lineY[r];
-            if (y > visibleBottom) break;
+            float lineTop = tableY + lineY[r];
+            bool isBottom = r == rowCount;
+            if (!isBottom && lineTop > visibleBottom) break;
 
             int c = 0;
             while (c < colCount)
@@ -332,7 +334,8 @@ public class DocumentRenderer
                 int end = c + 1;
                 while (end < colCount && HorizontalEdge(r, end) == width) end++;
 
-                if (width > 0f && y + width >= visibleTop)
+                float y = isBottom ? lineTop + g - width : lineTop;
+                if (width > 0f && y + width >= visibleTop && y <= visibleBottom)
                 {
                     float x = lineX[c];
                     float right = lineX[end] + g;
@@ -344,7 +347,9 @@ public class DocumentRenderer
         }
 
         // Vertical lines, one rectangle per row. A junction not covered by a horizontal line
-        // (between two row-spanning cells) is filled by extending the edge above it.
+        // (between two row-spanning cells) is filled by extending the edge above it. Lines grow
+        // right from the grid line, except the outer right line, which grows left so its far
+        // edge stays at the table's edge.
         for (int r = 0; r < rowCount; r++)
         {
             float top = tableY + lineY[r] + g;
@@ -365,7 +370,8 @@ public class DocumentRenderer
                     && (c == colCount || HorizontalEdge(r + 1, c) <= 0f))
                     edgeHeight += g;
 
-                context.FillRect(new EditorRect(lineX[c], top, width, edgeHeight), borderPaint);
+                float x = c == colCount ? lineX[c] + g - width : lineX[c];
+                context.FillRect(new EditorRect(x, top, width, edgeHeight), borderPaint);
             }
         }
     }

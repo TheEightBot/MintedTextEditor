@@ -420,6 +420,208 @@ public class TableStylingTests
         Assert.Equal(new DocumentPosition(0, 0, 0, 0, 0), caret.Position);
     }
 
+    // ── Spans: caret normalization ─────────────────────────────────────────
+
+    private EditorInputController NewController(Caret caret) => new(caret, new CaretRenderer());
+
+    private bool Press(EditorInputController ctrl, EditorDocument doc, EditorKey key, InputModifiers modifiers = InputModifiers.None)
+        => ctrl.HandleKeyDown(new EditorKeyEventArgs(key, modifiers: modifiers), doc, _engine.Layout(doc, 400f, _ctx), _ctx);
+
+    private static string CellText(TableBlock table, int row, int col) => table.GetCell(row, col)!.Blocks[0].GetText();
+
+    [Fact]
+    public void MoveDocEnd_LastSlotCoveredByMerge_GoesToEndOfSpanningCell_AndTypingEditsIt()
+    {
+        var table = new TableBlock(1, 2);
+        TableEngine.MergeCells(table, 0, 0, 1, 2);
+        SetText(table, 0, 0, "Hi");
+        var doc = new EditorDocument(new Block[] { table });
+        var caret = new Caret();
+        var ctrl = NewController(caret);
+
+        Press(ctrl, doc, EditorKey.End, InputModifiers.Control);
+        Assert.Equal(new DocumentPosition(0, 0, 2, 0, 0), caret.Position);
+        Assert.Equal(caret.Position, ctrl.Selection.Active);
+
+        ctrl.HandleTextInput("!", doc);
+        Assert.Equal("Hi!", CellText(table, 0, 0));
+        Assert.Equal("", CellText(table, 0, 1));
+    }
+
+    [Fact]
+    public void MoveLeft_OutOfTableIntoPreviousTable_LandsInCellCoveringItsLastSlot()
+    {
+        var table = new TableBlock(2, 2);
+        TableEngine.MergeCells(table, 0, 1, 2, 1);
+        SetText(table, 0, 1, "abc");
+        var doc = new EditorDocument(new Block[] { table, new TableBlock(1, 1) });
+        var caret = new Caret();
+        var ctrl = NewController(caret);
+        caret.MoveTo(new DocumentPosition(1, 0, 0, 0, 0));
+
+        Press(ctrl, doc, EditorKey.Left);
+
+        Assert.Equal(new DocumentPosition(0, 0, 3, 0, 1), caret.Position);
+    }
+
+    [Fact]
+    public void TextInput_CaretSetInCoveredSlot_EditsSpanningCell()
+    {
+        var table = new TableBlock(2, 2);
+        TableEngine.MergeCells(table, 0, 0, 2, 1);
+        SetText(table, 0, 0, "ab");
+        var doc = new EditorDocument(new Block[] { table });
+        var caret = new Caret();
+        var ctrl = NewController(caret);
+        caret.MoveTo(new DocumentPosition(0, 0, 7, 1, 0)); // offset past the anchor's content
+
+        ctrl.HandleTextInput("c", doc);
+
+        Assert.Equal("abc", CellText(table, 0, 0));
+        Assert.Equal("", CellText(table, 1, 0));
+        Assert.Equal(new DocumentPosition(0, 0, 3, 0, 0), caret.Position);
+    }
+
+    [Fact]
+    public void ToVisibleCell_ClampsOffsetsToSpanningCellContent()
+    {
+        var table = new TableBlock(1, 2);
+        TableEngine.MergeCells(table, 0, 0, 1, 2);
+        SetText(table, 0, 0, "abcd");
+        var doc = new EditorDocument(new Block[] { table });
+
+        Assert.Equal(new DocumentPosition(0, 0, 4, 0, 0), EditorInputController.ToVisibleCell(doc, new DocumentPosition(0, 0, 9, 0, 1)));
+        Assert.Equal(new DocumentPosition(0, 0, 4, 0, 0), EditorInputController.ToVisibleCell(doc, new DocumentPosition(0, 3, 0, 0, 1)));
+        Assert.Equal(new DocumentPosition(0, 0, 2, 0, 0), EditorInputController.ToVisibleCell(doc, new DocumentPosition(0, 0, 2, 0, 1)));
+        // Uncovered slots are left alone.
+        var visible = new DocumentPosition(0, 0, 9, 0, 0);
+        Assert.Equal(visible, EditorInputController.ToVisibleCell(doc, visible));
+    }
+
+    [Fact]
+    public void MoveRight_AtEndOfCellCoveringLastSlot_LeavesTable()
+    {
+        var table = new TableBlock(1, 2);
+        TableEngine.MergeCells(table, 0, 0, 1, 2);
+        SetText(table, 0, 0, "ab");
+        var doc = new EditorDocument(new Block[] { table, new Paragraph() });
+        var caret = new Caret();
+        var ctrl = NewController(caret);
+        caret.MoveTo(new DocumentPosition(0, 0, 2, 0, 0));
+
+        Press(ctrl, doc, EditorKey.Right);
+
+        Assert.Equal(new DocumentPosition(1, 0, 0), caret.Position);
+    }
+
+    [Fact]
+    public void Tab_InMergedLastCell_LeavesTableInsteadOfInsertingTab()
+    {
+        var table = new TableBlock(1, 2);
+        TableEngine.MergeCells(table, 0, 0, 1, 2);
+        var doc = new EditorDocument(new Block[] { table });
+        var caret = new Caret();
+        var ctrl = NewController(caret);
+        caret.MoveTo(new DocumentPosition(0, 0, 0, 0, 0));
+
+        Assert.True(Press(ctrl, doc, EditorKey.Tab));
+
+        Assert.Equal("", CellText(table, 0, 0));
+        Assert.Equal(2, doc.Blocks.Count);
+        Assert.Equal(new DocumentPosition(1, 0, 0), caret.Position);
+    }
+
+    [Fact]
+    public void Tab_FromLastVisibleCell_WhenLastSlotCoveredByRowSpan_LeavesTable()
+    {
+        // (0,1) spans both rows, so (1,0) is the last cell in reading order and (1,1) is covered.
+        var table = new TableBlock(2, 2);
+        TableEngine.MergeCells(table, 0, 1, 2, 1);
+        var doc = new EditorDocument(new Block[] { table, new Paragraph() });
+        var caret = new Caret();
+        var ctrl = NewController(caret);
+        caret.MoveTo(new DocumentPosition(0, 0, 0, 1, 0));
+
+        Press(ctrl, doc, EditorKey.Tab);
+
+        Assert.Equal(new DocumentPosition(1, 0, 0), caret.Position);
+        Assert.Equal("", CellText(table, 1, 0));
+    }
+
+    // ── Spans: resize boundaries ───────────────────────────────────────────
+
+    [Fact]
+    public void FindColumnResizeBoundary_IgnoresBoundaryInsideMergedCellOfPointerRow()
+    {
+        var table = new TableBlock(2, 3);
+        TableEngine.MergeCells(table, 0, 0, 1, 2);
+        var (_, layout, _) = LayoutTable(table);
+        float boundary0 = layout.GetColumnX(0) + layout.ColumnWidths[0];
+        float boundary1 = layout.GetColumnX(1) + layout.ColumnWidths[1];
+        float row0Y = layout.GetRowY(0) + 5f;
+        float row1Y = layout.GetRowY(1) + 5f;
+
+        Assert.Equal(-1, layout.FindColumnResizeBoundary(boundary0 + 2f, row0Y, 6f));
+        Assert.Equal(1, layout.FindColumnResizeBoundary(boundary1 - 2f, row0Y, 6f));
+        Assert.Equal(0, layout.FindColumnResizeBoundary(boundary0 + 2f, row1Y, 6f));
+        Assert.Equal(-1, layout.FindColumnResizeBoundary(boundary0 + 2f, layout.TotalHeight + 1f, 6f));
+        Assert.Equal(-1, layout.FindColumnResizeBoundary(boundary0 + 20f, row1Y, 6f));
+    }
+
+    [Fact]
+    public void FindRowResizeBoundary_IgnoresBoundaryInsideMergedCellOfPointerColumn()
+    {
+        var table = new TableBlock(3, 2);
+        TableEngine.MergeCells(table, 0, 1, 2, 1);
+        var (_, layout, _) = LayoutTable(table);
+        float boundary0 = layout.GetRowY(0) + layout.RowHeights[0];
+        float boundary1 = layout.GetRowY(1) + layout.RowHeights[1];
+        float col0X = layout.GetColumnX(0) + 5f;
+        float col1X = layout.GetColumnX(1) + 5f;
+
+        Assert.Equal(-1, layout.FindRowResizeBoundary(col1X, boundary0 + 2f, 6f));
+        Assert.Equal(0, layout.FindRowResizeBoundary(col0X, boundary0 + 2f, 6f));
+        Assert.Equal(1, layout.FindRowResizeBoundary(col1X, boundary1 - 2f, 6f));
+        Assert.Equal(-1, layout.FindRowResizeBoundary(layout.GetColumnX(2) + 1f, boundary0, 6f));
+    }
+
+    // ── Outer borders ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void Render_WideOuterBottomAndRightBorders_StayInsideTableBounds()
+    {
+        var table = new TableBlock(2, 2);
+        table.GetCell(1, 1)!.Border = new EditorBorder(top: 1f, right: 6f, bottom: 4f, left: 1f);
+        var (_, layout, docLayout) = LayoutTable(table);
+        var fills = RenderFills(docLayout);
+        float totalWidth = layout.GetColumnX(2);
+
+        Assert.All(fills, f =>
+        {
+            Assert.True(f.Rect.Y + f.Rect.Height <= layout.TotalHeight + 0.001f, $"{f.Rect} extends below the table");
+            Assert.True(f.Rect.X + f.Rect.Width <= totalWidth + 0.001f, $"{f.Rect} extends past the right edge");
+        });
+        // The 4-unit bottom edge under column 1 ends at the table's bottom edge.
+        Assert.Contains(fills, f => f.Rect.Height == 4f && f.Rect.Y == layout.TotalHeight - 4f);
+        // The 6-unit right edge of row 1 ends at the table's right edge.
+        Assert.Contains(fills, f => f.Rect.Width == 6f && f.Rect.X == totalWidth - 6f && f.Rect.Y == layout.GetRowY(1));
+    }
+
+    [Fact]
+    public void Render_WideOuterBottomBorder_DrawnWhenOnlyItsInsetPartIsVisible()
+    {
+        var table = new TableBlock(1, 1);
+        table.GetCell(0, 0)!.Border = new EditorBorder(top: 1f, right: 1f, bottom: 10f, left: 1f);
+        var (_, layout, docLayout) = LayoutTable(table);
+
+        var renderer = new DocumentRenderer { ShowScrollbar = false };
+        var ctx = new MockDrawingContext();
+        // Viewport ends 5 units above the table's bottom edge, inside the 10-unit bottom border.
+        renderer.Render(docLayout, new EditorRect(0f, 0f, 400f, layout.TotalHeight - 5f), ctx);
+
+        Assert.Contains(ctx.FillRectCalls, f => f.Rect.Height == 10f && f.Rect.Y == layout.TotalHeight - 10f);
+    }
+
     // ── HTML ───────────────────────────────────────────────────────────────
 
     [Fact]

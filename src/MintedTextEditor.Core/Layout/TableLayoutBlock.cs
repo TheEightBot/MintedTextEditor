@@ -101,6 +101,70 @@ public sealed class TableLayoutBlock : LayoutBlock
 
         return new EditorRect(GetColumnX(anchorCol), GetRowY(anchorRow), width, height);
     }
+
+    /// <summary>
+    /// Finds the column boundary a pointer at (<paramref name="x"/>, <paramref name="y"/>), relative to
+    /// the table's top-left corner, can drag to resize columns. A boundary is within reach when the
+    /// pointer is inside the table and no more than <paramref name="grabRadius"/> from it, and it is
+    /// visible in the pointer's row: a boundary inside a merged cell is ignored.
+    /// </summary>
+    /// <returns>The index of the column left of the boundary, or -1 when there is none.</returns>
+    public int FindColumnResizeBoundary(float x, float y, float grabRadius)
+    {
+        if (ColumnWidths.Length < 2 || RowHeights.Length == 0 || y < 0f || y > TotalHeight)
+            return -1;
+
+        int row = FindSlot(RowHeights, y);
+        for (int col = 0; col < ColumnWidths.Length - 1; col++)
+        {
+            float boundary = GetColumnX(col) + ColumnWidths[col];
+            if (Math.Abs(x - boundary) <= grabRadius && GetOwningCell(row, col) != GetOwningCell(row, col + 1))
+                return col;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Finds the row boundary a pointer at (<paramref name="x"/>, <paramref name="y"/>), relative to
+    /// the table's top-left corner, can drag to resize rows. A boundary is within reach when the
+    /// pointer is inside the table and no more than <paramref name="grabRadius"/> from it, and it is
+    /// visible in the pointer's column: a boundary inside a merged cell is ignored.
+    /// </summary>
+    /// <returns>The index of the row above the boundary, or -1 when there is none.</returns>
+    public int FindRowResizeBoundary(float x, float y, float grabRadius)
+    {
+        if (RowHeights.Length < 2 || ColumnWidths.Length == 0 || y < 0f || y > TotalHeight)
+            return -1;
+        float tableRight = GetColumnX(ColumnWidths.Length);
+        if (x < 0f || x > tableRight)
+            return -1;
+
+        int col = FindSlot(ColumnWidths, x);
+        for (int row = 0; row < RowHeights.Length - 1; row++)
+        {
+            float boundary = GetRowY(row) + RowHeights[row];
+            if (Math.Abs(y - boundary) <= grabRadius && GetOwningCell(row, col) != GetOwningCell(row + 1, col))
+                return row;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Index of the column (or row) containing <paramref name="pos"/>: the first whose far edge, or the
+    /// grid line after it, lies beyond <paramref name="pos"/>; the last one past the end.
+    /// </summary>
+    private int FindSlot(float[] sizes, float pos)
+    {
+        float edge = BorderWidth;
+        for (int i = 0; i < sizes.Length; i++)
+        {
+            edge += sizes[i];
+            if (pos < edge)
+                return i;
+            edge += BorderWidth;
+        }
+        return sizes.Length - 1;
+    }
 }
 
 /// <summary>
