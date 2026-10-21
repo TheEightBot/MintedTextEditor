@@ -45,6 +45,41 @@ public class WordWrapTests
     }
 
     [Fact]
+    public void WordWrap_HugeUnbrokenToken_MeasuresOnlyAroundEachLine()
+    {
+        // A 20,000-character token with no whitespace wraps onto 2,000 lines of 10
+        // characters. Each line's search must measure text near that line, not probe the
+        // whole remaining suffix (quadratic: hundreds of millions of characters).
+        var engine = new TextLayoutEngine { WordWrap = true };
+        var doc = new EditorDocument();
+        string token = new('x', 20_000);
+        ((Paragraph)doc.Blocks[0]).AppendRun(token);
+
+        var layout = engine.Layout(doc, 80f, _ctx);
+
+        var lines = layout.Blocks[0].Lines;
+        Assert.Equal(2_000, lines.Count);
+        Assert.All(lines, l => Assert.Equal(10, l.Runs.Sum(r => r.Text.Length)));
+        Assert.Equal(token, string.Concat(lines.SelectMany(l => l.Runs.Select(r => r.Text))));
+        Assert.True(_ctx.MeasuredCharacters < 2_000_000, $"measured {_ctx.MeasuredCharacters} characters");
+    }
+
+    [Fact]
+    public void WordWrap_HugeUnbrokenEmojiToken_KeepsGraphemesWhole()
+    {
+        // Narrower than one 👩‍💻 (40px): every line still takes exactly one whole grapheme.
+        var engine = new TextLayoutEngine { WordWrap = true };
+        var doc = new EditorDocument();
+        ((Paragraph)doc.Blocks[0]).AppendRun(string.Concat(Enumerable.Repeat("👩\u200D💻", 500)));
+
+        var layout = engine.Layout(doc, 30f, _ctx);
+
+        var runs = layout.Blocks[0].Lines.SelectMany(l => l.Runs).ToList();
+        Assert.Equal(500, runs.Count);
+        Assert.All(runs, r => Assert.Equal("👩\u200D💻", r.Text));
+    }
+
+    [Fact]
     public void WordWrap_Enabled_ShortLine_FitsOnOneLine()
     {
         var engine = new TextLayoutEngine { WordWrap = true };

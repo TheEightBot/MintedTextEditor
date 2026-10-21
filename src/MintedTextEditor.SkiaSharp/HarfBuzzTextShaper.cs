@@ -23,29 +23,40 @@ internal sealed record ShapedRun(ushort[] Glyphs, SKPoint[] Positions, float Wid
     {
         if (index <= 0) return 0f;
         if (index >= TextLength) return Width;
+        if (Clusters.Length == 0) return Width * index / TextLength;
 
-        // Start of the cluster holding index, and the start of the next cluster after it.
-        int startCluster = 0;
-        float startX = 0f;
-        for (int g = 0; g < Clusters.Length; g++)
+        // Clusters never decrease (glyphs stay in logical order), so binary search: hit-testing
+        // asks once per character, and a linear scan per query is quadratic on long runs.
+        int next = FirstGlyphAfter(index);
+        if (next == 0)
+            return GlyphX[0] * index / Clusters[0];
+
+        // The cluster holding index starts at its first glyph (a cluster can span several).
+        int startCluster = Clusters[next - 1];
+        float startX = GlyphX[FirstGlyphAfter(startCluster - 1)];
+        if (startCluster == index)
+            return startX;
+
+        // An index inside a multi-character cluster is placed proportionally across it.
+        return next < Clusters.Length
+            ? startX + (GlyphX[next] - startX) * (index - startCluster) / (Clusters[next] - startCluster)
+            : startX + (Width - startX) * (index - startCluster) / Math.Max(1, TextLength - startCluster);
+    }
+
+    /// <summary>The first glyph whose cluster is after <paramref name="index"/>, or the glyph count.</summary>
+    private int FirstGlyphAfter(int index)
+    {
+        int lo = 0, hi = Clusters.Length;
+        while (lo < hi)
         {
-            if (Clusters[g] > index)
-            {
-                float endX = GlyphX[g];
-                return startX + (endX - startX) * (index - startCluster) / (Clusters[g] - startCluster);
-            }
-
-            if (Clusters[g] != startCluster || g == 0)
-            {
-                startCluster = Clusters[g];
-                startX = GlyphX[g];
-            }
-
-            if (startCluster == index)
-                return startX;
+            int mid = (lo + hi) / 2;
+            if (Clusters[mid] > index)
+                hi = mid;
+            else
+                lo = mid + 1;
         }
 
-        return startX + (Width - startX) * (index - startCluster) / Math.Max(1, TextLength - startCluster);
+        return lo;
     }
 }
 
@@ -147,19 +158,38 @@ internal sealed class HarfBuzzTextShaper
     {
         // Long runs are rare (word wrap off, very long lines). Hit-testing one used to measure
         // every prefix, and caching all of those would retain megabytes, so long runs skip
-        // the shared cache. Caret queries ask about the same whole run once per character, so
-        // the most recent long run is kept on its own: one entry, bounded memory.
+        // the shared cache. Caret queries ask about the same whole run once per character,
+        // and a line can alternate between a few long segments (text either side of an
+        // emoji), so the most recent long runs are kept in a small LRU bounded by glyph count.
         if (text.Length > MaxCachedTextLength)
         {
             lock (_results)
             {
-                if (_lastLongRun is { } last && last.Size == size && string.Equals(last.Text, text, StringComparison.Ordinal))
-                    return last.Run;
+                for (var node = _longRuns.First; node is not null; node = node.Next)
+                {
+                    var entry = node.Value;
+                    if (entry.Size == size && string.Equals(entry.Text, text, StringComparison.Ordinal))
+                    {
+                        _longRuns.Remove(node);
+                        _longRuns.AddFirst(node);
+                        return entry.Run;
+                    }
+                }
             }
 
             var longRun = ShapeUncached(text, size);
             lock (_results)
-                _lastLongRun = (text, size, longRun);
+            {
+                _longRuns.AddFirst((text, size, longRun));
+                _longRunGlyphs += longRun.Glyphs.Length;
+                // Always keep the newest run, however large; evict the oldest beyond the budget.
+                while (_longRunGlyphs > MaxLongRunGlyphs && _longRuns.Last != _longRuns.First)
+                {
+                    _longRunGlyphs -= _longRuns.Last!.Value.Run.Glyphs.Length;
+                    _longRuns.RemoveLast();
+                }
+            }
+
             return longRun;
         }
 
@@ -185,11 +215,18 @@ internal sealed class HarfBuzzTextShaper
 
     private const int MaxCachedResults = 4096;
     private const int MaxCachedTextLength = 256;
-    private (string Text, float Size, ShapedRun Run)? _lastLongRun;
+    private const int MaxLongRunGlyphs = 16 * 1024;
+    private readonly LinkedList<(string Text, float Size, ShapedRun Run)> _longRuns = new();
+    private int _longRunGlyphs;
     private readonly Dictionary<(string Text, float Size), ShapedRun> _results = new();
+
+    /// <summary>How many times text has actually been shaped (cache misses), for tests.</summary>
+    internal int ShapeCount => _shapeCount;
+    private int _shapeCount;
 
     private ShapedRun ShapeUncached(string text, float size)
     {
+        Interlocked.Increment(ref _shapeCount);
         float scale = size / ShapingScale;
         var glyphs = new List<ushort>(text.Length);
         var points = new List<SKPoint>(text.Length);

@@ -15,8 +15,12 @@ internal class MockDrawingContext : IDrawingContext
     public List<DrawTextCall> DrawTextCalls { get; } = new();
     public List<FillRectCall> FillRectCalls { get; } = new();
 
+    /// <summary>Total characters passed to <see cref="MeasureText"/>, to count layout work.</summary>
+    public long MeasuredCharacters { get; private set; }
+
     public EditorSize MeasureText(string text, EditorPaint paint)
     {
+        MeasuredCharacters += text.Length;
         float fontSize = paint.Font?.Size ?? 14f;
         float width = text.Length * CharWidth;
         float height = fontSize;

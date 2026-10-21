@@ -197,6 +197,99 @@ public class SkiaDrawingContextTests : IDisposable
         Assert.NotSame(first, shaper.Shape(longText, 16f));
     }
 
+    [Fact]
+    public void Shape_AlternatingLongRuns_AreBothReused()
+    {
+        // With word wrap off, a line such as 300×'a' + 😀 + 300×'b' is measured as two long
+        // segments through the same shaper, alternately, for every caret query.
+        var shaper = HarfBuzzTextShaper.Get(SKTypeface.Default)!;
+        string left = new('a', 300), right = new('b', 300);
+
+        var leftRun = shaper.Shape(left, 31f);
+        var rightRun = shaper.Shape(right, 31f);
+        int shaped = shaper.ShapeCount;
+
+        for (int i = 0; i < 50; i++)
+        {
+            Assert.Same(leftRun, shaper.Shape(left, 31f));
+            Assert.Same(rightRun, shaper.Shape(right, 31f));
+        }
+
+        Assert.Equal(shaped, shaper.ShapeCount);
+    }
+
+    [Fact]
+    public void Shape_LongRuns_AreEvictedBeyondTheGlyphBudget()
+    {
+        // Long results are bounded by total glyph count: shaping many distinct long runs
+        // evicts the oldest, while the newest is always kept.
+        var shaper = HarfBuzzTextShaper.Get(SKTypeface.Default)!;
+        var oldest = shaper.Shape(new string('c', 1000), 29f);
+
+        ShapedRun newest = oldest;
+        for (int i = 0; i < 40; i++)
+            newest = shaper.Shape(new string('d', 1000 + i), 29f);
+
+        Assert.Same(newest, shaper.Shape(new string('d', 1039), 29f));
+        Assert.NotSame(oldest, shaper.Shape(new string('c', 1000), 29f));
+    }
+
+    [Fact]
+    public void CaretOffset_MatchesALinearScanOfTheClusters()
+    {
+        // Clusters 0,0 (two glyphs for one character), a 3-character ligature at 1, then a
+        // 2-character cluster at 4 that runs to the end of the text.
+        var run = new ShapedRun(new ushort[4], new SKPoint[4], 40f,
+            new[] { 0, 0, 1, 4 }, new[] { 0f, 4f, 10f, 25f }, 6);
+
+        for (int i = -1; i <= run.TextLength + 1; i++)
+            Assert.Equal(LinearCaretOffset(run, i), run.CaretOffset(i), 0.001f);
+
+        // Text that does not start at cluster 0 (leading characters with no glyph).
+        var offset = new ShapedRun(new ushort[2], new SKPoint[2], 20f, new[] { 2, 3 }, new[] { 6f, 12f }, 4);
+        for (int i = 0; i <= offset.TextLength; i++)
+            Assert.Equal(LinearCaretOffset(offset, i), offset.CaretOffset(i), 0.001f);
+    }
+
+    [Fact]
+    public void CaretOffset_LongShapedRun_MatchesALinearScan()
+    {
+        var run = HarfBuzzTextShaper.Get(SKTypeface.Default)!
+            .Shape(string.Concat(Enumerable.Repeat("office AVATAR ffi Wolf ", 40)), 27f);
+
+        for (int i = 0; i <= run.TextLength; i++)
+            Assert.Equal(LinearCaretOffset(run, i), run.CaretOffset(i), 0.001f);
+    }
+
+    // The original linear-scan CaretOffset, kept as the reference for the binary search.
+    private static float LinearCaretOffset(ShapedRun run, int index)
+    {
+        if (index <= 0) return 0f;
+        if (index >= run.TextLength) return run.Width;
+
+        int startCluster = 0;
+        float startX = 0f;
+        for (int g = 0; g < run.Clusters.Length; g++)
+        {
+            if (run.Clusters[g] > index)
+            {
+                float endX = run.GlyphX[g];
+                return startX + (endX - startX) * (index - startCluster) / (run.Clusters[g] - startCluster);
+            }
+
+            if (run.Clusters[g] != startCluster || g == 0)
+            {
+                startCluster = run.Clusters[g];
+                startX = run.GlyphX[g];
+            }
+
+            if (startCluster == index)
+                return startX;
+        }
+
+        return startX + (run.Width - startX) * (index - startCluster) / Math.Max(1, run.TextLength - startCluster);
+    }
+
     private static SKTypeface? DejaVu => SKFontManager.Default.MatchFamily("DejaVu Sans") is { FamilyName: "DejaVu Sans" } t ? t : null;
 
     [Theory]
