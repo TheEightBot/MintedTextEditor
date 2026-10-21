@@ -9,6 +9,10 @@ namespace MintedTextEditor.Core.Input;
 /// </summary>
 public sealed class EditorKeyBinding
 {
+    /// <summary>Creates a key binding.</summary>
+    /// <param name="key">The key that triggers the binding.</param>
+    /// <param name="modifiers">The modifiers that must be held; matched exactly against Shift, Control, Alt and Meta.</param>
+    /// <param name="handler">The action to run; return <see langword="true"/> to mark the key as handled.</param>
     public EditorKeyBinding(
         EditorKey key,
         InputModifiers modifiers,

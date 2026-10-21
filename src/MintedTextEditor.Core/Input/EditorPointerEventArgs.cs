@@ -26,6 +26,14 @@ public class EditorPointerEventArgs
     /// <summary>Timestamp in milliseconds.</summary>
     public long Timestamp { get; }
 
+    /// <summary>Creates pointer event data.</summary>
+    /// <param name="x">X coordinate relative to the editor surface.</param>
+    /// <param name="y">Y coordinate relative to the editor surface.</param>
+    /// <param name="action">The type of pointer action.</param>
+    /// <param name="button">Mouse button index (0 = primary, 1 = middle, 2 = secondary).</param>
+    /// <param name="modifiers">Active modifier keys.</param>
+    /// <param name="clickCount">Number of sequential clicks.</param>
+    /// <param name="timestamp">Timestamp in milliseconds.</param>
     public EditorPointerEventArgs(
         float x, float y, InputAction action,
         int button = 0, InputModifiers modifiers = InputModifiers.None,

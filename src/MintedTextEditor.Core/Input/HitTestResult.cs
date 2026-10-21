@@ -23,6 +23,12 @@ public class HitTestResult
     /// <summary>True if the hit was below the last block in the document.</summary>
     public bool IsAfterLastBlock { get; }
 
+    /// <summary>Creates a hit test result.</summary>
+    /// <param name="position">The document position corresponding to the hit location.</param>
+    /// <param name="line">The layout line that was hit, if any.</param>
+    /// <param name="run">The layout run that was hit, if any.</param>
+    /// <param name="isAtLineEnd">True if the hit was at or beyond the end of the line.</param>
+    /// <param name="isAfterLastBlock">True if the hit was below the last block.</param>
     public HitTestResult(
         DocumentPosition position,
         LayoutLine? line = null,

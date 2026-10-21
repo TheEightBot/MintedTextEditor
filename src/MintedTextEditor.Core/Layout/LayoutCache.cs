@@ -13,11 +13,15 @@ public class LayoutCache : IDocumentChangeListener
     private readonly TextLayoutEngine _engine;
     private float _lastViewportWidth = -1f;
 
+    /// <summary>Creates a layout cache that uses a new <see cref="TextLayoutEngine"/>.</summary>
     public LayoutCache()
         : this(new TextLayoutEngine())
     {
     }
 
+    /// <summary>Creates a layout cache that uses the given layout engine.</summary>
+    /// <param name="engine">The engine used to lay out blocks.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
     public LayoutCache(TextLayoutEngine engine)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
