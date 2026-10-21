@@ -35,6 +35,8 @@ file sealed class SpanishEditorStrings : EditorStrings
     public override string HyperlinkDialogMessage => "Escriba la URL:";
     public override string HyperlinkDialogInsert  => "Insertar";
     public override string HyperlinkDialogCancel  => "Cancelar";
+    public override string EditHyperlinkDialogTitle => "Editar hipervínculo";
+    public override string EditHyperlinkDialogSave  => "Guardar";
 }
 
 file sealed class FrenchEditorStrings : EditorStrings
@@ -68,6 +70,8 @@ file sealed class FrenchEditorStrings : EditorStrings
     public override string HyperlinkDialogMessage => "Saisissez l'URL :";
     public override string HyperlinkDialogInsert  => "Insérer";
     public override string HyperlinkDialogCancel  => "Annuler";
+    public override string EditHyperlinkDialogTitle => "Modifier le lien hypertexte";
+    public override string EditHyperlinkDialogSave  => "Enregistrer";
 }
 
 // ---------- page ---------------------------------------------------------------

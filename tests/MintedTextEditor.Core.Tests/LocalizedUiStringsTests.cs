@@ -299,6 +299,14 @@ public class LocalizedUiStringsTests
     }
 
     [Fact]
+    public void EditHyperlinkPromptStrings_HaveEnglishDefaults()
+    {
+        var strings = new EditorStrings();
+        Assert.Equal("Edit hyperlink", strings.EditHyperlinkDialogTitle);
+        Assert.Equal("Save", strings.EditHyperlinkDialogSave);
+    }
+
+    [Fact]
     public void ContextMenuRenderer_DrawsLocalizedLabels()
     {
         WithStrings(new FrenchStrings(), () =>

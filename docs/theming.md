@@ -122,7 +122,8 @@ Properties the MAUI control currently uses:
 | `ToolbarButtonColor` | Toolbar icon/label color (icons are tinted with it) |
 | `ToolbarActiveColor` | Toolbar button active/toggled fill |
 | `ToolbarHoverColor` | Fill of the toolbar button or drop-down under the mouse pointer (active buttons keep `ToolbarActiveColor`) |
-| `ToolbarSeparatorColor` | Toolbar group separator and disabled items |
+| `ToolbarSeparatorColor` | Toolbar group separator and disabled items; context menu border and separators |
+| `ContextMenuBackground` / `ContextMenuTextColor` / `ContextMenuHoverColor` | Context menu fill, item labels (disabled labels are this color blended halfway into the background) and highlighted item |
 | `ScrollbarTrackColor` / `ScrollbarThumbColor` / `ScrollbarWidth` | Scrollbar |
 | `LineNumbersGutterColor` / `LineNumbersTextColor` / `LineNumbersGutterWidth` | Line-number gutter (`ShowLineNumbers`) |
 | `FocusRingColor` | Thin ring around the editor while it has keyboard focus, when the view sets `ShowFocusRing = true`; `Transparent` hides it |
@@ -133,4 +134,4 @@ Hover colors apply where the platform reports mouse movement with no button pres
 
 `LineSpacing` and `ParagraphSpacing` are defaults: a paragraph whose `ParagraphStyle.LineSpacing` or `ParagraphStyle.SpaceAfter` has been set keeps its own value (see `IsLineSpacingSet` / `IsSpaceAfterSet`). The built-in themes use 0 and 8, which lay documents out exactly as when these properties were unused.
 
-`EditorStyle` also defines `BorderColor`, `BorderWidth`, `ContextMenuBackground`, `ContextMenuTextColor` and `ContextMenuHoverColor`, which the built-in themes set but the control does not draw with yet.
+`EditorStyle` also defines `BorderColor` and `BorderWidth`, which the built-in themes set but the control does not draw with yet.

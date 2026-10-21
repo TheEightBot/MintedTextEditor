@@ -93,6 +93,7 @@ Content = editor;
 | `ShowScrollbar` | `true` | Show the vertical scrollbar |
 | `ShowFocusRing` | `false` | Draw a ring in the theme's `FocusRingColor` around the editor while it has focus |
 | `IsMagnifierEnabled` | `true` | Show the magnifier while dragging the caret |
+| `IsContextMenuEnabled` | `true` | Show the context menu on right-click or long press (see [Context Menu](commands-events.md#context-menu)) |
 
 See [Theming](theming.md) and [Toolbar Customization](toolbar-customization.md) for the rest.
 
@@ -154,6 +155,8 @@ editor.MagnifierOptions = new MagnifierOptions
 ```
 
 `MagnifierOptions` also has `VerticalOffset` (distance above the finger), `BorderColor`, `BorderWidth`, `ShadowColor` and `ShadowOffset`. Sizes are in logical units.
+
+If you lift your finger without dragging, the context menu opens instead (Paste, Select All, …). A long press on selected text opens the context menu for the selection rather than picking up the caret. See [Context Menu](commands-events.md#context-menu).
 
 ## Next Steps
 
