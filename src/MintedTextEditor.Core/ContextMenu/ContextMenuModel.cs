@@ -8,10 +8,15 @@ namespace MintedTextEditor.Core.ContextMenu;
 /// <summary>A single entry in a context menu.</summary>
 public sealed class ContextMenuItem
 {
+    /// <summary>Text displayed for the item.</summary>
     public string         Label          { get; set; } = "";
+    /// <summary>Icon identifier for the item (for example "cut" or "table").</summary>
     public string         Icon           { get; set; } = "";
+    /// <summary>Command to execute when the item is chosen, or null when the platform layer handles it.</summary>
     public IEditorCommand? Command       { get; set; }
+    /// <summary>When false the item is drawn greyed out.</summary>
     public bool           IsEnabled      { get; set; } = true;
+    /// <summary>When false the item is omitted from the menu.</summary>
     public bool           IsVisible      { get; set; } = true;
     /// <summary>When true a visual separator is drawn below this item.</summary>
     public bool           SeparatorAfter { get; set; }
@@ -22,6 +27,7 @@ public sealed class ContextMenuItem
 /// <summary>Ordered collection of <see cref="ContextMenuItem"/> instances.</summary>
 public sealed class ContextMenuDefinition
 {
+    /// <summary>All items in display order, including hidden ones.</summary>
     public IList<ContextMenuItem> Items { get; set; } = new List<ContextMenuItem>();
 
     /// <summary>Visible items (IsVisible == true) in order.</summary>
@@ -36,9 +42,14 @@ public sealed class ContextMenuDefinition
 /// </summary>
 public sealed class ContextMenuItemsRequestedEventArgs : EventArgs
 {
+    /// <summary>The menu about to be shown; modify its items to customise the menu.</summary>
     public ContextMenuDefinition Definition { get; }
+    /// <summary>Editor state at the time the menu was requested.</summary>
     public EditorContext          Context   { get; }
 
+    /// <summary>Creates event args for the given menu and editor context.</summary>
+    /// <param name="definition">The menu about to be shown.</param>
+    /// <param name="context">The current editor context.</param>
     public ContextMenuItemsRequestedEventArgs(ContextMenuDefinition definition, EditorContext context)
     {
         Definition = definition;
@@ -55,6 +66,8 @@ public static class ContextMenuFactory
     /// Creates the default context menu for <paramref name="ctx"/>.
     /// Hyperlink-specific items are included only when relevant.
     /// </summary>
+    /// <param name="ctx">The current editor context.</param>
+    /// <returns>A new menu definition with clipboard, hyperlink, image, and table items.</returns>
     public static ContextMenuDefinition CreateDefault(EditorContext ctx)
     {
         bool hasSelection    = !ctx.Selection.IsEmpty;

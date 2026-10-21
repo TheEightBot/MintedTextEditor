@@ -12,7 +12,9 @@ namespace MintedTextEditor.Core.Commands;
 /// </summary>
 public sealed class InsertHyperlinkCommand : IEditorCommand
 {
+    /// <inheritdoc/>
     public string Name => "InsertHyperlink";
+    /// <inheritdoc/>
     public string Description => "Wraps the selected text (or inserts display text) as a hyperlink.";
 
     /// <summary>Set before calling Execute.</summary>
@@ -21,6 +23,7 @@ public sealed class InsertHyperlinkCommand : IEditorCommand
     /// <summary>Optional display text. When empty, uses selected text or the URL.</summary>
     public string DisplayText { get; set; } = string.Empty;
 
+    /// <inheritdoc/>
     public void Execute(EditorContext ctx)
     {
         if (string.IsNullOrWhiteSpace(Url)) return;
@@ -31,19 +34,25 @@ public sealed class InsertHyperlinkCommand : IEditorCommand
         ctx.Selection.CollapseTo(pos);
     }
 
+    /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => !string.IsNullOrWhiteSpace(Url);
 }
 
 // ── Remove Hyperlink ──────────────────────────────────────────────────────────
 
+/// <summary>Removes the hyperlink at the caret position.</summary>
 public sealed class RemoveHyperlinkCommand : IEditorCommand
 {
+    /// <inheritdoc/>
     public string Name => "RemoveHyperlink";
+    /// <inheritdoc/>
     public string Description => "Removes the hyperlink at the current caret position.";
 
+    /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
         HyperlinkEngine.RemoveHyperlink(ctx.Document, ctx.Selection.Active);
 
+    /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) =>
         HyperlinkEngine.GetHyperlinkAtPosition(ctx.Document, ctx.Selection.Active) is not null;
 }
@@ -55,18 +64,22 @@ public sealed class RemoveHyperlinkCommand : IEditorCommand
 /// </summary>
 public sealed class OpenHyperlinkCommand : IEditorCommand
 {
+    /// <inheritdoc/>
     public string Name => "OpenHyperlink";
+    /// <inheritdoc/>
     public string Description => "Opens the URL of the hyperlink at the current caret position.";
 
     /// <summary>Called with the URL when the command executes.</summary>
     public Action<string>? OnOpen { get; set; }
 
+    /// <inheritdoc/>
     public void Execute(EditorContext ctx)
     {
         var link = HyperlinkEngine.GetHyperlinkAtPosition(ctx.Document, ctx.Selection.Active);
         if (link is not null) OnOpen?.Invoke(link.Url);
     }
 
+    /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) =>
         HyperlinkEngine.GetHyperlinkAtPosition(ctx.Document, ctx.Selection.Active) is not null;
 }

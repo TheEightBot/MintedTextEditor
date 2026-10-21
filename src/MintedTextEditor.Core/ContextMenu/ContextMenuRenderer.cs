@@ -7,21 +7,41 @@ namespace MintedTextEditor.Core.ContextMenu;
 /// </summary>
 public sealed class ContextMenuRenderer
 {
+    /// <summary>Height of each menu item.</summary>
     public float ItemHeight      { get; set; } = 28f;
+    /// <summary>Vertical space taken by a separator between items.</summary>
     public float SeparatorHeight { get; set; } = 9f;
+    /// <summary>Width of the popup.</summary>
     public float MinWidth        { get; set; } = 180f;
+    /// <summary>Inner padding between the popup edge and its items.</summary>
     public float Padding         { get; set; } = 4f;
+    /// <summary>Corner radius of the popup background.</summary>
     public float CornerRadius    { get; set; } = 6f;
+    /// <summary>Horizontal space reserved for the icon column before each label.</summary>
     public float IconWidth       { get; set; } = 22f;
 
+    /// <summary>The menu currently shown, or null when closed.</summary>
     public ContextMenuDefinition? Definition { get; private set; }
+    /// <summary>Left edge of the popup after clamping to the viewport.</summary>
     public float X { get; private set; }
+    /// <summary>Top edge of the popup after clamping to the viewport.</summary>
     public float Y { get; private set; }
+    /// <summary>Index of the focused visible item, or -1 when none is focused.</summary>
     public int FocusedIndex { get; private set; } = -1;
+    /// <summary>True while a menu is open.</summary>
     public bool IsOpen => Definition is not null;
 
     private readonly List<EditorRect> _itemRects = new();
 
+    /// <summary>
+    /// Opens <paramref name="definition"/> at the given point, shifting the popup so it stays inside
+    /// <paramref name="viewport"/>, and clears focus.
+    /// </summary>
+    /// <param name="definition">The menu to show.</param>
+    /// <param name="x">Requested left edge of the popup.</param>
+    /// <param name="y">Requested top edge of the popup.</param>
+    /// <param name="viewport">Area the popup must fit within.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="definition"/> is null.</exception>
     public void Open(ContextMenuDefinition definition, float x, float y, EditorRect viewport)
     {
         Definition   = definition ?? throw new ArgumentNullException(nameof(definition));
@@ -35,6 +55,7 @@ public sealed class ContextMenuRenderer
         Y = Math.Max(Y, viewport.Y);
     }
 
+    /// <summary>Closes the menu and clears focus.</summary>
     public void Close()
     {
         Definition   = null;
@@ -42,6 +63,10 @@ public sealed class ContextMenuRenderer
         _itemRects.Clear();
     }
 
+    /// <summary>
+    /// Draws the open menu and records item bounds for <see cref="HitTest"/>. Does nothing when closed.
+    /// </summary>
+    /// <param name="ctx">Drawing context to render into.</param>
     public void Render(IDrawingContext ctx)
     {
         if (Definition is null) return;
@@ -100,6 +125,13 @@ public sealed class ContextMenuRenderer
         }
     }
 
+    /// <summary>
+    /// Returns the visible item at the given point and focuses it; clears focus when no item is hit.
+    /// Uses item bounds from the last <see cref="Render"/> call.
+    /// </summary>
+    /// <param name="x">X coordinate of the point.</param>
+    /// <param name="y">Y coordinate of the point.</param>
+    /// <returns>The item under the point, or null.</returns>
     public ContextMenuItem? HitTest(float x, float y)
     {
         if (Definition is null) return null;
@@ -117,6 +149,9 @@ public sealed class ContextMenuRenderer
         return null;
     }
 
+    /// <summary>Returns true when the point lies outside the popup bounds, or when the menu is closed.</summary>
+    /// <param name="x">X coordinate of the point.</param>
+    /// <param name="y">Y coordinate of the point.</param>
     public bool IsClickOutside(float x, float y)
     {
         if (Definition is null) return true;
@@ -127,6 +162,8 @@ public sealed class ContextMenuRenderer
     /// <summary>
     /// Handles keyboard navigation. Returns the item to execute when Enter fires, null otherwise.
     /// </summary>
+    /// <param name="key">The pressed key. Up/Down move focus (wrapping), Enter selects, Escape closes the menu.</param>
+    /// <returns>The focused item when <paramref name="key"/> is Enter and an item is focused; otherwise null.</returns>
     public ContextMenuItem? HandleKey(ConsoleKey key)
     {
         if (Definition is null) return null;
