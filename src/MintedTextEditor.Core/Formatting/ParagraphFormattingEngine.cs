@@ -6,7 +6,11 @@ namespace MintedTextEditor.Core.Formatting;
 
 /// <summary>
 /// High-level operations for paragraph-level formatting.
-/// All methods create undoable state changes through <see cref="DocumentEditor"/>.
+/// Each method changes the paragraph styles directly through <see cref="DocumentEditor"/> and is
+/// <b>not</b> recorded for undo. To make a change undoable, use the paragraph commands in
+/// <c>MintedTextEditor.Core.Commands</c> (e.g. <c>AlignCenterCommand</c>), which record it on the
+/// editor's <see cref="UndoManager"/>, or push an <see cref="ApplyParagraphStyleAction"/> that calls
+/// these methods.
 /// </summary>
 public static class ParagraphFormattingEngine
 {

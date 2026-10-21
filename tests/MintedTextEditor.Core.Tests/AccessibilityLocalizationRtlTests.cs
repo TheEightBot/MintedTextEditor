@@ -109,22 +109,7 @@ public class AccessibilityLocalizationRtlTests
         Assert.Equal("Normal text", s.NormalText);
     }
 
-    [Fact]
-    public void EditorStrings_Current_CanBeReplaced()
-    {
-        var original = EditorStrings.Current;
-        try
-        {
-            var custom = new CustomTestStrings();
-            EditorStrings.Current = custom;
-            Assert.Equal("Négrita", EditorStrings.Current.Bold);
-        }
-        finally
-        {
-            // Always restore the singleton
-            EditorStrings.Current = original;
-        }
-    }
+    // Tests that replace EditorStrings.Current live in LocalizedUiStringsTests (non-parallel collection).
 
     [Fact]
     public void EditorStrings_Current_ThrowsOnNullAssignment()
@@ -318,10 +303,4 @@ public class AccessibilityLocalizationRtlTests
         // Caret should be at the right edge of the viewport
         Assert.Equal(viewportWidth, rect.X, precision: 1);
     }
-}
-
-/// <summary>Custom strings subclass used in localisation replacement test.</summary>
-file sealed class CustomTestStrings : EditorStrings
-{
-    public override string Bold => "Négrita";
 }

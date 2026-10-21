@@ -1,4 +1,5 @@
 using MintedTextEditor.Core.Commands;
+using MintedTextEditor.Core.Localization;
 using MintedTextEditor.Core.Rendering;
 
 namespace MintedTextEditor.Core.Toolbar;
@@ -19,8 +20,32 @@ public enum ToolbarLayoutMode
 /// <summary>Abstract base for all toolbar elements.</summary>
 public abstract class ToolbarItem
 {
-    /// <summary>Text shown when no icon is drawn; for a dropdown, shown while nothing is selected.</summary>
-    public string Label     { get; set; } = "";
+    private string _label = "";
+
+    /// <summary>
+    /// Text shown when no icon is drawn; for a dropdown, shown while nothing is selected.
+    /// When <see cref="LocalizedLabel"/> is set, the value is resolved from
+    /// <see cref="EditorStrings.Current"/> on every read, so replacing the active strings takes
+    /// effect the next time the toolbar is drawn. Assigning this property clears
+    /// <see cref="LocalizedLabel"/> and fixes the label to the assigned text.
+    /// </summary>
+    public string Label
+    {
+        get => LocalizedLabel is { } resolve ? resolve(EditorStrings.Current) : _label;
+        set
+        {
+            _label         = value ?? "";
+            LocalizedLabel = null;
+        }
+    }
+
+    /// <summary>
+    /// Selects the label text from an <see cref="EditorStrings"/> instance (for example
+    /// <c>s =&gt; s.Bold</c>). The built-in toolbars set this; when null, <see cref="Label"/>
+    /// returns the text it was assigned.
+    /// </summary>
+    public Func<EditorStrings, string>? LocalizedLabel { get; set; }
+
     /// <summary>Icon key (for example "bold") used to look up a vector or image icon.</summary>
     public string Icon      { get; set; } = "";
     /// <summary>Whether the item is enabled. Disabled items are drawn in the disabled color.</summary>
@@ -110,6 +135,8 @@ public sealed class ToolbarDefinition
     /// ellipsis (…) button.  0 means unlimited (show all rows).
     /// Only meaningful when <see cref="LayoutMode"/> is <see cref="ToolbarLayoutMode.Wrap"/>
     /// or <see cref="ToolbarLayoutMode.Overflow"/>.
+    /// A non-null <see cref="ToolbarRenderer.MaxRowsOverride"/> takes precedence over this value
+    /// (the MAUI editor sets it from <c>MintedEditorView.ToolbarMaxRows</c> when the app sets that property).
     /// </summary>
     public int MaxRows { get; set; } = 0;
 
@@ -137,52 +164,52 @@ public sealed class ToolbarDefinition
         var def = new ToolbarDefinition();
 
         def.Groups.Add(MakeGroup("History",
-            new ToolbarButton { Label = "Undo", Icon = "undo", Command = new UndoCommand(), IsToggle = false },
-            new ToolbarButton { Label = "Redo", Icon = "redo", Command = new RedoCommand(), IsToggle = false }));
+            new ToolbarButton { LocalizedLabel = s => s.Undo, Icon = "undo", Command = new UndoCommand(), IsToggle = false },
+            new ToolbarButton { LocalizedLabel = s => s.Redo, Icon = "redo", Command = new RedoCommand(), IsToggle = false }));
 
         def.Groups.Add(MakeGroup("Font",
-            new ToolbarDropdown { Label = "Font Family", Icon = "font-family" },
-            new ToolbarDropdown { Label = "Font Size",   Icon = "font-size"   }));
+            new ToolbarDropdown { LocalizedLabel = s => s.FontFamily, Icon = "font-family" },
+            new ToolbarDropdown { LocalizedLabel = s => s.FontSize, Icon = "font-size"   }));
 
         def.Groups.Add(MakeGroup("Formatting",
-            new ToolbarButton { Label = "Bold",          Icon = "bold",          Command = new ToggleBoldCommand(),          IsToggle = true },
-            new ToolbarButton { Label = "Italic",        Icon = "italic",        Command = new ToggleItalicCommand(),        IsToggle = true },
-            new ToolbarButton { Label = "Underline",     Icon = "underline",     Command = new ToggleUnderlineCommand(),     IsToggle = true },
-            new ToolbarButton { Label = "Strikethrough", Icon = "strikethrough", Command = new ToggleStrikethroughCommand(), IsToggle = true }));
+            new ToolbarButton { LocalizedLabel = s => s.Bold, Icon = "bold",          Command = new ToggleBoldCommand(),          IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.Italic, Icon = "italic",        Command = new ToggleItalicCommand(),        IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.Underline, Icon = "underline",     Command = new ToggleUnderlineCommand(),     IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.Strikethrough, Icon = "strikethrough", Command = new ToggleStrikethroughCommand(), IsToggle = true }));
 
         def.Groups.Add(MakeGroup("Colors",
-            new ToolbarColorPicker { Label = "Text Color",      Icon = "text-color"      },
-            new ToolbarColorPicker { Label = "Highlight Color", Icon = "highlight-color" }));
+            new ToolbarColorPicker { LocalizedLabel = s => s.TextColor, Icon = "text-color"      },
+            new ToolbarColorPicker { LocalizedLabel = s => s.Highlight, Icon = "highlight-color" }));
 
         def.Groups.Add(MakeGroup("Alignment",
-            new ToolbarButton { Label = "Align Left",    Icon = "align-left",    Command = new AlignLeftCommand(),    IsToggle = true },
-            new ToolbarButton { Label = "Align Center",  Icon = "align-center",  Command = new AlignCenterCommand(),  IsToggle = true },
-            new ToolbarButton { Label = "Align Right",   Icon = "align-right",   Command = new AlignRightCommand(),   IsToggle = true },
-            new ToolbarButton { Label = "Justify",       Icon = "align-justify", Command = new AlignJustifyCommand(), IsToggle = true }));
+            new ToolbarButton { LocalizedLabel = s => s.AlignLeft, Icon = "align-left",    Command = new AlignLeftCommand(),    IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.AlignCenter, Icon = "align-center",  Command = new AlignCenterCommand(),  IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.AlignRight, Icon = "align-right",   Command = new AlignRightCommand(),   IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.AlignJustify, Icon = "align-justify", Command = new AlignJustifyCommand(), IsToggle = true }));
 
         def.Groups.Add(MakeGroup("Lists",
-            new ToolbarButton { Label = "Bullet List",     Icon = "bullet-list",     Command = new ToggleBulletListCommand(), IsToggle = true  },
-            new ToolbarButton { Label = "Number List",     Icon = "number-list",     Command = new ToggleNumberListCommand(), IsToggle = true  },
-            new ToolbarButton { Label = "Decrease Indent", Icon = "indent-decrease", Command = new DecreaseIndentCommand(),   IsToggle = false },
-            new ToolbarButton { Label = "Increase Indent", Icon = "indent-increase", Command = new IncreaseIndentCommand(),   IsToggle = false }));
+            new ToolbarButton { LocalizedLabel = s => s.BulletList, Icon = "bullet-list",     Command = new ToggleBulletListCommand(), IsToggle = true  },
+            new ToolbarButton { LocalizedLabel = s => s.NumberedList, Icon = "number-list",     Command = new ToggleNumberListCommand(), IsToggle = true  },
+            new ToolbarButton { LocalizedLabel = s => s.IndentDecrease, Icon = "indent-decrease", Command = new DecreaseIndentCommand(),   IsToggle = false },
+            new ToolbarButton { LocalizedLabel = s => s.IndentIncrease, Icon = "indent-increase", Command = new IncreaseIndentCommand(),   IsToggle = false }));
 
         def.Groups.Add(MakeGroup("Script",
-            new ToolbarButton { Label = "Subscript",   Icon = "subscript",   Command = new ToggleSubscriptCommand(),   IsToggle = true },
-            new ToolbarButton { Label = "Superscript", Icon = "superscript", Command = new ToggleSuperscriptCommand(), IsToggle = true }));
+            new ToolbarButton { LocalizedLabel = s => s.Subscript, Icon = "subscript",   Command = new ToggleSubscriptCommand(),   IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.Superscript, Icon = "superscript", Command = new ToggleSuperscriptCommand(), IsToggle = true }));
 
         def.Groups.Add(MakeGroup("Insert",
-            new ToolbarButton { Label = "Insert Hyperlink", Icon = "hyperlink", Command = new InsertHyperlinkCommand(), IsToggle = false },
-            new ToolbarButton { Label = "Insert Image",     Icon = "image",     Command = new InsertImageCommand(),     IsToggle = false },
-            new ToolbarButton { Label = "Insert Table",     Icon = "table",     Command = new InsertTableCommand(),     IsToggle = false }));
+            new ToolbarButton { LocalizedLabel = s => s.InsertLink, Icon = "hyperlink", Command = new InsertHyperlinkCommand(), IsToggle = false },
+            new ToolbarButton { LocalizedLabel = s => s.InsertImage, Icon = "image",     Command = new InsertImageCommand(),     IsToggle = false },
+            new ToolbarButton { LocalizedLabel = s => s.InsertTable, Icon = "table",     Command = new InsertTableCommand(),     IsToggle = false }));
 
         def.Groups.Add(MakeGroup("Edit",
-            new ToolbarDropdown { Label = "Edit",   Icon = "edit-actions" },
-            new ToolbarDropdown { Label = "Object", Icon = "object-actions" },
-            new ToolbarDropdown { Label = "Table",  Icon = "table-actions" }));
+            new ToolbarDropdown { LocalizedLabel = s => s.EditMenu, Icon = "edit-actions" },
+            new ToolbarDropdown { LocalizedLabel = s => s.ObjectMenu, Icon = "object-actions" },
+            new ToolbarDropdown { LocalizedLabel = s => s.TableMenu, Icon = "table-actions" }));
 
         def.Groups.Add(MakeGroup("Paragraph",
-            new ToolbarDropdown { Label = "Heading Level",    Icon = "heading"          },
-            new ToolbarButton   { Label = "Clear Formatting", Icon = "clear-formatting",
+            new ToolbarDropdown { LocalizedLabel = s => s.HeadingLevel, Icon = "heading"          },
+            new ToolbarButton   { LocalizedLabel = s => s.ClearFormat, Icon = "clear-formatting",
                 Command = new ClearFormattingCommand(), IsToggle = false }));
 
         return def;
@@ -196,34 +223,34 @@ public sealed class ToolbarDefinition
         var def = new ToolbarDefinition();
 
         def.Groups.Add(MakeGroup("Font",
-            new ToolbarDropdown { Label = "Font Family", Icon = "font-family" },
-            new ToolbarDropdown { Label = "Font Size",   Icon = "font-size"   }));
+            new ToolbarDropdown { LocalizedLabel = s => s.FontFamily, Icon = "font-family" },
+            new ToolbarDropdown { LocalizedLabel = s => s.FontSize, Icon = "font-size"   }));
 
         def.Groups.Add(MakeGroup("Formatting",
-            new ToolbarButton { Label = "Bold",          Icon = "bold",          Command = new ToggleBoldCommand(),          IsToggle = true },
-            new ToolbarButton { Label = "Italic",        Icon = "italic",        Command = new ToggleItalicCommand(),        IsToggle = true },
-            new ToolbarButton { Label = "Underline",     Icon = "underline",     Command = new ToggleUnderlineCommand(),     IsToggle = true },
-            new ToolbarButton { Label = "Strikethrough", Icon = "strikethrough", Command = new ToggleStrikethroughCommand(), IsToggle = true }));
+            new ToolbarButton { LocalizedLabel = s => s.Bold, Icon = "bold",          Command = new ToggleBoldCommand(),          IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.Italic, Icon = "italic",        Command = new ToggleItalicCommand(),        IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.Underline, Icon = "underline",     Command = new ToggleUnderlineCommand(),     IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.Strikethrough, Icon = "strikethrough", Command = new ToggleStrikethroughCommand(), IsToggle = true }));
 
         def.Groups.Add(MakeGroup("Colors",
-            new ToolbarColorPicker { Label = "Text Color",      Icon = "text-color"      },
-            new ToolbarColorPicker { Label = "Highlight Color", Icon = "highlight-color" }));
+            new ToolbarColorPicker { LocalizedLabel = s => s.TextColor, Icon = "text-color"      },
+            new ToolbarColorPicker { LocalizedLabel = s => s.Highlight, Icon = "highlight-color" }));
 
         def.Groups.Add(MakeGroup("Alignment",
-            new ToolbarButton { Label = "Align Left",   Icon = "align-left",    Command = new AlignLeftCommand(),    IsToggle = true },
-            new ToolbarButton { Label = "Align Center", Icon = "align-center",  Command = new AlignCenterCommand(),  IsToggle = true },
-            new ToolbarButton { Label = "Align Right",  Icon = "align-right",   Command = new AlignRightCommand(),   IsToggle = true },
-            new ToolbarButton { Label = "Justify",      Icon = "align-justify", Command = new AlignJustifyCommand(), IsToggle = true }));
+            new ToolbarButton { LocalizedLabel = s => s.AlignLeft, Icon = "align-left",    Command = new AlignLeftCommand(),    IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.AlignCenter, Icon = "align-center",  Command = new AlignCenterCommand(),  IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.AlignRight, Icon = "align-right",   Command = new AlignRightCommand(),   IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.AlignJustify, Icon = "align-justify", Command = new AlignJustifyCommand(), IsToggle = true }));
 
         def.Groups.Add(MakeGroup("Lists",
-            new ToolbarButton { Label = "Bullet List",     Icon = "bullet-list",     Command = new ToggleBulletListCommand(), IsToggle = true  },
-            new ToolbarButton { Label = "Number List",     Icon = "number-list",     Command = new ToggleNumberListCommand(), IsToggle = true  },
-            new ToolbarButton { Label = "Decrease Indent", Icon = "indent-decrease", Command = new DecreaseIndentCommand(),   IsToggle = false },
-            new ToolbarButton { Label = "Increase Indent", Icon = "indent-increase", Command = new IncreaseIndentCommand(),   IsToggle = false }));
+            new ToolbarButton { LocalizedLabel = s => s.BulletList, Icon = "bullet-list",     Command = new ToggleBulletListCommand(), IsToggle = true  },
+            new ToolbarButton { LocalizedLabel = s => s.NumberedList, Icon = "number-list",     Command = new ToggleNumberListCommand(), IsToggle = true  },
+            new ToolbarButton { LocalizedLabel = s => s.IndentDecrease, Icon = "indent-decrease", Command = new DecreaseIndentCommand(),   IsToggle = false },
+            new ToolbarButton { LocalizedLabel = s => s.IndentIncrease, Icon = "indent-increase", Command = new IncreaseIndentCommand(),   IsToggle = false }));
 
         def.Groups.Add(MakeGroup("Script",
-            new ToolbarButton { Label = "Subscript",   Icon = "subscript",   Command = new ToggleSubscriptCommand(),   IsToggle = true },
-            new ToolbarButton { Label = "Superscript", Icon = "superscript", Command = new ToggleSuperscriptCommand(), IsToggle = true }));
+            new ToolbarButton { LocalizedLabel = s => s.Subscript, Icon = "subscript",   Command = new ToggleSubscriptCommand(),   IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.Superscript, Icon = "superscript", Command = new ToggleSuperscriptCommand(), IsToggle = true }));
 
         return def;
     }
@@ -236,9 +263,9 @@ public sealed class ToolbarDefinition
         var def = new ToolbarDefinition();
 
         def.Groups.Add(MakeGroup("Insert",
-            new ToolbarButton { Label = "Insert Hyperlink", Icon = "hyperlink", Command = new InsertHyperlinkCommand(), IsToggle = false },
-            new ToolbarButton { Label = "Insert Image",     Icon = "image",     Command = new InsertImageCommand(),     IsToggle = false },
-            new ToolbarButton { Label = "Insert Table",     Icon = "table",     Command = new InsertTableCommand(),     IsToggle = false }));
+            new ToolbarButton { LocalizedLabel = s => s.InsertLink, Icon = "hyperlink", Command = new InsertHyperlinkCommand(), IsToggle = false },
+            new ToolbarButton { LocalizedLabel = s => s.InsertImage, Icon = "image",     Command = new InsertImageCommand(),     IsToggle = false },
+            new ToolbarButton { LocalizedLabel = s => s.InsertTable, Icon = "table",     Command = new InsertTableCommand(),     IsToggle = false }));
 
         return def;
     }
@@ -251,13 +278,13 @@ public sealed class ToolbarDefinition
         var def = new ToolbarDefinition();
 
         def.Groups.Add(MakeGroup("History",
-            new ToolbarButton { Label = "Undo", Icon = "undo", Command = new UndoCommand(), IsToggle = false },
-            new ToolbarButton { Label = "Redo", Icon = "redo", Command = new RedoCommand(), IsToggle = false }));
+            new ToolbarButton { LocalizedLabel = s => s.Undo, Icon = "undo", Command = new UndoCommand(), IsToggle = false },
+            new ToolbarButton { LocalizedLabel = s => s.Redo, Icon = "redo", Command = new RedoCommand(), IsToggle = false }));
 
         def.Groups.Add(MakeGroup("Formatting",
-            new ToolbarButton { Label = "Bold",      Icon = "bold",      Command = new ToggleBoldCommand(),      IsToggle = true },
-            new ToolbarButton { Label = "Italic",    Icon = "italic",    Command = new ToggleItalicCommand(),    IsToggle = true },
-            new ToolbarButton { Label = "Underline", Icon = "underline", Command = new ToggleUnderlineCommand(), IsToggle = true }));
+            new ToolbarButton { LocalizedLabel = s => s.Bold, Icon = "bold",      Command = new ToggleBoldCommand(),      IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.Italic, Icon = "italic",    Command = new ToggleItalicCommand(),    IsToggle = true },
+            new ToolbarButton { LocalizedLabel = s => s.Underline, Icon = "underline", Command = new ToggleUnderlineCommand(), IsToggle = true }));
 
         return def;
     }
