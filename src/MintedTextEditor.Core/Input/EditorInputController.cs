@@ -1137,38 +1137,48 @@ public class EditorInputController
         int row = Math.Clamp(pos.CellRow, 0, table.RowCount - 1);
         int col = Math.Clamp(pos.CellCol, 0, table.Rows[row].Cells.Count - 1);
 
-        if (reverse)
+        // Step cell by cell in reading order, skipping slots covered by another cell's span.
+        while (true)
         {
-            if (col > 0)
+            if (reverse)
             {
-                ApplyCaret(new DocumentPosition(pos.BlockIndex, 0, 0, row, col - 1), extend: false);
-                return true;
+                if (col > 0)
+                {
+                    col--;
+                }
+                else if (row > 0)
+                {
+                    row--;
+                    col = Math.Max(0, table.Rows[row].Cells.Count - 1);
+                }
+                else
+                {
+                    return TryMoveOutOfTable(document, pos, toAfter: false, extend: false);
+                }
+            }
+            else
+            {
+                if (col + 1 < table.Rows[row].Cells.Count)
+                {
+                    col++;
+                }
+                else if (row + 1 < table.RowCount)
+                {
+                    row++;
+                    col = 0;
+                }
+                else
+                {
+                    return TryMoveOutOfTable(document, pos, toAfter: true, extend: false);
+                }
             }
 
-            if (row > 0)
+            if (table.GetSpanAnchor(row, col) == (row, col))
             {
-                int prevRow = row - 1;
-                int prevCol = Math.Max(0, table.Rows[prevRow].Cells.Count - 1);
-                ApplyCaret(new DocumentPosition(pos.BlockIndex, 0, 0, prevRow, prevCol), extend: false);
+                ApplyCaret(new DocumentPosition(pos.BlockIndex, 0, 0, row, col), extend: false);
                 return true;
             }
-
-            return TryMoveOutOfTable(document, pos, toAfter: false, extend: false);
         }
-
-        if (col + 1 < table.Rows[row].Cells.Count)
-        {
-            ApplyCaret(new DocumentPosition(pos.BlockIndex, 0, 0, row, col + 1), extend: false);
-            return true;
-        }
-
-        if (row + 1 < table.RowCount)
-        {
-            ApplyCaret(new DocumentPosition(pos.BlockIndex, 0, 0, row + 1, 0), extend: false);
-            return true;
-        }
-
-        return TryMoveOutOfTable(document, pos, toAfter: true, extend: false);
     }
 
     private bool TryInsertTableRow(Document.Document document, bool below)

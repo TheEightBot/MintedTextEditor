@@ -49,9 +49,32 @@ Each `TableCell` holds a list of blocks, so cells can contain formatted text:
 | `Background` | Optional `EditorColor` background |
 | `Border` | Optional `EditorBorder` (per-side widths) |
 
-`TableBlock.Style` (`TableStyle`) has `BorderWidth`, `BorderColor`, `CellPadding`, `HasHeaderRow` and `HeaderBackground`.
+## Table and Cell Styling
 
-> The renderer does not yet draw cell backgrounds, per-cell borders, `TableStyle` values or spans: tables are drawn with a 1-unit border, 4-unit padding, and every cell in its own grid slot. These properties are kept in the model for your own use.
+`TableBlock.Style` (`TableStyle`) sets table-wide defaults:
+
+| Property | Default | Description |
+|---|---|---|
+| `BorderWidth` | `1` | Width of the grid lines between and around cells (`0` for no grid) |
+| `BorderColor` | `TableStyle.DefaultBorderColor` (grey 160,160,160) | Colour of the grid lines and per-cell borders |
+| `CellPadding` | `4` | Space between a cell's edge and its content, on every side |
+| `HasHeaderRow` | `false` | Fills the first row with `HeaderBackground` |
+| `HeaderBackground` | `null` | Header-row fill; `null` uses `TableStyle.DefaultHeaderBackground`, a faint tint |
+
+Per cell, `Background` fills the cell behind its content (it wins over the header-row fill), and `Border` overrides the width of each side. A cell without a `Border` uses `BorderWidth` on every side. Where two cells share an edge, the wider of their two sides is drawn, in `BorderColor`, so a side set to `0` disappears only when the neighbouring cell's side is `0` too. Borders are drawn on the grid lines, which are always `BorderWidth` apart; a wider border extends into the cell's padding.
+
+```csharp
+table.Style.BorderColor = new EditorColor(200, 200, 200);
+table.Style.CellPadding = 8f;
+table.Style.HasHeaderRow = true;
+table.Style.HeaderBackground = new EditorColor(235, 240, 250);
+
+var cell = table.GetCell(1, 2)!;
+cell.Background = new EditorColor(255, 250, 205);
+cell.Border = new EditorBorder(top: 0f, right: 0f, bottom: 2f, left: 0f);
+```
+
+These are model properties: after changing them on a table that is already displayed, raise `Document.NotifyChanged` (as `TableEngine` does) so the editor lays it out again. `TableEngine.SetCellBackground` sets a cell background and notifies for you. None of them are written to or read from HTML or Markdown.
 
 ## Column Widths and Row Heights
 
@@ -92,7 +115,9 @@ TableEngine.MergeCells(table, startRow: 0, startCol: 0, rowSpan: 2, colSpan: 3);
 TableEngine.SplitCell(table, table.GetCell(0, 0)!);
 ```
 
-Merges are stored in the model and exported to HTML as `colspan`/`rowspan`; see the note above about rendering.
+A cell with `ColumnSpan`/`RowSpan` greater than 1 is drawn over the combined area of the slots it covers, including the grid lines between them, and taps anywhere in that area place the caret in it. The covered cells stay in `Row.Cells` (so the grid stays rectangular) but are not drawn, and `Tab`/`Shift+Tab` skip them. `TableBlock.GetSpanAnchor(row, col)` returns the cell that occupies a slot. A spanning cell taller than the rows it covers makes the last of those rows taller. Spans that run past the table's edge, or into a slot an earlier cell already covers, are cut short.
+
+Merges are exported to HTML as `colspan`/`rowspan`.
 
 ## Keyboard Navigation
 
@@ -100,7 +125,7 @@ When the caret is inside a table cell:
 
 | Key | Action |
 |---|---|
-| `Tab` | Move to next cell (wraps to next row; leaves the table after the last cell) |
+| `Tab` | Move to next cell (wraps to next row; skips cells covered by a merge; leaves the table after the last cell) |
 | `Shift+Tab` | Move to previous cell |
 | `Ctrl/Cmd+Alt+Up` / `Down` | Insert a row above / below |
 | `Ctrl/Cmd+Alt+Left` / `Right` | Insert a column left / right |

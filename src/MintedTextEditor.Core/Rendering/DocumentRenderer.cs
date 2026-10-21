@@ -188,83 +188,185 @@ public class DocumentRenderer
 
     private void RenderTable(TableLayoutBlock table, float visibleTop, float visibleBottom, IDrawingContext context)
     {
-        const float borderWidth = 1f;
-        var borderPaint = new EditorPaint
-        {
-            Color = new EditorColor(160, 160, 160),
-            Style = PaintStyle.Fill
-        };
-
         int rowCount = table.RowHeights.Length;
         int colCount = table.ColumnWidths.Length;
-        float totalWidth = table.ColumnWidths.Sum() + (colCount + 1) * borderWidth;
         float tableY = table.Y;
+        var rowTops = GridLinePositions(table.RowHeights, table.BorderWidth);
 
-        // Top border
-        context.FillRect(new EditorRect(0f, tableY, totalWidth, borderWidth), borderPaint);
-
-        float rowY = tableY + borderWidth;
+        // ── Cell backgrounds and content ──────────────────────────────────────
         for (int r = 0; r < rowCount; r++)
         {
-            float rowHeight = table.RowHeights[r];
-            float rowBottom = rowY + rowHeight + borderWidth;
-
-            if (rowBottom < visibleTop)
-            {
-                rowY += rowHeight + borderWidth;
-                continue;
-            }
-
-            if (rowY > visibleBottom)
+            if (tableY + rowTops[r] + table.BorderWidth > visibleBottom)
                 break;
 
-            // Left border
-            context.FillRect(new EditorRect(0f, rowY, borderWidth, rowHeight), borderPaint);
-
-            float colX = borderWidth;
             for (int c = 0; c < colCount; c++)
             {
-                float colWidth = table.ColumnWidths[c];
+                var info = table.GetCellInfo(r, c);
+                if (info.IsCovered)
+                    continue;
 
-                // Render cell content lines (if any)
-                if (r < table.Cells.Length && c < table.Cells[r].Length)
+                // Cheap cull on the rows the cell covers before computing its exact bounds.
+                int lastRow = Math.Min(rowCount, r + Math.Max(1, info.RowSpan));
+                if (tableY + rowTops[lastRow] < visibleTop)
+                    continue;
+
+                var bounds = table.GetCellBounds(r, c);
+                float cellTop = tableY + bounds.Y;
+                float cellBottom = cellTop + bounds.Height;
+                if (cellBottom < visibleTop || cellTop > visibleBottom)
+                    continue;
+
+                if (info.Background is { } background)
                 {
-                    var cellLayout = table.Cells[r][c];
-                    float cellContentX = colX + table.CellPadding;
-                    float cellContentY = rowY + table.CellPadding;
-
-                    context.Save();
-                    context.Translate(cellContentX, cellContentY);
-                    context.ClipRect(new EditorRect(
-                        0f, 0f,
-                        colWidth - 2f * table.CellPadding,
-                        rowHeight - 2f * table.CellPadding));
-
-                    foreach (var line in cellLayout.Lines)
-                    {
-                        float lineTop = rowY + table.CellPadding + line.Y;
-                        float lineBottom = lineTop + line.Height;
-                        if (lineBottom < visibleTop) continue;
-                        if (lineTop > visibleBottom) break;
-
-                        RenderLine(line, 0f, context);
-                    }
-
-                    context.Restore();
+                    context.FillRect(
+                        new EditorRect(bounds.X, cellTop, bounds.Width, bounds.Height),
+                        new EditorPaint { Color = background, Style = PaintStyle.Fill });
                 }
 
-                colX += colWidth;
+                if (r >= table.Cells.Length || c >= table.Cells[r].Length)
+                    continue;
 
-                // Right/vertical border
-                context.FillRect(new EditorRect(colX, rowY, borderWidth, rowHeight), borderPaint);
-                colX += borderWidth;
+                var cellLayout = table.Cells[r][c];
+                float cellContentX = bounds.X + table.CellPadding;
+                float cellContentY = cellTop + table.CellPadding;
+
+                context.Save();
+                context.Translate(cellContentX, cellContentY);
+                context.ClipRect(new EditorRect(
+                    0f, 0f,
+                    bounds.Width - 2f * table.CellPadding,
+                    bounds.Height - 2f * table.CellPadding));
+
+                foreach (var line in cellLayout.Lines)
+                {
+                    float lineTop = cellContentY + line.Y;
+                    float lineBottom = lineTop + line.Height;
+                    if (lineBottom < visibleTop) continue;
+                    if (lineTop > visibleBottom) break;
+
+                    RenderLine(line, 0f, context);
+                }
+
+                context.Restore();
             }
+        }
 
-            rowY += rowHeight;
+        RenderTableBorders(table, visibleTop, visibleBottom, context);
+    }
 
-            // Bottom horizontal border for this row
-            context.FillRect(new EditorRect(0f, rowY, totalWidth, borderWidth), borderPaint);
-            rowY += borderWidth;
+    /// <summary>
+    /// Positions of the grid lines of a table axis, relative to the table: line i sits just before
+    /// column (or row) i, and the last entry is the far outer edge. Accumulated the same way as
+    /// <see cref="TableLayoutBlock.GetColumnX"/> / <see cref="TableLayoutBlock.GetRowY"/>.
+    /// </summary>
+    private static float[] GridLinePositions(float[] sizes, float borderWidth)
+    {
+        var lines = new float[sizes.Length + 1];
+        float pos = borderWidth;
+        for (int i = 0; i <= sizes.Length; i++)
+        {
+            lines[i] = pos - borderWidth;
+            if (i < sizes.Length)
+                pos += sizes[i] + borderWidth;
+        }
+        return lines;
+    }
+
+    /// <summary>
+    /// Draws the grid lines of a table as collapsed borders. Each edge between two slots (or between a
+    /// slot and the table's outside) is drawn once, at the grid line's position, with the wider of the
+    /// two adjacent cells' side widths; edges inside a spanning cell are skipped.
+    /// </summary>
+    private static void RenderTableBorders(TableLayoutBlock table, float visibleTop, float visibleBottom, IDrawingContext context)
+    {
+        int rowCount = table.RowHeights.Length;
+        int colCount = table.ColumnWidths.Length;
+        if (rowCount == 0 || colCount == 0)
+            return;
+
+        float g = table.BorderWidth;
+        float tableY = table.Y;
+        var borderPaint = new EditorPaint { Color = table.BorderColor, Style = PaintStyle.Fill };
+
+        // Grid line positions: line i sits just before column/row i (line N is the outer far edge).
+        var lineX = GridLinePositions(table.ColumnWidths, g);
+        var lineY = GridLinePositions(table.RowHeights, g);
+
+        // Width of one side of the cell occupying a slot; -1 outside the grid.
+        float SideWidth(int r, int c, Func<EditorBorder, float> side)
+        {
+            if (r < 0 || r >= rowCount || c < 0 || c >= colCount)
+                return -1f;
+            var (ar, ac) = table.GetOwningCell(r, c);
+            var border = table.GetCellInfo(ar, ac).Border;
+            return border is null ? g : Math.Max(0f, side(border));
+        }
+
+        // Width of the horizontal edge above row r in column c (0 when it lies inside a span).
+        float HorizontalEdge(int r, int c)
+        {
+            if (r > 0 && r < rowCount && table.GetOwningCell(r - 1, c) == table.GetOwningCell(r, c))
+                return 0f;
+            return Math.Max(0f, Math.Max(SideWidth(r - 1, c, b => b.Bottom), SideWidth(r, c, b => b.Top)));
+        }
+
+        // Width of the vertical edge left of column c in row r (0 when it lies inside a span).
+        float VerticalEdge(int r, int c)
+        {
+            if (c > 0 && c < colCount && table.GetOwningCell(r, c - 1) == table.GetOwningCell(r, c))
+                return 0f;
+            return Math.Max(0f, Math.Max(SideWidth(r, c - 1, b => b.Right), SideWidth(r, c, b => b.Left)));
+        }
+
+        // Horizontal lines: runs of equal-width edges are drawn as one rectangle spanning the
+        // grid-line junctions at both ends.
+        for (int r = 0; r <= rowCount; r++)
+        {
+            float y = tableY + lineY[r];
+            if (y > visibleBottom) break;
+
+            int c = 0;
+            while (c < colCount)
+            {
+                float width = HorizontalEdge(r, c);
+                int end = c + 1;
+                while (end < colCount && HorizontalEdge(r, end) == width) end++;
+
+                if (width > 0f && y + width >= visibleTop)
+                {
+                    float x = lineX[c];
+                    float right = lineX[end] + g;
+                    context.FillRect(new EditorRect(x, y, right - x, width), borderPaint);
+                }
+
+                c = end;
+            }
+        }
+
+        // Vertical lines, one rectangle per row. A junction not covered by a horizontal line
+        // (between two row-spanning cells) is filled by extending the edge above it.
+        for (int r = 0; r < rowCount; r++)
+        {
+            float top = tableY + lineY[r] + g;
+            float height = table.RowHeights[r];
+            if (top + height + g < visibleTop) continue;
+            if (top > visibleBottom) break;
+
+            for (int c = 0; c <= colCount; c++)
+            {
+                float width = VerticalEdge(r, c);
+                if (width <= 0f)
+                    continue;
+
+                float edgeHeight = height;
+                if (r + 1 < rowCount
+                    && VerticalEdge(r + 1, c) > 0f
+                    && (c == 0 || HorizontalEdge(r + 1, c - 1) <= 0f)
+                    && (c == colCount || HorizontalEdge(r + 1, c) <= 0f))
+                    edgeHeight += g;
+
+                context.FillRect(new EditorRect(lineX[c], top, width, edgeHeight), borderPaint);
+            }
         }
     }
 

@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Table styling is rendered**: `TableStyle.BorderWidth`, `BorderColor`, `CellPadding`, `HasHeaderRow` and `HeaderBackground`, plus `TableCell.Background` and `TableCell.Border`, now affect layout and drawing (borders collapse: the wider side of a shared edge is drawn). `TableLayoutBlock` exposes `BorderWidth`, `BorderColor`, `CellInfo`, `GetCellBounds`, `GetOwningCell`, `GetColumnX` and `GetRowY`.
+- **Merged table cells are laid out**: a cell with `ColumnSpan`/`RowSpan` occupies the combined area of the slots it covers, a tall spanning cell grows the last row it covers, and taps in that area hit it. Covered cells are not drawn and `Tab`/`Shift+Tab` skip them. `TableBlock.GetSpanAnchor` returns the cell occupying a slot.
+
+### Changed
+- `TableStyle.BorderColor` defaults to grey (160,160,160), the colour tables have always been drawn with, instead of black, so existing tables look the same now that the property is used.
+
 ---
 
 ## [0.3.1] — 2026-10-21

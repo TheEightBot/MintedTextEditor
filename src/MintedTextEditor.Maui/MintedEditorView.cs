@@ -1932,13 +1932,13 @@ public class MintedEditorView : ContentView
 
     private bool TryBeginTableColumnResize(float x, float y)
     {
-        const float borderWidth = 1f;
         const float grabRadius = 6f;
 
         foreach (var block in _lastLayout.Blocks)
         {
             if (block is not TableLayoutBlock tableLayout)
                 continue;
+            float borderWidth = tableLayout.BorderWidth;
             if (y < tableLayout.Y || y > tableLayout.Y + tableLayout.TotalHeight)
                 continue;
 
@@ -1977,13 +1977,13 @@ public class MintedEditorView : ContentView
 
     private bool TryBeginTableRowResize(float x, float y)
     {
-        const float borderWidth = 1f;
         const float grabRadius = 6f;
 
         foreach (var block in _lastLayout.Blocks)
         {
             if (block is not TableLayoutBlock tableLayout)
                 continue;
+            float borderWidth = tableLayout.BorderWidth;
 
             float tableBottom = tableLayout.Y + tableLayout.TotalHeight;
             if (y < tableLayout.Y || y > tableBottom)
