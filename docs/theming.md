@@ -1,107 +1,120 @@
 # Theming
 
-MintedTextEditor ships with three built-in themes and supports fully custom themes.
+MintedTextEditor ships with three built-in themes and supports fully custom themes. A theme is an `EditorStyle` (a record in `MintedTextEditor.Core.Theming`); `EditorTheme` creates the built-in ones.
 
 ## Built-in Themes
 
-| Theme | Constant | Description |
-|---|---|---|
-| Light | `EditorTheme.Light` | Light background, dark text (default) |
-| Dark | `EditorTheme.Dark` | Dark background, light text |
-| High Contrast | `EditorTheme.HighContrast` | Maximum contrast for accessibility |
+| Theme | Factory | `EditorThemeMode` | Description |
+|---|---|---|---|
+| Light | `EditorTheme.CreateLight()` | `Light` | Light background, dark text (default) |
+| Dark | `EditorTheme.CreateDark()` | `Dark` | Dark background, light text |
+| High Contrast | `EditorTheme.CreateHighContrast()` | `HighContrast` | White text on black, yellow selection |
 
 ### Switching Themes
 
 ```csharp
-editor.Theme = EditorTheme.Dark;
+using MintedTextEditor.Core.Theming;
+
+editor.Theme = EditorTheme.CreateDark();
+// or
+editor.ThemeMode = EditorThemeMode.Dark;
 ```
 
 In XAML:
 
 ```xml
-<minted:RichTextEditor Theme="{x:Static minted:EditorTheme.Dark}" />
+<minted:MintedEditorView ThemeMode="Dark" />
 ```
 
 ## Custom Themes
 
-Create a custom `EditorTheme` by setting individual color properties:
+`EditorStyle` is a record, so start from a built-in theme and override what you need with a `with` expression:
 
 ```csharp
-editor.Theme = new EditorTheme
+using MintedTextEditor.Core.Rendering;
+
+editor.Theme = EditorTheme.CreateDark() with
 {
     // Canvas
-    Background           = new EditorColor(0xFF1E1E1E),
+    Background              = new EditorColor(30, 30, 30),
 
     // Text
-    DefaultForeground    = new EditorColor(0xFFD4D4D4),
-    HeadingForeground    = new EditorColor(0xFFFFFFFF),
+    DefaultTextColor        = new EditorColor(212, 212, 212),
 
     // Selection
-    SelectionBackground  = new EditorColor(0x664080D0),
-    SelectionForeground  = new EditorColor(0xFFFFFFFF),
+    SelectionHighlightColor = new EditorColor(64, 128, 208, 102),
 
     // Caret
-    CaretColor           = new EditorColor(0xFFD4D4D4),
+    CaretColor              = new EditorColor(212, 212, 212),
 
     // Toolbar
-    ToolbarBackground    = new EditorColor(0xFF252526),
-    ToolbarForeground    = new EditorColor(0xFFCCCCCC),
-    ToolbarButtonHover   = new EditorColor(0xFF2D2D30),
-    ToolbarButtonActive  = new EditorColor(0xFF094771),
-    ToolbarSeparator     = new EditorColor(0xFF3F3F46),
+    ToolbarBackground       = new EditorColor(37, 37, 38),
+    ToolbarButtonColor      = new EditorColor(204, 204, 204),
+    ToolbarActiveColor      = new EditorColor(9, 71, 113),
+    ToolbarSeparatorColor   = new EditorColor(63, 63, 70),
 
     // Links
-    HyperlinkColor       = new EditorColor(0xFF4EC9B0),
-
-    // Block quote
-    BlockQuoteBorder     = new EditorColor(0xFF569CD6),
-    BlockQuoteBackground = new EditorColor(0xFF1A2433),
+    HyperlinkColor          = new EditorColor(78, 201, 176),
 };
 ```
 
+Setting `Theme` turns `UseSystemTheme` off.
+
 ## EditorColor
 
-`EditorColor` wraps a packed `uint` ARGB value (`0xAARRGGBB`):
+`EditorColor` (namespace `MintedTextEditor.Core.Rendering`) is a struct of byte components:
 
 ```csharp
-// From packed ARGB
-var color = new EditorColor(0xFF3399FF);
+// From components (alpha defaults to 255)
+var color = new EditorColor(51, 153, 255);
+var translucent = new EditorColor(51, 153, 255, 128);
 
-// From components
-var color2 = new EditorColor(alpha: 255, red: 51, green: 153, blue: 255);
+// Factory methods
+var color2 = EditorColor.FromArgb(255, 51, 153, 255);
+var color3 = EditorColor.FromRgb(51, 153, 255);
 
-// Fully transparent
+// Named colors, e.g. fully transparent
 var transparent = EditorColor.Transparent;
+
+uint argb = color.ToUint32(); // 0xAARRGGBB
 ```
 
 ## Responding to System Theme Changes
 
-Subscribe to MAUI's `Application.RequestedThemeChanged` event and update the editor theme accordingly:
+Set `UseSystemTheme = true` and the editor uses the built-in light or dark theme to match the app's current theme (`Application.Current.RequestedTheme`):
+
+```csharp
+editor.UseSystemTheme = true;
+```
+
+To follow the system with your own themes instead, subscribe to MAUI's `Application.RequestedThemeChanged` event:
 
 ```csharp
 Application.Current!.RequestedThemeChanged += (s, e) =>
 {
     editor.Theme = e.RequestedTheme == AppTheme.Dark
-        ? EditorTheme.Dark
-        : EditorTheme.Light;
+        ? myDarkTheme
+        : myLightTheme;
 };
 ```
 
 ## Theme Properties Reference
 
+Properties the MAUI control currently uses:
+
 | Property | Description |
 |---|---|
 | `Background` | Canvas background |
-| `DefaultForeground` | Default text color |
-| `HeadingForeground` | Heading text color |
-| `SelectionBackground` | Text selection fill |
-| `SelectionForeground` | Text color within selection |
-| `CaretColor` | Cursor caret color |
-| `ToolbarBackground` | Toolbar fill |
-| `ToolbarForeground` | Toolbar icon/label color |
-| `ToolbarButtonHover` | Toolbar button hover fill |
-| `ToolbarButtonActive` | Toolbar button pressed/active fill |
-| `ToolbarSeparator` | Toolbar group separator |
+| `DefaultTextColor` | Default text color |
+| `DefaultFontFamily` / `DefaultFontSize` / `Padding` | Font and position of the placeholder text |
+| `SelectionHighlightColor` | Text selection fill |
+| `CaretColor` / `CaretWidth` | Caret color and width |
 | `HyperlinkColor` | Link text color |
-| `BlockQuoteBorder` | Left border of block quotes |
-| `BlockQuoteBackground` | Background of block quotes |
+| `ToolbarBackground` | Toolbar fill |
+| `ToolbarButtonColor` | Toolbar icon/label color (icons are tinted with it) |
+| `ToolbarActiveColor` | Toolbar button active/toggled fill |
+| `ToolbarSeparatorColor` | Toolbar group separator and disabled items |
+| `ScrollbarTrackColor` / `ScrollbarThumbColor` / `ScrollbarWidth` | Scrollbar |
+| `LineNumbersGutterColor` / `LineNumbersTextColor` / `LineNumbersGutterWidth` | Line-number gutter (`ShowLineNumbers`) |
+
+`EditorStyle` also defines `BorderColor`, `BorderWidth`, `SelectionTextColor`, `HyperlinkHoverColor`, `ToolbarHoverColor`, `ContextMenuBackground`, `ContextMenuTextColor`, `ContextMenuHoverColor`, `FocusRingColor`, `LineSpacing` and `ParagraphSpacing`, which the built-in themes set but the control does not draw with yet.

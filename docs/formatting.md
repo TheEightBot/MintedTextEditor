@@ -2,69 +2,91 @@
 
 MintedTextEditor supports two levels of formatting: **character formatting** (applied to inline text runs) and **paragraph formatting** (applied to entire block-level elements).
 
+All formatting APIs take the document and a `TextRange`. In the MAUI control, use `editor.Document` and `editor.Selection.Range`:
+
+```csharp
+using MintedTextEditor.Core.Document;
+using MintedTextEditor.Core.Formatting;
+using MintedTextEditor.Core.Rendering;
+
+var doc = editor.Document;
+var range = editor.Selection.Range;
+```
+
 ## Character Formatting
 
-Character formatting is represented by `TextStyle`, an immutable value type. All "with" methods return a new `TextStyle` rather than mutating in place.
+Character formatting is represented by `TextStyle`, an immutable class. All `With…` methods return a new `TextStyle` rather than mutating in place.
 
 ### Toggling via the FormattingEngine
 
-The recommended way to apply character formatting is through `FormattingEngine`, which handles splitting and merging runs automatically.
+The recommended way to apply character formatting is through `FormattingEngine` (`editor.Formatting`), which handles splitting and merging runs automatically. A toggle turns the format on unless the whole range already has it.
 
 ```csharp
-// Get the engine from the editor
-var fmt = editor.FormattingEngine;
+var fmt = editor.Formatting;
 
-// Toggle bold across the current selection
-fmt.ToggleBold();
-fmt.ToggleItalic();
-fmt.ToggleUnderline();
-fmt.ToggleStrikethrough();
-fmt.ToggleSubscript();
-fmt.ToggleSuperscript();
+fmt.ToggleBold(doc, range);
+fmt.ToggleItalic(doc, range);
+fmt.ToggleUnderline(doc, range);
+fmt.ToggleStrikethrough(doc, range);
+fmt.ToggleSubscript(doc, range);
+fmt.ToggleSuperscript(doc, range);
+fmt.ClearFormatting(doc, range);
 ```
+
+With an empty range (a collapsed caret), toggles set a pending style that is applied to the next text the user types.
 
 ### Setting Font Properties
 
+Font family, size and colors go through `FontFormattingEngine` (`editor.FontFormatting`):
+
 ```csharp
-fmt.SetFontFamily("Georgia");
-fmt.SetFontSize(18f);
-fmt.SetForegroundColor(new EditorColor(0xFFFF0000));   // red
-fmt.SetBackgroundColor(new EditorColor(0x40FFFF00));  // semi-transparent yellow highlight
+var font = editor.FontFormatting;
+
+font.ApplyFontFamily(doc, range, "Georgia");
+font.ApplyFontSize(doc, range, 18f);
+font.ApplyTextColor(doc, range, new EditorColor(255, 0, 0));                 // red
+font.ApplyHighlightColor(doc, range, new EditorColor(255, 255, 0, 64));      // semi-transparent yellow
+font.RemoveHighlightColor(doc, range);
 ```
+
+`EditorColor` takes `(r, g, b, a = 255)`; see [Theming](theming.md#editorcolor).
 
 ### Programmatic (DocumentEditor + UndoManager)
 
-For undo-aware programmatic formatting:
+The engines above change the document directly and are not recorded for undo. For undo-aware programmatic formatting, push an `ApplyStyleAction`; `UndoManager.Push` executes it and records it:
 
 ```csharp
-var action = new ApplyStyleAction(doc, selectedRange, s => s
+using MintedTextEditor.Core.Editing;
+
+var action = new ApplyStyleAction(doc, range, s => s
     .WithBold(true)
     .WithFontSize(14f));
 
-undoManager.Push(action);   // executes and records undo
+editor.UndoManager.Push(action);   // executes and records undo
 ```
 
 ### Querying Current Formatting
 
 ```csharp
-TextStyle style = fmt.GetStyleAtCaret();
+TextStyle style = FontFormattingEngine.GetCurrentTextStyle(doc, editor.Selection.Active);
 bool isBold = style.IsBold;
-string? family = style.FontFamily;
+string family = style.FontFamily;
+
+// Common style over a range, or null when the range is empty
+TextStyle? common = FontFormattingEngine.GetTextStyleForRange(doc, range);
 ```
 
 ---
 
 ## Paragraph Formatting
 
-Paragraph formatting is stored in `ParagraphStyle` on each `Paragraph` block.
+Paragraph formatting is stored in `ParagraphStyle` on each `Paragraph` block. `ParagraphFormattingEngine` is a static class; each method applies to every paragraph the range touches.
 
 ### Setting Alignment
 
 ```csharp
-var paragraphFmt = editor.ParagraphFormattingEngine;
-
-paragraphFmt.SetAlignment(TextAlignment.Center);
-paragraphFmt.SetAlignment(TextAlignment.Justify);
+ParagraphFormattingEngine.SetAlignment(doc, range, TextAlignment.Center);
+ParagraphFormattingEngine.SetAlignment(doc, range, TextAlignment.Justify);
 ```
 
 Available values: `Left` · `Center` · `Right` · `Justify`
@@ -72,51 +94,58 @@ Available values: `Left` · `Center` · `Right` · `Justify`
 ### Headings
 
 ```csharp
-paragraphFmt.SetHeadingLevel(1);   // H1
-paragraphFmt.SetHeadingLevel(2);   // H2
-paragraphFmt.SetHeadingLevel(0);   // body text
+ParagraphFormattingEngine.SetHeadingLevel(doc, range, 1);   // H1
+ParagraphFormattingEngine.SetHeadingLevel(doc, range, 2);   // H2
+ParagraphFormattingEngine.SetHeadingLevel(doc, range, 0);   // body text
 ```
 
 ### Lists
 
 ```csharp
-paragraphFmt.ToggleBulletList();
-paragraphFmt.ToggleNumberedList();
-paragraphFmt.Indent();
-paragraphFmt.Outdent();
+ParagraphFormattingEngine.ToggleBulletList(doc, range);
+ParagraphFormattingEngine.ToggleNumberList(doc, range);
+ParagraphFormattingEngine.IncreaseIndent(doc, range);
+ParagraphFormattingEngine.DecreaseIndent(doc, range);
 ```
 
 ### Indentation and Spacing
 
 ```csharp
-paragraphFmt.SetIndentLevel(2);
-paragraphFmt.SetLineSpacing(1.5f);
-paragraphFmt.SetSpaceBefore(8f);
-paragraphFmt.SetSpaceAfter(8f);
+ParagraphFormattingEngine.SetLineSpacing(doc, range, 1.5f);
+
+// Other ParagraphStyle properties have no dedicated method; set them through DocumentEditor
+DocumentEditor.ApplyParagraphStyle(doc, range, s =>
+{
+    s.IndentLevel = 2;
+    s.SpaceBefore = 8f;
+    s.SpaceAfter = 8f;
+});
 ```
 
 ### Block Quote
 
 ```csharp
-paragraphFmt.ToggleBlockQuote();
+ParagraphFormattingEngine.SetParagraphFormat(doc, range, "Quote");   // also "Normal", "Heading1"–"Heading6"
 ```
 
 ### RTL Direction
 
 ```csharp
-paragraphFmt.SetDirection(TextDirection.RightToLeft);
+DocumentEditor.ApplyParagraphStyle(doc, range, s => s.Direction = TextDirection.RightToLeft);
 ```
 
 ---
 
 ## Undo / Redo Integration
 
-All formatting operations performed through `FormattingEngine` and `ParagraphFormattingEngine` are automatically pushed to the `UndoManager`.
+Typing, deleting, pasting, and the insert commands (hyperlink, image, table, rows and columns) are recorded by the `UndoManager`. The formatting engines are not; use `ApplyStyleAction` (above) when formatting must be undoable.
 
 ```csharp
-editor.UndoManager.Undo();
-editor.UndoManager.Redo();
+editor.Undo();   // or editor.UndoManager.Undo()
+editor.Redo();
 ```
+
+`editor.Undo()`/`Redo()` also move the caret to the restored position.
 
 ---
 
