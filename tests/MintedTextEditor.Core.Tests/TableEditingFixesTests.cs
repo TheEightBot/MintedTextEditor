@@ -402,6 +402,49 @@ public class TableEditingFixesTests
         Assert.Equal(new DocumentPosition(0, 0, 3), pos);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InsertTextAction_BeforeImageOrLineBreakAfterLink_RedoKeepsTextOutsideLink(bool lineBreak)
+    {
+        var p = new Paragraph();
+        var link = new HyperlinkInline("https://x.y");
+        link.AddChild(new TextRun("site"));
+        p.AddInline(link);
+        p.AddInline(lineBreak ? new LineBreak() : new ImageInline("img.png"));
+        var doc = new EditorDocument([p]);
+        string after = lineBreak ? "P[L(https://x.y:'site'),'X',LineBreak]" : "P[L(https://x.y:'site'),'X',I(img.png)]";
+        var undo = new UndoManager();
+
+        undo.Push(new InsertTextAction(doc, new DocumentPosition(0, 1, 0), "X"));
+        Assert.Equal(after, Dump(doc));
+
+        undo.Undo();
+        undo.Redo();
+        Assert.Equal(after, Dump(doc));
+        undo.Undo();
+        Assert.Equal(lineBreak ? "P[L(https://x.y:'site'),LineBreak]" : "P[L(https://x.y:'site'),I(img.png)]", Dump(doc));
+    }
+
+    [Fact]
+    public void InsertTextAction_AtLinkEnd_RedoStillExtendsLink()
+    {
+        // A position inside the link (at its end) keeps inserting into the link on redo.
+        var p = new Paragraph();
+        var link = new HyperlinkInline("https://x.y");
+        link.AddChild(new TextRun("site"));
+        p.AddInline(link);
+        p.AddInline(new ImageInline("img.png"));
+        var doc = new EditorDocument([p]);
+        var undo = new UndoManager();
+
+        undo.Push(new InsertTextAction(doc, new DocumentPosition(0, 0, 4), "X"));
+        undo.Undo();
+        undo.Redo();
+
+        Assert.Equal("P[L(https://x.y:'siteX'),I(img.png)]", Dump(doc));
+    }
+
     [Fact]
     public void InsertText_AtEndOfImage_StillInsertsAfterImage()
     {

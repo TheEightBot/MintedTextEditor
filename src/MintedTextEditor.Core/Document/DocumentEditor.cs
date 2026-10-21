@@ -1056,6 +1056,28 @@ public static class DocumentEditor
         return position.With(i + 1, 0);
     }
 
+    /// <summary>
+    /// When <paramref name="position"/> is at the end of a hyperlink that is followed by an inline other
+    /// than a hyperlink (a run, an image, a line break), returns the same place expressed as the start of
+    /// that inline, so text inserted there stays outside the link. Otherwise returns
+    /// <paramref name="position"/> unchanged.
+    /// </summary>
+    internal static DocumentPosition PreferAfterHyperlinkEnd(Document document, DocumentPosition position)
+    {
+        Paragraph paragraph;
+        try { paragraph = GetParagraph(document, position); }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException) { return position; }
+
+        int i = position.InlineIndex;
+        if (i < 0 || i + 1 >= paragraph.Inlines.Count)
+            return position;
+        if (paragraph.Inlines[i] is not HyperlinkInline link || position.Offset < link.Length)
+            return position;
+        if (paragraph.Inlines[i + 1] is HyperlinkInline)
+            return position;
+        return position.With(i + 1, 0);
+    }
+
     /// <summary>Returns the hyperlink at <paramref name="position"/>, or null when it is not in one.</summary>
     internal static HyperlinkInline? GetHyperlinkAt(Document document, DocumentPosition position)
     {

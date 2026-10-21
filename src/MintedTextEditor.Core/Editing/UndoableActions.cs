@@ -34,20 +34,24 @@ internal readonly struct ParagraphAnchor
     private readonly int _offset;
     private readonly bool _inParagraph;
     private readonly bool _atHyperlinkStart;
+    private readonly bool _outsideHyperlink;
 
     /// <param name="document">The document containing <paramref name="position"/>.</param>
     /// <param name="position">The position to anchor.</param>
-    /// <param name="keepHyperlinkStart">
-    /// When true and <paramref name="position"/> is at the start of a hyperlink, <see cref="Resolve"/>
-    /// returns the start of the hyperlink rather than the end of the inline before it.
+    /// <param name="keepHyperlinkSide">
+    /// When true, <see cref="Resolve"/> keeps the position on the same side of a hyperlink boundary:
+    /// a position at the start of a hyperlink resolves to the start of the hyperlink rather than the
+    /// end of the inline before it, and a position outside any hyperlink (e.g. at the start of an image
+    /// that follows a link) resolves to the start of the inline after the link rather than the link's end.
     /// </param>
-    public ParagraphAnchor(Document.Document document, DocumentPosition position, bool keepHyperlinkStart = false)
+    public ParagraphAnchor(Document.Document document, DocumentPosition position, bool keepHyperlinkSide = false)
     {
         _context = position;
         _inParagraph = IsParagraphPosition(document, position);
         _offset = _inParagraph ? DocumentEditor.GetAbsoluteCharOffset(document, position) : position.Offset;
-        _atHyperlinkStart = _inParagraph && keepHyperlinkStart && position.Offset == 0
-            && DocumentEditor.GetHyperlinkAt(document, position) is not null;
+        bool inHyperlink = _inParagraph && DocumentEditor.GetHyperlinkAt(document, position) is not null;
+        _atHyperlinkStart = keepHyperlinkSide && inHyperlink && position.Offset == 0;
+        _outsideHyperlink = keepHyperlinkSide && _inParagraph && !inHyperlink;
     }
 
     public DocumentPosition Resolve(Document.Document document)
@@ -55,7 +59,11 @@ internal readonly struct ParagraphAnchor
         if (!_inParagraph || !IsParagraphPosition(document, _context))
             return _context;
         var position = DocumentEditor.AbsoluteCharOffsetToPosition(document, _context, _offset);
-        return _atHyperlinkStart ? DocumentEditor.PreferFollowingHyperlink(document, position) : position;
+        if (_atHyperlinkStart)
+            return DocumentEditor.PreferFollowingHyperlink(document, position);
+        if (_outsideHyperlink)
+            return DocumentEditor.PreferAfterHyperlinkEnd(document, position);
+        return position;
     }
 
     public bool SameAs(ParagraphAnchor other)
@@ -236,7 +244,7 @@ public sealed class InsertTextAction : IUndoableAction
     public DocumentPosition Execute()
     {
         var start = _startAnchor is { } anchor ? anchor.Resolve(_document) : _position;
-        _startAnchor ??= new ParagraphAnchor(_document, start, keepHyperlinkStart: true);
+        _startAnchor ??= new ParagraphAnchor(_document, start, keepHyperlinkSide: true);
         _resultPosition = DocumentEditor.InsertText(_document, start, _text, _style, EscapeHyperlinkBoundary);
         _endAnchor = new ParagraphAnchor(_document, _resultPosition);
         return _resultPosition;
