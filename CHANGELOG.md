@@ -8,7 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+---
+
+## [0.3.1] — 2026-10-21
+
 ### Fixed
+- **Images from a custom `ImageProvider`**: a bitmap returned by `ImageProvider` is no longer replaced (and leaked) by decoding the image name as an app-package asset, or lost when that asset decode fails.
 - **Wrapping very long unbroken text**: character wrapping finds grapheme boundaries once per text fragment and searches each line from its own position, measuring only text near the line end. A 20,000-character token with no spaces now lays out in linear rather than quadratic time. Lines still always take at least one whole grapheme.
 - **Hit-testing long unwrapped lines**: caret offsets within a shaped run are found by binary search over its glyph clusters instead of a scan from the start, so tapping in a line thousands of characters long no longer takes quadratic time.
 - **Shaping cache for long runs**: shaped runs longer than 256 characters are kept in a small least-recently-used cache, bounded by total glyph count, instead of a single slot. A line split into several long segments (e.g. text either side of an emoji, with word wrap off) no longer reshapes them in turn on every caret query.
