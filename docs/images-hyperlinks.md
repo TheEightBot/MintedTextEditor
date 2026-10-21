@@ -98,7 +98,7 @@ The toolbar's hyperlink button prompts for a URL and links the selected text (or
 | Empty (default) | Inserts the URL as the link text at the caret | Links the selected text |
 | Set | Inserts `DisplayText` as the link text at the caret | Replaces the selected text with `DisplayText` and links it |
 
-A `DisplayText` that is only whitespace counts as empty. Either way the insertion is a single undo step (undo restores any replaced text with its formatting) and the caret is left at the end of the link.
+A `DisplayText` that is only whitespace counts as empty. Either way the insertion is a single undo step (undo restores any replaced text with its formatting, and leaves other images, links and line breaks in the paragraph untouched) and the caret is left at the end of the link.
 
 ```csharp
 // ctx: an EditorContext built as shown under "Inserting an Image"

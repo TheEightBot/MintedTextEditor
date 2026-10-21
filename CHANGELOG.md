@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `SkiaSharpEngine`, a placeholder class whose only member, `IsAvailable`, always returned `true`.
 
 ### Fixed
-- **`InsertHyperlinkCommand.DisplayText`** is now used: when set, the link is inserted with that text at the caret, or replaces the selected text. Undoing a hyperlink insertion now restores the original text with its formatting (previously it came back unformatted), and redoing a link made from a selection no longer throws.
+- **`InsertHyperlinkCommand.DisplayText`** is now used: when set, the link is inserted with that text at the caret, or replaces the selected text. Undoing a hyperlink insertion now restores the original text with its formatting (previously it came back unformatted), and redoing a link made from a selection no longer throws. A link inserted with the caret right after an image or another link now goes after it rather than before. Undoing a deletion or a link insertion keeps soft line breaks, images and links (with all their content) as the same objects instead of converting them to text or copies, so earlier undo steps such as an image insertion still work, and undoing one that spanned paragraphs refreshes the layout of every paragraph after them.
 
 ---
 

@@ -463,6 +463,172 @@ public class CommandTests
         Assert.False(undo.CanUndo);
     }
 
+    private static EditorContext MakeCaretCtx(EditorDocument doc, DocumentPosition caret, UndoManager undo)
+    {
+        var sel = new Selection();
+        sel.Set(caret, caret);
+        return MakeCtx(doc, sel, undo);
+    }
+
+    [Fact]
+    public void InsertHyperlinkCommand_AfterImage_InsertsLinkAfterTheImage()
+    {
+        var doc  = new EditorDocument();
+        var para = (Paragraph)doc.Blocks[0];
+        para.AppendRun("Hi");
+        var image = new ImageInline("a.png");
+        para.AddInline(image);
+        para.AppendRun("there");
+        var undo = new UndoManager();
+
+        // Caret at the start of the text after the image.
+        new InsertHyperlinkCommand { Url = "https://example.com", DisplayText = "L" }
+            .Execute(MakeCaretCtx(doc, new DocumentPosition(0, 2, 0), undo));
+
+        Assert.Same(image, para.Inlines[1]);
+        Assert.IsType<HyperlinkInline>(para.Inlines[2]);
+        Assert.Equal("Hi￼Lthere", para.GetText());
+
+        // Caret at the end of an image that ends the paragraph.
+        var doc2  = new EditorDocument();
+        var para2 = (Paragraph)doc2.Blocks[0];
+        para2.AppendRun("Hi");
+        para2.AddInline(new ImageInline("a.png"));
+        new InsertHyperlinkCommand { Url = "https://example.com", DisplayText = "L" }
+            .Execute(MakeCaretCtx(doc2, new DocumentPosition(0, 1, 1), new UndoManager()));
+
+        Assert.IsType<ImageInline>(para2.Inlines[1]);
+        Assert.IsType<HyperlinkInline>(para2.Inlines[2]);
+    }
+
+    [Fact]
+    public void InsertHyperlinkCommand_AfterExistingLink_InsertsNewLinkAfterIt()
+    {
+        var doc   = new EditorDocument();
+        var para  = (Paragraph)doc.Blocks[0];
+        var first = new HyperlinkInline("https://one.example");
+        para.AddInline(first);
+        first.AddChild(new TextRun("one"));
+        para.AppendRun(" tail");
+        var undo = new UndoManager();
+
+        new InsertHyperlinkCommand { Url = "https://two.example", DisplayText = "two" }
+            .Execute(MakeCaretCtx(doc, new DocumentPosition(0, 1, 0), undo));
+
+        Assert.Same(first, para.Inlines[0]);
+        Assert.Equal("https://two.example", Assert.IsType<HyperlinkInline>(para.Inlines[1]).Url);
+        Assert.Equal("onetwo tail", para.GetText());
+
+        undo.Undo();
+        Assert.Equal("one tail", para.GetText());
+        Assert.Same(first, para.Inlines[0]);
+    }
+
+    [Fact]
+    public void InsertHyperlinkAction_Undo_KeepsImageIdentity_SoEarlierImageUndoAndRedoWork()
+    {
+        var doc  = MakeDoc("Hello world");
+        var para = (Paragraph)doc.Blocks[0];
+        var undo = new UndoManager();
+
+        undo.Push(new InsertImageAction(doc, new DocumentPosition(0, 0, 5), "a.png"));
+        var image = Assert.Single(para.Inlines.OfType<ImageInline>());
+
+        // A link elsewhere in the same paragraph (at its end).
+        var end = new DocumentPosition(0, para.Inlines.Count - 1, para.Inlines[^1].Length);
+        undo.Push(new InsertHyperlinkAction(doc, new TextRange(end, end), "https://example.com", "L"));
+
+        undo.Undo(); // link
+        Assert.Same(image, Assert.Single(para.Inlines.OfType<ImageInline>()));
+        Assert.Same(para, image.Parent);
+
+        undo.Undo(); // image
+        Assert.Empty(para.Inlines.OfType<ImageInline>());
+        Assert.Equal("Hello world", para.GetText());
+
+        undo.Redo(); // image
+        Assert.Single(para.Inlines.OfType<ImageInline>());
+        undo.Redo(); // link
+        Assert.Single(para.Inlines.OfType<ImageInline>());
+        Assert.Single(para.Inlines.OfType<HyperlinkInline>());
+    }
+
+    [Fact]
+    public void InsertHyperlinkAction_Undo_PreservesLineBreaksAndLinkChildren()
+    {
+        var doc  = new EditorDocument();
+        var para = (Paragraph)doc.Blocks[0];
+        para.AppendRun("a");
+        var lineBreak = new LineBreak();
+        para.AddInline(lineBreak);
+        var existing = new HyperlinkInline("https://one.example", "title");
+        para.AddInline(existing);
+        var linkText  = new TextRun("x", TextStyle.Default.WithBold(true));
+        var linkImage = new ImageInline("in-link.png", "alt", 10, 20);
+        existing.AddChild(linkText);
+        existing.AddChild(linkImage);
+        para.AppendRun("bc");
+        var undo = new UndoManager();
+
+        // Replace "b" (outside the existing link) with a new link, then undo.
+        var range = new TextRange(new DocumentPosition(0, 3, 0), new DocumentPosition(0, 3, 1));
+        undo.Push(new InsertHyperlinkAction(doc, range, "https://two.example", "new"));
+        undo.Undo();
+
+        Assert.Equal(4, para.Inlines.Count);
+        Assert.Equal("a", Assert.IsType<TextRun>(para.Inlines[0]).Text);
+        Assert.Same(lineBreak, para.Inlines[1]);
+        Assert.Same(existing, para.Inlines[2]);
+        Assert.Equal("title", existing.Title);
+        Assert.Equal(2, existing.Children.Count);
+        Assert.Same(linkText, existing.Children[0]);
+        Assert.True(linkText.Style.IsBold);
+        Assert.Same(linkImage, existing.Children[1]);
+        Assert.Equal(20, linkImage.Height);
+        Assert.Equal("bc", Assert.IsType<TextRun>(para.Inlines[3]).Text);
+        Assert.All(para.Inlines, i => Assert.Same(para, i.Parent));
+    }
+
+    [Fact]
+    public void InsertHyperlinkAction_UndoAcrossParagraphs_InvalidatesLaterCachedLayouts()
+    {
+        var doc = new EditorDocument(new Block[] { new Paragraph("One"), new Paragraph("Two"), new Paragraph("Three"), new Paragraph("Four") });
+        var cache = new MintedTextEditor.Core.Layout.LayoutCache();
+        doc.AddChangeListener(cache);
+        var mock = new MockDrawingContext();
+        var undo = new UndoManager();
+
+        var range = new TextRange(new DocumentPosition(0, 0, 1), new DocumentPosition(1, 0, 1));
+        undo.Push(new InsertHyperlinkAction(doc, range, "https://example.com", "L"));
+        Assert.Equal(3, doc.Blocks.Count);
+        var merged = cache.GetLayout(doc, 500f, mock); // caches "Three" at 1 and "Four" at 2
+
+        DocumentChangeType? seen = null;
+        doc.Changed += (_, e) => seen = e.ChangeType;
+        undo.Undo();
+
+        Assert.Equal(DocumentChangeType.BlockSplit, seen);
+        Assert.Equal(new[] { "One", "Two", "Three", "Four" }, doc.Blocks.Select(b => b.GetText()));
+        var restored = cache.GetLayout(doc, 500f, mock);
+        Assert.NotSame(merged.Blocks[2], restored.Blocks[2]); // "Four"'s layout no longer stands in for "Three"
+    }
+
+    [Fact]
+    public void DeleteRangeAction_UndoAcrossParagraphs_ReportsStructuralChange()
+    {
+        var doc = new EditorDocument(new Block[] { new Paragraph("One"), new Paragraph("Two"), new Paragraph("Three") });
+        var undo = new UndoManager();
+        undo.Push(new DeleteRangeAction(doc,
+            new TextRange(new DocumentPosition(0, 0, 1), new DocumentPosition(1, 0, 1))));
+
+        DocumentChangeType? seen = null;
+        doc.Changed += (_, e) => seen = e.ChangeType;
+        undo.Undo();
+
+        Assert.Equal(DocumentChangeType.BlockSplit, seen);
+        Assert.Equal(new[] { "One", "Two", "Three" }, doc.Blocks.Select(b => b.GetText()));
+    }
+
     // ── TableCommands ─────────────────────────────────────────────────────────
 
     [Fact]
