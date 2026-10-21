@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **Undo for paragraph formatting**: the alignment, list, indent, heading and paragraph-format (`Normal`/`Heading1`–`6`/`Quote`) commands, and the toolbar's heading dropdown, are now recorded on the `UndoManager` as one step per command, even across a multi-paragraph selection. Undo restores each paragraph's previous style and redo reapplies it. The new `ApplyParagraphStyleAction` makes other paragraph style changes undoable. The `ParagraphFormattingEngine` documentation no longer claims its methods are undoable; they still change the document directly.
+
 ---
 
 ## [0.3.1] — 2026-10-21
