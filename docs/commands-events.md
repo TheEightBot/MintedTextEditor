@@ -171,6 +171,65 @@ editor.ImageRequested += (sender, e) =>
 };
 ```
 
+### ContentLoaded
+
+Raised at the end of `LoadHtml` and `LoadMarkdown`, after the document has been replaced and the caret moved to the start. `TextChanged` is raised first, as for any change. `AppendHtml` and `AppendMarkdown` do not raise it.
+
+```csharp
+editor.ContentLoaded += (sender, e) => SaveButton.IsEnabled = false;
+```
+
+### IsReadOnlyChanged
+
+Raised when the `IsReadOnly` property changes value (`e.IsReadOnly`), whether set from code or a binding.
+
+### ImageInserted / ImageRemoved
+
+Raised once per image after an edit adds images to the document or removes them: inserting from the toolbar or a command, pasting, deleting a selection, undo and redo. `ImageInserted` carries the `ImageInline` (`e.Image`); `ImageRemoved` carries its source (`e.Source`). Images in table cells and hyperlinks count too.
+
+- They are raised once the edit has finished (on the next turn of the UI dispatcher), after `TextChanged`.
+- Images that arrive with `LoadHtml` / `LoadMarkdown` are not reported: the loaded content is the new starting point.
+- Undo and redo rebuild paragraphs, so a removed image and an added image with the same source in one edit count as the same image and raise nothing. Replacing an image with one from a different source raises both events.
+
+```csharp
+editor.ImageRemoved += (sender, e) => imageStore.Release(e.Source);
+```
+
+### Formatting state events
+
+These events report the formatting at the caret or selection, for keeping a custom toolbar or status bar in sync. Each fires only when its value actually changes: after the caret or selection moves, after an edit, undo or redo, and after formatting is chosen from the toolbar or a shortcut (including formatting chosen with nothing selected, which applies to the next typed text).
+
+| Event | Arguments | Fires when this changes |
+|---|---|---|
+| `FontFamilyChanged` | `FontFamily` | Font family |
+| `FontSizeChanged` | `FontSize` | Font size |
+| `FontAttributesChanged` | `IsBold`, `IsItalic`, `IsSubscript`, `IsSuperscript` | Any of the four |
+| `TextDecorationsChanged` | `IsUnderline`, `IsStrikethrough` | Either of the two |
+| `TextColorChanged` | `Color` | Text colour |
+| `HighlightTextColorChanged` | `Color` | Highlight colour (transparent when none) |
+| `TextFormattingChanged` | `Format`: `"Normal"`, `"Heading1"`–`"Heading6"` or `"Quote"` | Heading level or block quote of the paragraph |
+| `HorizontalTextAlignmentChanged` | `Alignment` | Paragraph alignment |
+| `ListTypeChanged` | `ListType` | Paragraph list type |
+
+How the values are worked out (`FormattingState.Compute` in Core):
+
+- **Caret**: from the formatting chosen for the next typed text if there is any, otherwise from the text run at the caret.
+- **Selection**: bold, italic, underline, strikethrough, subscript and superscript are true only when they apply to the whole selection, as the toolbar buttons show them. Font family, size and colours are the selection's common value, or the value at its start when they are mixed.
+- **Paragraph values** come from the paragraph at the start of the selection.
+
+`editor.CurrentFormatting` returns the latest `FormattingState`, so you can read the initial values before any event has fired.
+
+```csharp
+editor.FontAttributesChanged += (sender, e) =>
+{
+    BoldButton.IsChecked = e.IsBold;
+    ItalicButton.IsChecked = e.IsItalic;
+};
+editor.TextFormattingChanged += (sender, e) => HeadingPicker.SelectedItem = e.Format;
+```
+
+Caret and selection moves, typing, shortcuts and toolbar formatting raise these events straight away. Other document changes (undo, redo, changes made through the document or engine APIs) raise them once the change has finished, on the next turn of the UI dispatcher.
+
 ### UndoStackChanged
 
 Raised by `editor.UndoManager` when the undo stack changes — useful for updating undo/redo button states in a custom toolbar.
