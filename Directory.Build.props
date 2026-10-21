@@ -1,13 +1,15 @@
 <Project>
   <!--
     Shared NuGet package metadata inherited by every project in the repository.
-    Per-project values (PackageId, Version, Description, PackageTags) are kept
-    in the individual .csproj files.
+    Per-project values (PackageId, Description, PackageTags) are kept in the
+    individual .csproj files.
 
-    The Version can be overridden at build time by passing /p:Version=x.y.z
-    (done automatically by the GitHub Actions publish workflow).
+    Version is shared by all packages and should match the latest release in
+    CHANGELOG.md; bump it in the release PR. The publish workflow overrides it
+    with the tag (/p:Version=x.y.z), so a tag always wins.
   -->
   <PropertyGroup>
+    <Version>0.3.1</Version>
     <Authors>Eight-Bot, Inc.; Michael Stonis</Authors>
     <Company>Eight-Bot, Inc.</Company>
     <Copyright>Copyright © Eight-Bot, Inc. $([System.DateTime]::UtcNow.Year)</Copyright>
@@ -50,6 +52,6 @@
 
   <!-- SourceLink for GitHub (requires Microsoft.SourceLink.GitHub package) -->
   <ItemGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All"/>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.402" PrivateAssets="All"/>
   </ItemGroup>
 </Project>

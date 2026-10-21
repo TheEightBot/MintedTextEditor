@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - `TableStyle.BorderColor` defaults to grey (160,160,160), the colour tables have always been drawn with, instead of black, so existing tables look the same now that the property is used.
+- `ISpellCheckProvider` (`MTE001`), `IPrintProvider` (`MTE002`) and `ITextShaper` / `ShapedTextResult` / `DefaultTextShaper` (`MTE003`) are now marked `[Experimental]`: the editor does not use them yet, so code that references them now reports the diagnostic and must suppress it. See [Experimental APIs](docs/architecture.md#experimental-apis).
+- The package version is set once in `Directory.Build.props` instead of `1.0.0` in each project, so local and CI pack runs produce the current version rather than 1.0.0.
+
+### Removed
+- `SkiaSharpEngine`, a placeholder class whose only member, `IsAvailable`, always returned `true`.
 
 ---
 
