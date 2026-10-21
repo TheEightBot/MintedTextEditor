@@ -15,7 +15,7 @@ public sealed class ToggleBoldCommand : ICharacterFormattingCommand
 
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ctx.FormattingEngine.ToggleBold(ctx.Document, ctx.Selection.Range);
+        ctx.ApplyCharacterFormatting("Bold", r => ctx.FormattingEngine.ToggleBold(ctx.Document, r));
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
@@ -33,7 +33,7 @@ public sealed class ToggleItalicCommand : ICharacterFormattingCommand
 
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ctx.FormattingEngine.ToggleItalic(ctx.Document, ctx.Selection.Range);
+        ctx.ApplyCharacterFormatting("Italic", r => ctx.FormattingEngine.ToggleItalic(ctx.Document, r));
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
@@ -51,7 +51,7 @@ public sealed class ToggleUnderlineCommand : ICharacterFormattingCommand
 
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ctx.FormattingEngine.ToggleUnderline(ctx.Document, ctx.Selection.Range);
+        ctx.ApplyCharacterFormatting("Underline", r => ctx.FormattingEngine.ToggleUnderline(ctx.Document, r));
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
@@ -69,7 +69,7 @@ public sealed class ToggleStrikethroughCommand : ICharacterFormattingCommand
 
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ctx.FormattingEngine.ToggleStrikethrough(ctx.Document, ctx.Selection.Range);
+        ctx.ApplyCharacterFormatting("Strikethrough", r => ctx.FormattingEngine.ToggleStrikethrough(ctx.Document, r));
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
@@ -87,7 +87,7 @@ public sealed class ToggleSubscriptCommand : ICharacterFormattingCommand
 
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ctx.FormattingEngine.ToggleSubscript(ctx.Document, ctx.Selection.Range);
+        ctx.ApplyCharacterFormatting("Subscript", r => ctx.FormattingEngine.ToggleSubscript(ctx.Document, r));
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
@@ -105,7 +105,7 @@ public sealed class ToggleSuperscriptCommand : ICharacterFormattingCommand
 
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ctx.FormattingEngine.ToggleSuperscript(ctx.Document, ctx.Selection.Range);
+        ctx.ApplyCharacterFormatting("Superscript", r => ctx.FormattingEngine.ToggleSuperscript(ctx.Document, r));
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;
@@ -123,7 +123,7 @@ public sealed class ClearFormattingCommand : ICharacterFormattingCommand
 
     /// <inheritdoc/>
     public void Execute(EditorContext ctx) =>
-        ctx.FormattingEngine.ClearFormatting(ctx.Document, ctx.Selection.Range);
+        ctx.ApplyCharacterFormatting("Clear Formatting", r => ctx.FormattingEngine.ClearFormatting(ctx.Document, r));
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) => true;

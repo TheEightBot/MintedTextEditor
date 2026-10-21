@@ -257,7 +257,7 @@ public class CharacterFormattingTests
     }
 
     [Fact]
-    public void PendingStyle_SubsequentTypingUsesDefaultStyle()
+    public void PendingStyle_IsConsumed_SubsequentTypingInheritsPrecedingStyle()
     {
         var doc = new EditorDocument([Para("Hello")]);
         var layout = _engine.Layout(doc, 800f, _context);
@@ -270,14 +270,17 @@ public class CharacterFormattingTests
         fmt.ToggleBold(doc, TextRange.Empty);
         ctrl.HandleTextInput("!", doc); // bold
 
-        // Second character should NOT be bold (pending was consumed)
-        var posBefore = caret.Position;
+        // The pending style is consumed by the first character...
+        Assert.Null(fmt.PendingStyle);
+
+        // ...and the second character inherits the (bold) style of the character before it.
         ctrl.HandleTextInput("?", doc);
 
         var para = (Paragraph)doc.Blocks[0];
         var questionRun = para.Inlines.OfType<TextRun>().FirstOrDefault(r => r.Text.Contains('?'));
         Assert.NotNull(questionRun);
-        Assert.False(questionRun!.Style.IsBold);
+        Assert.True(questionRun!.Style.IsBold);
+        Assert.False(para.Inlines.OfType<TextRun>().First(r => r.Text.Contains("Hello")).Style.IsBold);
     }
 
     // ── IsAppliedToEntireRange ────────────────────────────────────────────────

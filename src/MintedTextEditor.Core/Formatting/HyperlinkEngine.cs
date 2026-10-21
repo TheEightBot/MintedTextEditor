@@ -23,20 +23,34 @@ public static class HyperlinkEngine
     /// </summary>
     public static HyperlinkInline InsertHyperlink(
         Document.Document doc, TextRange range, string url, string? title = null)
+        => InsertHyperlink(doc, range, url, title, displayText: null);
+
+    /// <summary>
+    /// Inserts a new <see cref="HyperlinkInline"/> to <paramref name="url"/> over
+    /// <paramref name="range"/>, using <paramref name="displayText"/> as the link text.
+    /// When <paramref name="displayText"/> is non-empty (not null or whitespace) it becomes the link
+    /// text and replaces any text covered by <paramref name="range"/>. Otherwise this behaves like
+    /// <see cref="InsertHyperlink(Document.Document, TextRange, string, string?)"/>: the covered text
+    /// becomes the link text, or the URL is inserted as the text when the range is empty.
+    /// Returns the inserted <see cref="HyperlinkInline"/>.
+    /// </summary>
+    public static HyperlinkInline InsertHyperlink(
+        Document.Document doc, TextRange range, string url, string? title, string? displayText)
     {
         var para = GetParagraph(doc, range.Start.BlockIndex);
 
+        bool hasDisplayText = !string.IsNullOrWhiteSpace(displayText);
         string linkText;
         DocumentPosition insertPos;
 
         if (range.IsEmpty)
         {
-            linkText  = url;
+            linkText  = hasDisplayText ? displayText! : url;
             insertPos = range.Start;
         }
         else
         {
-            linkText  = DocumentEditor.GetSelectedText(doc, range);
+            linkText  = hasDisplayText ? displayText! : DocumentEditor.GetSelectedText(doc, range);
             insertPos = DocumentEditor.DeleteRange(doc, range);
         }
 
@@ -68,9 +82,9 @@ public static class HyperlinkEngine
     }
 
     /// <summary>
-    /// Removes the first <see cref="HyperlinkInline"/> that starts at
-    /// <paramref name="position"/>, preserving its plain text as a
-    /// <see cref="TextRun"/> in its place.
+    /// Removes the <see cref="HyperlinkInline"/> at <paramref name="position"/>, leaving
+    /// its text in place as <see cref="TextRun"/>s that keep their character formatting.
+    /// Not recorded for undo; use <see cref="Editing.RemoveHyperlinkAction"/> for that.
     /// </summary>
     public static void RemoveHyperlink(Document.Document doc, DocumentPosition position)
     {
@@ -81,9 +95,23 @@ public static class HyperlinkEngine
         int idx  = para.Inlines.IndexOf(hyperlink);
         if (idx < 0) return;
 
-        // Replace hyperlink with a plain TextRun containing the same text
-        para.Inlines.RemoveAt(idx);
-        para.Inlines.Insert(idx, new TextRun(hyperlink.GetText()) { Parent = para });
+        // Replace the hyperlink with copies of its text runs, keeping each run's style
+        para.RemoveInline(idx);
+        int insertAt = idx;
+        foreach (var child in hyperlink.Children)
+        {
+            if (child is TextRun run)
+            {
+                if (run.Length > 0)
+                    para.InsertInline(insertAt++, new TextRun(run.Text, run.Style));
+            }
+            else
+            {
+                para.InsertInline(insertAt++, child);
+            }
+        }
+        if (para.Inlines.Count == 0)
+            para.AppendRun(string.Empty);
 
         doc.NotifyChanged(new DocumentChangedEventArgs(
             DocumentChangeType.TextDeleted,
@@ -160,27 +188,34 @@ public static class HyperlinkEngine
     /// <summary>
     /// Inserts a <see cref="HyperlinkInline"/> into the paragraph at the
     /// location described by <paramref name="pos"/>. If the caret is in the
-    /// middle of a <see cref="TextRun"/>, the run is split first.
+    /// middle of a <see cref="TextRun"/>, the run is split first. A caret at the end
+    /// of any other inline (an image or an existing link) inserts after that inline.
     /// </summary>
     private static void InsertHyperlinkInline(
         Paragraph para, DocumentPosition pos, HyperlinkInline hyperlink)
     {
-        hyperlink.Parent = para;
-
         int ii = Math.Min(pos.InlineIndex, para.Inlines.Count);
 
         if (ii < para.Inlines.Count && para.Inlines[ii] is TextRun run && pos.Offset > 0)
         {
             // Split the run at the caret offset
-            var right = run.Split(pos.Offset);   // mutates run (left part), returns right part
+            var right = run.Split(Math.Min(pos.Offset, run.Length));   // mutates run (left part), returns right part
             int insertAt = ii + 1;
-            para.Inlines.Insert(insertAt, hyperlink);
+            para.InsertInline(insertAt, hyperlink);
             if (right.Length > 0)
-                para.Inlines.Insert(insertAt + 1, right);
+                para.InsertInline(insertAt + 1, right);
+        }
+        else if (ii < para.Inlines.Count && para.Inlines[ii] is not TextRun
+                 && pos.Offset > 0 && pos.Offset >= para.Inlines[ii].Length)
+        {
+            para.InsertInline(ii + 1, hyperlink);
         }
         else
         {
-            para.Inlines.Insert(ii, hyperlink);
+            para.InsertInline(ii, hyperlink);
         }
+
+        foreach (var child in hyperlink.Children)
+            child.Parent = para;
     }
 }

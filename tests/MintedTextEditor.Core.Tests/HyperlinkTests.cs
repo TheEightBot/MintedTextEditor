@@ -258,4 +258,24 @@ public class HyperlinkTests
 
         Assert.Equal(2, changes);
     }
+
+    // ── HitTestHyperlink (pointer hover) ──────────────────────────────────
+
+    [Fact]
+    public void HitTestHyperlink_FindsLinkOnlyInsideItsText()
+    {
+        var link = new HyperlinkInline("https://example.com");
+        link.AddChild(new TextRun("link"));
+        var para = new Paragraph("Go ");
+        para.AddInline(link);
+        var doc = new EditorDocument(new Block[] { para });
+        var layout = new MintedTextEditor.Core.Layout.TextLayoutEngine().Layout(doc, 500f, new MockDrawingContext());
+        float y = layout.Blocks[0].Lines[0].Height / 2f;
+
+        // 8px per character in the mock: "Go " is x 0–24, "link" is x 24–56.
+        Assert.Same(link, MintedTextEditor.Core.Input.DocumentHitTester.HitTestHyperlink(30f, y, layout));
+        Assert.Null(MintedTextEditor.Core.Input.DocumentHitTester.HitTestHyperlink(10f, y, layout));
+        Assert.Null(MintedTextEditor.Core.Input.DocumentHitTester.HitTestHyperlink(100f, y, layout));
+        Assert.Null(MintedTextEditor.Core.Input.DocumentHitTester.HitTestHyperlink(30f, 500f, layout));
+    }
 }

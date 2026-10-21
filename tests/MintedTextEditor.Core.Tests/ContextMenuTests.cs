@@ -83,9 +83,9 @@ public class ContextMenuTests
         var ctx = MakeCtx();
         var def = ContextMenuFactory.CreateDefault(ctx);
 
-        Assert.Contains(def.Items, i => i.Label == "Insert Hyperlink");
-        Assert.DoesNotContain(def.Items, i => i.Label == "Edit Hyperlink");
-        Assert.DoesNotContain(def.Items, i => i.Label == "Remove Hyperlink");
+        Assert.Contains(def.Items, i => i.Label == "Insert hyperlink");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Edit hyperlink…");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Remove hyperlink");
     }
 
     [Fact]
@@ -108,10 +108,10 @@ public class ContextMenuTests
         var ctx = MakeCtx(doc, sel);
         var def = ContextMenuFactory.CreateDefault(ctx);
 
-        Assert.Contains(def.Items, i => i.Label == "Edit Hyperlink");
-        Assert.Contains(def.Items, i => i.Label == "Remove Hyperlink");
-        Assert.Contains(def.Items, i => i.Label == "Open Hyperlink");
-        Assert.DoesNotContain(def.Items, i => i.Label == "Insert Hyperlink");
+        Assert.Contains(def.Items, i => i.Label == "Edit hyperlink…");
+        Assert.Contains(def.Items, i => i.Label == "Remove hyperlink");
+        Assert.Contains(def.Items, i => i.Label == "Open hyperlink");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Insert hyperlink");
     }
 
     [Fact]
@@ -120,9 +120,9 @@ public class ContextMenuTests
         var ctx = MakeCtx();
         var def = ContextMenuFactory.CreateDefault(ctx);
 
-        Assert.Contains(def.Items, i => i.Label == "Select All");
-        Assert.Contains(def.Items, i => i.Label == "Insert Image");
-        Assert.Contains(def.Items, i => i.Label == "Insert Table");
+        Assert.Contains(def.Items, i => i.Label == "Select all");
+        Assert.Contains(def.Items, i => i.Label == "Insert image");
+        Assert.Contains(def.Items, i => i.Label == "Insert table");
     }
 
     // ── Custom items via ContextMenuItemsRequestedEventArgs ──────────────────
@@ -316,20 +316,9 @@ public class ContextMenuTests
         sel.CollapseTo(new DocumentPosition(0, linkIndex, 3));
         var def = ContextMenuFactory.CreateDefault(MakeCtx(doc, sel));
 
-        Assert.Contains(def.Items, i => i.Label == "Remove Hyperlink");
-        Assert.Contains(def.Items, i => i.Label == "Open Hyperlink");
-        Assert.DoesNotContain(def.Items, i => i.Label == "Insert Hyperlink");
-    }
-
-    [Fact]
-    public void CreateDefault_CaretOnPlainText_ShowsInsertHyperlinkOnly()
-    {
-        var sel = new Selection();
-        sel.CollapseTo(new DocumentPosition(0, 0, 3));
-        var def = ContextMenuFactory.CreateDefault(MakeCtx(MakeDoc(), sel));
-
-        Assert.Contains(def.Items, i => i.Label == "Insert Hyperlink");
-        Assert.DoesNotContain(def.Items, i => i.Label == "Remove Hyperlink");
+        Assert.Contains(def.Items, i => i.Label == "Remove hyperlink");
+        Assert.Contains(def.Items, i => i.Label == "Open hyperlink");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Insert hyperlink");
     }
 
     [Fact]
@@ -339,7 +328,7 @@ public class ContextMenuTests
 
         Assert.IsType<CutCommand>(def.Items.First(i => i.Label == "Cut").Command);
         Assert.IsType<CopyCommand>(def.Items.First(i => i.Label == "Copy").Command);
-        Assert.IsType<SelectAllCommand>(def.Items.First(i => i.Label == "Select All").Command);
+        Assert.IsType<SelectAllCommand>(def.Items.First(i => i.Label == "Select all").Command);
         // Paste reads the clipboard asynchronously, so the host runs it.
         var paste = def.Items.First(i => i.Label == "Paste");
         Assert.Null(paste.Command);
@@ -352,8 +341,8 @@ public class ContextMenuTests
     {
         var def = ContextMenuFactory.CreateDefault(MakeCtx());
 
-        Assert.DoesNotContain(def.Items, i => i.Label == "Delete Row");
-        Assert.DoesNotContain(def.Items, i => i.Label == "Delete Table");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Delete row");
+        Assert.DoesNotContain(def.Items, i => i.Label == "Delete table");
     }
 
     [Fact]
@@ -367,10 +356,10 @@ public class ContextMenuTests
 
         var def = ContextMenuFactory.CreateDefault(MakeCtx(doc, sel));
 
-        Assert.Contains(def.Items, i => i.Label == "Insert Row Above");
-        Assert.Contains(def.Items, i => i.Label == "Delete Table");
-        Assert.False(def.Items.First(i => i.Label == "Delete Row").IsEnabled);
-        Assert.True(def.Items.First(i => i.Label == "Delete Column").IsEnabled);
+        Assert.Contains(def.Items, i => i.Label == "Insert row above");
+        Assert.Contains(def.Items, i => i.Label == "Delete table");
+        Assert.False(def.Items.First(i => i.Label == "Delete row").IsEnabled);
+        Assert.True(def.Items.First(i => i.Label == "Delete column").IsEnabled);
     }
 
     // ── ContextMenuRenderer – hit testing ────────────────────────────────────
@@ -404,7 +393,7 @@ public class ContextMenuTests
                               + renderer.SeparatorHeight + renderer.ItemHeight / 2f;
         var hit = renderer.HitTest(50 + renderer.MinWidth / 2f, selectAllMidY);
 
-        Assert.Equal("Select All", hit?.Label);
+        Assert.Equal("Select all", hit?.Label);
         Assert.Equal(3, renderer.FocusedIndex);
     }
 

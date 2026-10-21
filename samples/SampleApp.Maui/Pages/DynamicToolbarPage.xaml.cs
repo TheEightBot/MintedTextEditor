@@ -59,7 +59,7 @@ public partial class DynamicToolbarPage : ContentPage
         if (!_boldEnabled)
         {
             foreach (var btn in def.AllItems.OfType<ToolbarButton>()
-                                            .Where(b => b.Label == "Bold"))
+                                            .Where(b => b.Icon == "bold"))
                 btn.IsEnabled = false;
         }
 

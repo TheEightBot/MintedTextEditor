@@ -8,7 +8,8 @@ namespace MintedTextEditor.Core.Commands;
 
 /// <summary>
 /// Inserts or wraps selected text as a hyperlink with the given URL.
-/// Provide the <see cref="Url"/> before calling <see cref="Execute"/>.
+/// Provide the <see cref="Url"/> (and optionally <see cref="DisplayText"/>) before calling
+/// <see cref="Execute"/>. The insertion is a single undo step and leaves the caret at the end of the link.
 /// </summary>
 public sealed class InsertHyperlinkCommand : IEditorCommand
 {
@@ -20,16 +21,18 @@ public sealed class InsertHyperlinkCommand : IEditorCommand
     /// <summary>Set before calling Execute.</summary>
     public string Url { get; set; } = string.Empty;
 
-    /// <summary>Optional display text. When empty, uses selected text or the URL.</summary>
+    /// <summary>
+    /// Optional text shown for the link. When non-empty (not null or whitespace), a link with this text
+    /// is inserted at the caret, or replaces the selected text when there is a selection. When empty,
+    /// the selected text becomes the link text, or the URL is inserted as the text when nothing is selected.
+    /// </summary>
     public string DisplayText { get; set; } = string.Empty;
 
     /// <inheritdoc/>
     public void Execute(EditorContext ctx)
     {
         if (string.IsNullOrWhiteSpace(Url)) return;
-        // Passes the current selection range — if there is selected text it becomes
-        // the link text; otherwise the URL is used as the display text.
-        var action = new InsertHyperlinkAction(ctx.Document, ctx.Selection.Range, Url);
+        var action = new InsertHyperlinkAction(ctx.Document, ctx.Selection.Range, Url, DisplayText);
         var pos = ctx.UndoManager.Push(action);
         ctx.Selection.CollapseTo(pos);
     }
@@ -40,7 +43,10 @@ public sealed class InsertHyperlinkCommand : IEditorCommand
 
 // ── Remove Hyperlink ──────────────────────────────────────────────────────────
 
-/// <summary>Removes the hyperlink at the caret position.</summary>
+/// <summary>
+/// Removes the hyperlink at the caret position, keeping its text and formatting.
+/// Recorded as one undo step.
+/// </summary>
 public sealed class RemoveHyperlinkCommand : IEditorCommand
 {
     /// <inheritdoc/>
@@ -49,8 +55,12 @@ public sealed class RemoveHyperlinkCommand : IEditorCommand
     public string Description => "Removes the hyperlink at the current caret position.";
 
     /// <inheritdoc/>
-    public void Execute(EditorContext ctx) =>
-        HyperlinkEngine.RemoveHyperlink(ctx.Document, ctx.Selection.Active);
+    public void Execute(EditorContext ctx)
+    {
+        if (HyperlinkEngine.GetHyperlinkAtPosition(ctx.Document, ctx.Selection.Active) is null) return;
+        var pos = ctx.UndoManager.Push(new RemoveHyperlinkAction(ctx.Document, ctx.Selection.Active));
+        ctx.Selection.CollapseTo(pos);
+    }
 
     /// <inheritdoc/>
     public bool CanExecute(EditorContext ctx) =>

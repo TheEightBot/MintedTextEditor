@@ -91,6 +91,7 @@ Content = editor;
 | `IsWordWrap` | `true` | Wrap lines at the view width |
 | `ShowLineNumbers` | `false` | Show a line-number gutter |
 | `ShowScrollbar` | `true` | Show the vertical scrollbar |
+| `ShowFocusRing` | `false` | Draw a ring in the theme's `FocusRingColor` around the editor while it has focus |
 | `IsMagnifierEnabled` | `true` | Show the magnifier while dragging the caret |
 | `IsContextMenuEnabled` | `true` | Show the context menu on right-click or long press (see [Context Menu](commands-events.md#context-menu)) |
 

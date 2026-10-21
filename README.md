@@ -36,7 +36,7 @@ MintedTextEditor is organized into three packages:
 - Character formatting: bold, italic, underline, strikethrough, subscript, superscript, font family/size, text color, highlight.
 - Paragraph formatting: alignment, indentation, line spacing, headings, lists, block quote.
 - Inline content: hyperlinks, images, tables.
-- Editing primitives: caret navigation, selection, clipboard, undo/redo.
+- Editing primitives: caret navigation, selection, clipboard, undo/redo, find and replace.
 - Touch caret drag with a native-style magnifier (loupe), configurable or switchable off.
 - Themed, canvas-drawn context menu (cut, copy, paste, select all, hyperlink, image and table actions) on right-click or long press, with keyboard navigation and customizable items.
 - Text shaped with HarfBuzz (kerning, ligatures, complex scripts); emoji, ZWJ sequences and flags draw as one glyph and are never split by the caret, Backspace, wrapping or hit-testing.
@@ -47,6 +47,7 @@ MintedTextEditor is organized into three packages:
 - HTML and Markdown import/export pipelines, including support for GitHub Flavored Markdown (GFM).
 - Theming support (light, dark, high contrast, and custom styles).
 - Right-to-left paragraphs and replaceable UI strings (`EditorStrings`).
+- Basic screen-reader support: the editor is announced as one element with a localizable description and hint (read-only state, placeholder); document content and the canvas-drawn toolbar are not exposed yet ([details](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/accessibility.md)).
 
 ## Package Layout
 
@@ -219,13 +220,30 @@ Editor.EditorFocusChanged += (_, e) => { /* e.IsFocused */ };
 
 `EditorFocusChanged` fires once per real native focus change, including a tap into the editor or focus moving to another control. The editor starts unfocused.
 
+### Find and replace
+
+```csharp
+Editor.FindNext("draft");                       // select and scroll to the next match (wraps)
+Editor.FindPrevious("draft", matchCase: true);
+Editor.Replace("draft", "final");               // replace the selected match, select the next
+int replaced = Editor.ReplaceAll("draft", "final");   // one undo step
+Editor.FindReplaceCompleted += (_, e) => { /* e.MatchCount, e.CurrentMatchIndex */ };
+```
+
+There is no built-in find bar; see [docs/commands-events.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/commands-events.md#find-and-replace).
+
 ### Events
 
 ```csharp
 Editor.TextChanged += (_, e) => { /* document changed */ };
 Editor.SelectionChanged += (_, e) => { /* selection changed */ };
 Editor.HyperlinkClicked += (_, e) => { /* e.Url; set e.Cancel to stop the default open */ };
+Editor.FontAttributesChanged += (_, e) => { /* e.IsBold, e.IsItalic … at the caret/selection */ };
+Editor.ImageInserted += (_, e) => { /* e.Image */ };
+Editor.ContentLoaded += (_, e) => { /* after LoadHtml / LoadMarkdown */ };
 ```
+
+The formatting events (font, size, colours, bold/italic, underline/strikethrough, heading, alignment, list type) fire only when the formatting at the caret or selection actually changes; `Editor.CurrentFormatting` holds the latest values.
 
 For deeper API details, see [docs/getting-started.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/getting-started.md), [docs/commands-events.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/commands-events.md), and [docs/toolbar-customization.md](https://github.com/TheEightBot/MintedTextEditor/blob/main/docs/toolbar-customization.md).
 

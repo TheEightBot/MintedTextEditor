@@ -14,7 +14,9 @@ internal class MockDrawingContext : IDrawingContext
     // Track draw calls for verification
     public List<DrawTextCall> DrawTextCalls { get; } = new();
     public List<FillRectCall> FillRectCalls { get; } = new();
+    /// <summary>Calls to <see cref="FillRoundRect"/>, in order.</summary>
     public List<FillRectCall> FillRoundRectCalls { get; } = new();
+    /// <summary>Text, bounds and paint passed to <see cref="DrawTextInRect"/>, in order.</summary>
     public List<DrawTextInRectCall> DrawTextInRectCalls { get; } = new();
 
     /// <summary>Total characters passed to <see cref="MeasureText"/>, to count layout work.</summary>
@@ -41,7 +43,7 @@ internal class MockDrawingContext : IDrawingContext
 
     public void DrawText(string text, float x, float y, EditorPaint paint)
     {
-        DrawTextCalls.Add(new DrawTextCall(text, x, y, paint));
+        DrawTextCalls.Add(new DrawTextCall(text, x, y, paint) { Clip = _clip });
     }
 
     public void DrawTextInRect(string text, EditorRect rect, EditorPaint paint,
@@ -67,16 +69,38 @@ internal class MockDrawingContext : IDrawingContext
     /// <summary>Clip, state and transform calls in order, e.g. "Translate(10,20)".</summary>
     public List<string> TransformCalls { get; } = new();
 
-    public void ClipRect(EditorRect rect) => TransformCalls.Add($"ClipRect({rect.X},{rect.Y},{rect.Width},{rect.Height})");
-    public void Save() => TransformCalls.Add("Save");
-    public void Restore() => TransformCalls.Add("Restore");
+    // Most recent clip rect in effect (not intersected with outer clips), saved/restored with state.
+    private EditorRect? _clip;
+    private readonly Stack<EditorRect?> _clipStack = new();
+
+    public void ClipRect(EditorRect rect)
+    {
+        TransformCalls.Add($"ClipRect({rect.X},{rect.Y},{rect.Width},{rect.Height})");
+        _clip = rect;
+    }
+
+    public void Save()
+    {
+        TransformCalls.Add("Save");
+        _clipStack.Push(_clip);
+    }
+
+    public void Restore()
+    {
+        TransformCalls.Add("Restore");
+        if (_clipStack.Count > 0) _clip = _clipStack.Pop();
+    }
     public void Translate(float dx, float dy) => TransformCalls.Add($"Translate({dx},{dy})");
     public void Scale(float sx, float sy) => TransformCalls.Add($"Scale({sx},{sy})");
     public void ClipRoundRect(EditorRect rect, float cornerRadius)
         => TransformCalls.Add($"ClipRoundRect({rect.X},{rect.Y},{rect.Width},{rect.Height},{cornerRadius})");
     public void DrawImage(object image, EditorRect destRect) { }
 
-    public record DrawTextCall(string Text, float X, float Y, EditorPaint Paint);
+    public record DrawTextCall(string Text, float X, float Y, EditorPaint Paint)
+    {
+        /// <summary>The innermost clip rect in effect when the text was drawn, if any.</summary>
+        public EditorRect? Clip { get; init; }
+    }
     public record FillRectCall(EditorRect Rect, EditorPaint Paint);
     public record DrawTextInRectCall(string Text, EditorRect Rect, EditorPaint Paint);
 }

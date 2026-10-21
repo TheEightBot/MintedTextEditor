@@ -61,7 +61,7 @@ editor.AppendHtml("<p>Additional content.</p>");
 | `<blockquote>` | `Paragraph` with `IsBlockQuote = true` |
 | `<table>` | `TableBlock` |
 | `<tr>` | `TableRow` |
-| `<td>` / `<th>` | `TableCell` (exported as `<td>`) |
+| `<td>` / `<th>` | `TableCell` (exported as `<td>`); `colspan` / `rowspan` map to `ColumnSpan` / `RowSpan` |
 | `<br>` | `LineBreak` inline |
 
 `<hr>` ends the current paragraph and is otherwise dropped. `<head>`, `<style>` and `<script>` are skipped with their content. Other unknown tags are ignored but their text is kept.
@@ -84,7 +84,11 @@ editor.AppendHtml("<p>Additional content.</p>");
 | `<a href="..." title="...">` | `HyperlinkInline` |
 | `<img src="..." alt="..." width="..." height="...">` | `ImageInline` (the source is stored as-is and loaded when drawn; see [Images & Hyperlinks](images-hyperlinks.md)) |
 
-Colors may be `#rgb`, `#rrggbb`, `rgb(...)`, or a few named colors.
+Colors may be `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb(...)` or `rgba(...)`, or a few named colors (`black`, `white`, `red`, `blue`, `green`, `gray`/`grey`, `lightgray`/`silver`, `darkgray`, `yellow`, `transparent`). `rgb()`/`rgba()` accept comma- or space-separated channels (0–255 or a percentage) and an optional alpha as a number from 0 to 1 or a percentage, e.g. `rgba(255, 0, 0, 0.5)` or `rgb(255 0 0 / 50%)`; space-separated values need exactly three channels, with any alpha after a `/`. A color that can't be parsed is ignored.
+
+### Table Cell Spans
+
+`colspan` and `rowspan` on `<td>`/`<th>` set the cell's `ColumnSpan` and `RowSpan`. As with `TableEngine.MergeCells`, every other grid slot a spanning cell covers gets a placeholder cell with `IsMerged = true`, so cells keep their column positions in every row. A `rowspan` that runs past the last row (including `rowspan="0"`) is shortened to fit the table; missing or invalid values mean 1. Rows that end up narrower than the widest row are padded with empty cells, so every row has the same number of cells.
 
 ### Style Attributes
 
@@ -105,4 +109,6 @@ Exported HTML imports back to the same structure and character formatting. Font 
 <span style="background-color:#FFFF00">highlighted</span>
 ```
 
-Paragraph alignment and direction round-trip through `style`. Not preserved: indent level, line spacing and paragraph spacing; table header rows; cell spans (`colspan`/`rowspan` are exported but not read back); and colors with transparency, which are exported as `rgba(...)` but not parsed on import.
+Colors with transparency are written as `rgba(r,g,b,a)` with a three-decimal alpha and read back to the same alpha byte. Merged table cells are written as `colspan`/`rowspan` and read back to the same spans and merged-cell grid.
+
+Paragraph alignment and direction round-trip through `style`. Not preserved: indent level, line spacing and paragraph spacing; and table header rows.

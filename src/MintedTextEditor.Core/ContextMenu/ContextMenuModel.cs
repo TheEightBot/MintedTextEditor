@@ -1,6 +1,7 @@
 using MintedTextEditor.Core.Commands;
 using MintedTextEditor.Core.Document;
 using MintedTextEditor.Core.Formatting;
+using MintedTextEditor.Core.Localization;
 
 namespace MintedTextEditor.Core.ContextMenu;
 
@@ -71,8 +72,22 @@ public static class ContextMenuFactory
     /// </summary>
     /// <param name="ctx">The current editor context.</param>
     /// <returns>A new menu definition with clipboard, hyperlink, image, and table items.</returns>
+    /// <remarks>Item labels are taken from <see cref="EditorStrings.Current"/> at the time of the call.</remarks>
     public static ContextMenuDefinition CreateDefault(EditorContext ctx)
+        => CreateDefault(ctx, EditorStrings.Current);
+
+    /// <summary>
+    /// Creates the default context menu for <paramref name="ctx"/>, labelling items from
+    /// <paramref name="strings"/>. Hyperlink-specific items are included only when relevant.
+    /// </summary>
+    /// <param name="ctx">The current editor context.</param>
+    /// <param name="strings">The strings used for item labels.</param>
+    /// <returns>A new menu definition with clipboard, hyperlink, image, and table items.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="strings"/> is null.</exception>
+    public static ContextMenuDefinition CreateDefault(EditorContext ctx, EditorStrings strings)
     {
+        ArgumentNullException.ThrowIfNull(strings);
+
         bool hasSelection    = !ctx.Selection.IsEmpty;
         bool onHyperlink     = IsSelectionOnHyperlink(ctx);
         bool inTable         = ctx.Selection.Active.IsInTableCell;
@@ -82,21 +97,21 @@ public static class ContextMenuFactory
 
         def.Items.Add(new ContextMenuItem
         {
-            Label     = "Cut",
+            Label     = strings.Cut,
             Icon      = "cut",
             Command   = new CutCommand(),
             IsEnabled = hasSelection,
         });
         def.Items.Add(new ContextMenuItem
         {
-            Label     = "Copy",
+            Label     = strings.Copy,
             Icon      = "copy",
             Command   = new CopyCommand(),
             IsEnabled = hasSelection,
         });
         def.Items.Add(new ContextMenuItem
         {
-            Label          = "Paste",
+            Label          = strings.Paste,
             Icon           = "paste",
             Command        = null, // Paste is handled by the platform layer
             IsEnabled      = canPaste,
@@ -105,7 +120,7 @@ public static class ContextMenuFactory
 
         def.Items.Add(new ContextMenuItem
         {
-            Label          = "Select All",
+            Label          = strings.SelectAll,
             Icon           = "select-all",
             Command        = new SelectAllCommand(),
             SeparatorAfter = true,
@@ -115,19 +130,19 @@ public static class ContextMenuFactory
         {
             def.Items.Add(new ContextMenuItem
             {
-                Label   = "Edit Hyperlink",
+                Label   = strings.EditLink,
                 Icon    = "hyperlink-edit",
                 Command = new InsertHyperlinkCommand(),
             });
             def.Items.Add(new ContextMenuItem
             {
-                Label   = "Remove Hyperlink",
+                Label   = strings.RemoveLink,
                 Icon    = "hyperlink-remove",
                 Command = new RemoveHyperlinkCommand(),
             });
             def.Items.Add(new ContextMenuItem
             {
-                Label          = "Open Hyperlink",
+                Label          = strings.OpenLink,
                 Icon           = "hyperlink-open",
                 Command        = new OpenHyperlinkCommand(),
                 SeparatorAfter = true,
@@ -137,7 +152,7 @@ public static class ContextMenuFactory
         {
             def.Items.Add(new ContextMenuItem
             {
-                Label          = "Insert Hyperlink",
+                Label          = strings.InsertLink,
                 Icon           = "hyperlink",
                 Command        = new InsertHyperlinkCommand(),
                 SeparatorAfter = true,
@@ -146,13 +161,13 @@ public static class ContextMenuFactory
 
         def.Items.Add(new ContextMenuItem
         {
-            Label   = "Insert Image",
+            Label   = strings.InsertImage,
             Icon    = "image",
             Command = new InsertImageCommand(),
         });
         def.Items.Add(new ContextMenuItem
         {
-            Label          = "Insert Table",
+            Label          = strings.InsertTable,
             Icon           = "table",
             Command        = new InsertTableCommand(),
             SeparatorAfter = inTable,
@@ -165,45 +180,45 @@ public static class ContextMenuFactory
 
             def.Items.Add(new ContextMenuItem
             {
-                Label   = "Insert Row Above",
+                Label   = strings.InsertRowAbove,
                 Icon    = "table-insert-row-above",
                 Command = new InsertRowAboveCommand(),
             });
             def.Items.Add(new ContextMenuItem
             {
-                Label   = "Insert Row Below",
+                Label   = strings.InsertRowBelow,
                 Icon    = "table-insert-row-below",
                 Command = new InsertRowBelowCommand(),
             });
             def.Items.Add(new ContextMenuItem
             {
-                Label     = "Delete Row",
+                Label     = strings.DeleteRow,
                 Icon      = "table-delete-row",
                 Command   = new DeleteRowCommand(),
                 IsEnabled = table is not null && table.RowCount > 1,
             });
             def.Items.Add(new ContextMenuItem
             {
-                Label   = "Insert Column Left",
+                Label   = strings.InsertColumnLeft,
                 Icon    = "table-insert-col-left",
                 Command = new InsertColumnLeftCommand(),
             });
             def.Items.Add(new ContextMenuItem
             {
-                Label   = "Insert Column Right",
+                Label   = strings.InsertColumnRight,
                 Icon    = "table-insert-col-right",
                 Command = new InsertColumnRightCommand(),
             });
             def.Items.Add(new ContextMenuItem
             {
-                Label     = "Delete Column",
+                Label     = strings.DeleteColumn,
                 Icon      = "table-delete-col",
                 Command   = new DeleteColumnCommand(),
                 IsEnabled = table is not null && table.ColumnCount > 1,
             });
             def.Items.Add(new ContextMenuItem
             {
-                Label          = "Delete Table",
+                Label          = strings.DeleteTable,
                 Icon           = "table-delete",
                 Command        = new DeleteTableCommand(),
                 SeparatorAfter = false,
