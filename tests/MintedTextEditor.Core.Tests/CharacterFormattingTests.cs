@@ -240,8 +240,8 @@ public class CharacterFormattingTests
         // Place caret at end of "Hello"
         caret.MoveTo(new DocumentPosition(0, 0, 5));
 
-        // Toggle bold with no selection (sets pending)
-        fmt.ToggleBold(doc, TextRange.Empty);
+        // Toggle bold with no selection at the caret (sets pending)
+        fmt.ToggleBold(doc, new TextRange(caret.Position, caret.Position));
 
         // Type a character — should be bold
         ctrl.HandleTextInput("!", doc);
@@ -267,7 +267,7 @@ public class CharacterFormattingTests
         var ctrl = new EditorInputController(caret, caretRenderer) { FormattingEngine = fmt };
 
         caret.MoveTo(new DocumentPosition(0, 0, 5));
-        fmt.ToggleBold(doc, TextRange.Empty);
+        fmt.ToggleBold(doc, new TextRange(caret.Position, caret.Position));
         ctrl.HandleTextInput("!", doc); // bold
 
         // The pending style is consumed by the first character...
