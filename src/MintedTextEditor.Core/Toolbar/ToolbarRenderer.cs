@@ -84,6 +84,14 @@ public sealed class ToolbarRenderer
         return true;
     }
 
+    // An item can be disabled after the pointer settled on it (e.g. by UpdateToggleStates):
+    // drop the hover before drawing so a disabled item never shows the hover fill.
+    private void DropDisabledHover()
+    {
+        if (HoveredItem is { IsEnabled: false })
+            HoveredItem = null;
+    }
+
     /// <summary>
     /// Optional icon resolver.  Given an icon key (e.g. "bold") returns a
     /// platform-specific image object understood by <see cref="IDrawingContext.DrawImage"/>,
@@ -341,6 +349,7 @@ public sealed class ToolbarRenderer
     /// <summary>Renders the entire toolbar into <paramref name="bounds"/>.</summary>
     public void Render(IDrawingContext ctx, EditorRect bounds)
     {
+        DropDisabledHover();
         _itemRects.Clear();
         _overflowItems.Clear();
         _overflowButtonRect = default;
@@ -1021,6 +1030,7 @@ public sealed class ToolbarRenderer
     public void RenderOverflowPanel(IDrawingContext ctx, float totalWidth, float totalHeight)
     {
         if (!_overflowPanelOpen || _overflowItems.Count == 0) return;
+        DropDisabledHover();
 
         float h    = ButtonSize;
         float pad  = ButtonPadding;

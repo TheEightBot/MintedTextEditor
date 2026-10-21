@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 - Changing the theme's `HyperlinkColor` now recolors links already laid out, instead of only links in paragraphs edited afterwards.
+- When the document gets shorter (e.g. smaller theme spacing), the editor no longer stays scrolled past its end.
 
 ---
 

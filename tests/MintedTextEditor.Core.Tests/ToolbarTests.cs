@@ -423,4 +423,64 @@ public class ToolbarTests
         Assert.False(renderer.UpdateHover(100f, RowY));
         Assert.Null(renderer.HoveredItem);
     }
+
+    [Fact]
+    public void ToolbarRenderer_HoveredButtonDisabledLater_IsNotDrawnHovered()
+    {
+        var (renderer, plain, _, _, _) = MakeHoverToolbar();
+        renderer.Render(new MockDrawingContext(), new EditorRect(0, 0, 400, 100));
+        Assert.True(renderer.UpdateHover(20f, RowY));
+        Assert.Same(plain, renderer.HoveredItem);
+
+        // e.g. UpdateToggleStates disables the button while the pointer rests on it.
+        plain.IsEnabled = false;
+        var ctx = new MockDrawingContext();
+        renderer.Render(ctx, new EditorRect(0, 0, 400, 100));
+
+        Assert.Null(renderer.HoveredItem);
+        Assert.DoesNotContain(ctx.FillRoundRectCalls, c => c.Paint.Color == renderer.HoverColor);
+    }
+
+    [Fact]
+    public void ToolbarRenderer_HoveredOverflowItemDisabledLater_IsNotDrawnHovered()
+    {
+        var items = new List<ToolbarItem>();
+        for (int i = 0; i < 8; i++)
+            items.Add(new ToolbarButton { Label = "B" + i, Icon = "bold" });
+        var def = ToolbarDefinition.CreateFromItems(items);
+        def.MaxRows = 1;
+        var renderer = new ToolbarRenderer(def)
+        {
+            ButtonSize = 36f,
+            ButtonPadding = 5f,
+            HoverColor = new EditorColor(1, 2, 3),
+        };
+        var bounds = new EditorRect(0, 0, 120, 100);
+        renderer.Render(new MockDrawingContext(), bounds);
+        Assert.True(renderer.HasOverflow);
+
+        bool opened = false;
+        for (float x = 0; x < bounds.Width && !opened; x += 2f)
+            opened = renderer.HandleOverflowButtonTap(x, RowY);
+        Assert.True(opened);
+        Assert.True(renderer.IsOverflowPanelOpen);
+        renderer.RenderOverflowPanel(new MockDrawingContext(), bounds.Width, 400f);
+
+        // Find an overflow item under the pointer.
+        for (float y = 50f; y < 400f && renderer.HoveredItem is null; y += 4f)
+            renderer.UpdateHover(20f, y);
+        var hovered = Assert.IsType<ToolbarButton>(renderer.HoveredItem);
+        Assert.Contains(hovered, renderer.OverflowItems);
+
+        var ctx = new MockDrawingContext();
+        renderer.RenderOverflowPanel(ctx, bounds.Width, 400f);
+        Assert.Contains(ctx.FillRoundRectCalls, c => c.Paint.Color == renderer.HoverColor);
+
+        hovered.IsEnabled = false;
+        ctx = new MockDrawingContext();
+        renderer.RenderOverflowPanel(ctx, bounds.Width, 400f);
+
+        Assert.Null(renderer.HoveredItem);
+        Assert.DoesNotContain(ctx.FillRoundRectCalls, c => c.Paint.Color == renderer.HoverColor);
+    }
 }
