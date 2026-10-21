@@ -34,7 +34,8 @@ public sealed class EditorFindReplace
 
     /// <summary>
     /// Zero-based index of the selected match among <see cref="MatchCount"/> matches after the
-    /// most recent operation, or -1 when no match is selected.
+    /// most recent operation, or -1 when the selection is not a match. When a search finds
+    /// nothing further and leaves a match selected, this is still that match's index.
     /// </summary>
     public int CurrentMatchIndex { get; private set; } = -1;
 
@@ -83,19 +84,16 @@ public sealed class EditorFindReplace
         replacement ??= string.Empty;
         var matches = Collect(query, options);
 
-        var selStart = Key(_selection.Range.Start);
-        var selEnd = Key(_selection.Range.End);
-        int index = matches.FindIndex(m =>
-            Compare(Key(m.Range.Start), selStart) == 0 && Compare(Key(m.Range.End), selEnd) == 0);
+        int index = IndexOfSelected(matches);
         if (index < 0)
-            index = IndexOfNext(matches, selEnd, options.WrapAround);
+            index = IndexOfNext(matches, Key(_selection.Range.End), options.WrapAround);
         if (index < 0)
         {
             UpdateState(matches.Count, -1);
             return false;
         }
 
-        var pos = Apply(new CompositeAction(CreateReplaceActions(matches[index], replacement)));
+        var pos = Apply(new ReplaceMatchesAction(_document, [matches[index]], replacement));
         _selection.CollapseTo(pos);
         FindNext(query, options);
         return true;
@@ -116,13 +114,7 @@ public sealed class EditorFindReplace
             return 0;
         }
 
-        // Build the actions in reverse document order so each step's original positions are
-        // still valid when it executes (later edits never shift earlier text).
-        var actions = new List<IUndoableAction>();
-        for (int i = matches.Count - 1; i >= 0; i--)
-            actions.AddRange(CreateReplaceActions(matches[i], replacement));
-
-        var pos = Apply(new CompositeAction(actions));
+        var pos = Apply(new ReplaceMatchesAction(_document, matches, replacement));
         _selection.CollapseTo(pos);
 
         UpdateState(Collect(query, options).Count, -1);
@@ -138,7 +130,9 @@ public sealed class EditorFindReplace
     {
         if (index < 0)
         {
-            UpdateState(matches.Count, -1);
+            // Nothing further was found and the selection is unchanged: report its index (if
+            // it is still a match) rather than -1, so "match N of M" stays accurate.
+            UpdateState(matches.Count, IndexOfSelected(matches));
             return null;
         }
 
@@ -163,41 +157,17 @@ public sealed class EditorFindReplace
         return wrapAround && matches.Count > 0 ? 0 : -1;
     }
 
+    private int IndexOfSelected(List<FindMatch> matches)
+    {
+        if (_selection.IsEmpty) return -1;
+        var selStart = Key(_selection.Range.Start);
+        var selEnd = Key(_selection.Range.End);
+        return matches.FindIndex(m =>
+            Compare(Key(m.Range.Start), selStart) == 0 && Compare(Key(m.Range.End), selEnd) == 0);
+    }
+
     private DocumentPosition Apply(IUndoableAction action) =>
         _undoManager is not null ? _undoManager.Push(action) : action.Execute();
-
-    private IEnumerable<IUndoableAction> CreateReplaceActions(FindMatch match, string replacement)
-    {
-        // Capture the style before deleting so the replacement keeps the match's formatting.
-        var style = GetStyleAt(match.Range.Start);
-        yield return new DeleteRangeAction(_document, match.Range);
-        if (replacement.Length > 0)
-            yield return new InsertTextAction(_document, match.Range.Start, replacement, style);
-    }
-
-    private TextStyle? GetStyleAt(DocumentPosition position)
-    {
-        if (position.BlockIndex < 0 || position.BlockIndex >= _document.Blocks.Count) return null;
-        if (_document.Blocks[position.BlockIndex] is not Paragraph paragraph) return null;
-        if (position.InlineIndex < 0 || position.InlineIndex >= paragraph.Inlines.Count) return null;
-
-        switch (paragraph.Inlines[position.InlineIndex])
-        {
-            case TextRun run:
-                return run.Style;
-            case HyperlinkInline link:
-                int remaining = position.Offset;
-                foreach (var child in link.Children)
-                {
-                    if (remaining < child.Length)
-                        return (child as TextRun)?.Style;
-                    remaining -= child.Length;
-                }
-                return null;
-            default:
-                return null;
-        }
-    }
 
     /// <summary>
     /// A position as (block, character offset within the paragraph), which stays comparable even

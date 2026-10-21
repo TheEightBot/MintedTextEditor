@@ -102,7 +102,22 @@ public class EditorFindReplaceTests
 
         Assert.Null(none);
         Assert.Equal(3, sel.Range.Start.Offset);
-        Assert.Equal(-1, finder.CurrentMatchIndex);
+        Assert.Equal(1, finder.CurrentMatchIndex);
+    }
+
+    [Fact]
+    public void FindPrevious_WithoutWrap_KeepsIndexOfSelectedMatch()
+    {
+        var (_, sel, _, finder) = Setup("ab ab");
+        var options = new FindOptions { WrapAround = false };
+
+        finder.FindNext("ab", options);
+        var none = finder.FindPrevious("ab", options);
+
+        Assert.Null(none);
+        Assert.Equal(0, sel.Range.Start.Offset);
+        Assert.Equal(0, finder.CurrentMatchIndex);
+        Assert.Equal(2, finder.MatchCount);
     }
 
     [Fact]
@@ -201,12 +216,65 @@ public class EditorFindReplaceTests
         para.AppendRun("plain ");
         var bold = TextStyle.Default.WithBold(true);
         para.AppendRun("word", bold);
-        var finder = new EditorFindReplace(doc, new Selection());
+        var undo = new UndoManager();
+        var finder = new EditorFindReplace(doc, new Selection(), undo);
 
         finder.Replace("word", "term");
 
+        Assert.Equal("plain term", doc.GetText());
         var run = Assert.Single(para.Inlines.OfType<TextRun>(), r => r.Text == "term");
         Assert.True(run.Style.IsBold);
+
+        undo.Undo();
+        Assert.Equal("plain word", doc.GetText());
+        Assert.True(Assert.Single(para.Inlines.OfType<TextRun>(), r => r.Text == "word").Style.IsBold);
+
+        undo.Redo();
+        Assert.Equal("plain term", doc.GetText());
+        Assert.True(Assert.Single(para.Inlines.OfType<TextRun>(), r => r.Text == "term").Style.IsBold);
+    }
+
+    [Fact]
+    public void ReplaceAll_KeepsEachMatchFormatting_AndUndoRedoRestore()
+    {
+        var doc = new EditorDocument();
+        var para = (Paragraph)doc.Blocks[0];
+        var bold = TextStyle.Default.WithBold(true);
+        para.AppendRun("word ");
+        para.AppendRun("word", bold);
+        para.AppendRun(" and word");
+        var undo = new UndoManager();
+        var finder = new EditorFindReplace(doc, new Selection(), undo);
+
+        Assert.Equal(3, finder.ReplaceAll("word", "term"));
+
+        Assert.Equal("term term and term", doc.GetText());
+        Assert.True(Assert.Single(para.Inlines.OfType<TextRun>(), r => r.Style.IsBold).Text == "term");
+
+        undo.Undo();
+        Assert.Equal("word word and word", doc.GetText());
+        Assert.True(Assert.Single(para.Inlines.OfType<TextRun>(), r => r.Style.IsBold).Text == "word");
+
+        undo.Redo();
+        Assert.Equal("term term and term", doc.GetText());
+        Assert.True(Assert.Single(para.Inlines.OfType<TextRun>(), r => r.Style.IsBold).Text == "term");
+    }
+
+    [Fact]
+    public void Replace_InsideHyperlink_KeepsReplacementInLink()
+    {
+        var doc = new EditorDocument();
+        var para = (Paragraph)doc.Blocks[0];
+        para.AppendRun("see ");
+        var link = new HyperlinkInline("https://example.com");
+        para.AddInline(link);
+        link.AddChild(new TextRun("docs here"));
+        var finder = new EditorFindReplace(doc, new Selection(), new UndoManager());
+
+        Assert.True(finder.Replace("docs", "notes"));
+
+        Assert.Equal("see notes here", doc.GetText());
+        Assert.Equal("notes here", Assert.Single(para.Inlines.OfType<HyperlinkInline>()).GetText());
     }
 
     [Fact]
@@ -267,6 +335,41 @@ public class EditorFindReplaceTests
 
         undo.Redo();
         Assert.Equal("one cat two cat\nred cat", doc.GetText());
+    }
+
+    [Fact]
+    public void ReplaceAll_ManyMatchesInOneParagraph_IsOneStepWithOneSnapshotPerParagraph()
+    {
+        string original = string.Concat(Enumerable.Repeat("ab", 2_000));
+        var (doc, _, undo, finder) = Setup(original, "xa");
+
+        Assert.Equal(2_001, finder.ReplaceAll("a", "c"));
+        string replaced = string.Concat(Enumerable.Repeat("cb", 2_000)) + "\nxc";
+        Assert.Equal(replaced, doc.GetText());
+
+        Assert.True(undo.CanUndo);
+        undo.Undo();
+        Assert.False(undo.CanUndo);
+        Assert.Equal(original + "\nxa", doc.GetText());
+
+        undo.Redo();
+        Assert.Equal(replaced, doc.GetText());
+    }
+
+    [Fact]
+    public void ReplaceMatchesAction_HoldsTwoSnapshotsPerParagraph_NotOnePerMatch()
+    {
+        var doc = MakeDocument(string.Concat(Enumerable.Repeat("ab", 500)), "xa");
+        var matches = new FindReplaceEngine(doc).FindAll("a");
+        Assert.Equal(501, matches.Count);
+
+        var action = new ReplaceMatchesAction(doc, matches, "c");
+        action.Execute();
+        action.Undo();
+        action.Redo();
+
+        // One "before" and one "after" snapshot for each of the two paragraphs.
+        Assert.Equal(4, action.SnapshotCount);
     }
 
     [Fact]
