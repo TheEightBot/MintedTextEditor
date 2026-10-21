@@ -213,7 +213,7 @@ public class HtmlExporter
     private static string ColorToCss(EditorColor c)
         => c.A == 255
             ? $"#{c.R:X2}{c.G:X2}{c.B:X2}"
-            : $"rgba({c.R},{c.G},{c.B},{c.A / 255.0:F3})";
+            : $"rgba({c.R},{c.G},{c.B},{(c.A / 255.0).ToString("F3", System.Globalization.CultureInfo.InvariantCulture)})";
 
     private static string QuoteFontFamily(string family)
         => family.Contains(' ') ? $"'{family}'" : family;

@@ -734,6 +734,291 @@ public class HtmlTests
         Assert.True(run.Style.IsUnderline);
     }
 
+    [Fact]
+    public void RoundTrip_ColorsWithAlpha_PreservesTextAndHighlightColor()
+    {
+        var text = new EditorColor(10, 20, 30, 128);
+        var highlight = new EditorColor(255, 255, 0, 64);
+        var doc = new EditorDocument();
+        var para = (Paragraph)doc.Blocks[0];
+        para.AppendRun("translucent", TextStyle.Default.WithTextColor(text).WithHighlightColor(highlight));
+        para.AppendRun(" clear", TextStyle.Default.WithHighlightColor(EditorColor.FromArgb(0, 1, 2, 3)));
+
+        var html = new HtmlExporter().Export(doc);
+        Assert.Contains("rgba(", html);
+        var imported = new HtmlImporter().Import(html);
+
+        var importedPara = Assert.IsType<Paragraph>(imported.Blocks[0]);
+        var run = Assert.IsType<TextRun>(importedPara.Inlines[0]);
+        Assert.Equal(text, run.Style.TextColor);
+        Assert.Equal(highlight, run.Style.HighlightColor);
+        var run2 = Assert.IsType<TextRun>(importedPara.Inlines[1]);
+        Assert.Equal(EditorColor.FromArgb(0, 1, 2, 3), run2.Style.HighlightColor);
+    }
+
+    [Fact]
+    public void RoundTrip_EveryAlphaValue_IsExact()
+    {
+        for (int a = 0; a < 255; a++)
+        {
+            var color = new EditorColor(1, 2, 3, (byte)a);
+            var doc = new EditorDocument();
+            ((Paragraph)doc.Blocks[0]).AppendRun("x", TextStyle.Default.WithTextColor(color));
+
+            var imported = new HtmlImporter().Import(new HtmlExporter().Export(doc));
+
+            var run = Assert.IsType<TextRun>(((Paragraph)imported.Blocks[0]).Inlines[0]);
+            Assert.Equal(color, run.Style.TextColor);
+        }
+    }
+
+    [Fact]
+    public void Export_AlphaColor_UsesInvariantCulture()
+    {
+        var saved = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+            var doc = new EditorDocument();
+            ((Paragraph)doc.Blocks[0]).AppendRun("x",
+                TextStyle.Default.WithTextColor(new EditorColor(1, 2, 3, 128)));
+
+            var html = new HtmlExporter().Export(doc);
+
+            Assert.Contains("rgba(1,2,3,0.502)", html);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = saved;
+        }
+    }
+
+    [Fact]
+    public void RoundTrip_TableSpans_PreservesGridAndSpans()
+    {
+        // 3x3 grid: A spans 2 columns in row 0, D spans 2 rows in column 0.
+        var doc = new EditorDocument();
+        doc.Blocks.Clear();
+        var table = new TableBlock(3, 3);
+        doc.Blocks.Add(table);
+        string[,] labels = { { "A", "", "B" }, { "D", "E", "F" }, { "", "H", "I" } };
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 3; c++)
+                if (labels[r, c].Length > 0)
+                    ((Paragraph)table.Rows[r].Cells[c].Blocks[0]).AppendRun(labels[r, c]);
+        Formatting.TableEngine.MergeCells(table, 0, 0, rowSpan: 1, colSpan: 2);
+        Formatting.TableEngine.MergeCells(table, 1, 0, rowSpan: 2, colSpan: 1);
+
+        var html = new HtmlExporter().Export(doc);
+        Assert.Contains("colspan=\"2\"", html);
+        Assert.Contains("rowspan=\"2\"", html);
+        var imported = Assert.IsType<TableBlock>(Assert.Single(new HtmlImporter().Import(html).Blocks));
+
+        Assert.Equal(3, imported.RowCount);
+        for (int r = 0; r < 3; r++)
+        {
+            Assert.Equal(3, imported.Rows[r].Cells.Count);
+            for (int c = 0; c < 3; c++)
+            {
+                var expected = table.Rows[r].Cells[c];
+                var actual = imported.Rows[r].Cells[c];
+                Assert.Equal(expected.IsMerged, actual.IsMerged);
+                Assert.Equal(expected.ColumnSpan, actual.ColumnSpan);
+                Assert.Equal(expected.RowSpan, actual.RowSpan);
+                Assert.Same(imported.Rows[r], actual.Parent);
+                if (!expected.IsMerged)
+                    Assert.Equal(labels[r, c], actual.GetText());
+            }
+        }
+
+        // Exporting the imported table gives the same HTML.
+        Assert.Equal(html, new HtmlExporter().Export(new HtmlImporter().Import(html)));
+    }
+
+    [Fact]
+    public void Import_RowspanInMiddleColumn_PlacesFollowingCellsAfterIt()
+    {
+        var doc = new HtmlImporter().Import(
+            "<table><tr><td>A</td><td rowspan=\"2\">B</td><td>C</td></tr>" +
+            "<tr><td>D</td><td>F</td></tr></table>");
+
+        var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+        var row1 = table.Rows[1].Cells;
+        Assert.Equal(3, row1.Count);
+        Assert.Equal("D", row1[0].GetText());
+        Assert.True(row1[1].IsMerged);
+        Assert.Equal("F", row1[2].GetText());
+        Assert.Equal(2, table.Rows[0].Cells[1].RowSpan);
+    }
+
+    [Fact]
+    public void Import_RowspanInLastColumn_FillsCoveredSlotAtRowEnd()
+    {
+        var doc = new HtmlImporter().Import(
+            "<table><tr><td>A</td><td rowspan=\"2\">B</td></tr><tr><td>C</td></tr></table>");
+
+        var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+        Assert.Equal(2, table.Rows[1].Cells.Count);
+        Assert.True(table.Rows[1].Cells[1].IsMerged);
+    }
+
+    [Theory]
+    [InlineData("5")]
+    [InlineData("0")]
+    public void Import_RowspanPastLastRow_IsClampedToTable(string rowspan)
+    {
+        var doc = new HtmlImporter().Import(
+            $"<table><tr><td rowspan=\"{rowspan}\">A</td><td>B</td></tr><tr><td>C</td></tr></table>");
+
+        var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+        Assert.Equal(2, table.Rows[0].Cells[0].RowSpan);
+        Assert.True(table.Rows[1].Cells[0].IsMerged);
+        Assert.Equal("C", table.Rows[1].Cells[1].GetText());
+    }
+
+    [Fact]
+    public void Import_UnclosedTable_StillClampsRowspan()
+    {
+        var doc = new HtmlImporter().Import("<table><tr><td rowspan=\"0\">A</td><td>B</td></tr><tr><td>C");
+
+        var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+        Assert.Equal(2, table.Rows[0].Cells[0].RowSpan);
+        Assert.Equal(2, table.Rows[1].Cells.Count);
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("-3")]
+    [InlineData("")]
+    public void Import_InvalidColspan_TreatedAsOne(string colspan)
+    {
+        var doc = new HtmlImporter().Import($"<table><tr><td colspan=\"{colspan}\">A</td><td>B</td></tr></table>");
+
+        var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+        Assert.Equal(2, table.Rows[0].Cells.Count);
+        Assert.Equal(1, table.Rows[0].Cells[0].ColumnSpan);
+        Assert.False(table.Rows[0].Cells[1].IsMerged);
+    }
+
+    [Fact]
+    public void Import_RowspanWidensLaterRow_ShorterRowsArePadded()
+    {
+        // Span expansion makes row 0 one slot wide and row 1 two; the column count comes
+        // from row 0, so without padding layout would never reach B.
+        var doc = new HtmlImporter().Import(
+            "<table><tr><td rowspan=\"2\">A</td></tr><tr><td>B</td></tr></table>");
+
+        var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+        Assert.Equal(2, table.ColumnCount);
+        Assert.All(table.Rows, r => Assert.Equal(2, r.Cells.Count));
+        var pad = table.Rows[0].Cells[1];
+        Assert.False(pad.IsMerged);
+        Assert.Same(table.Rows[0], pad.Parent);
+        Assert.Equal("", pad.GetText());
+        Assert.True(table.Rows[1].Cells[0].IsMerged);
+        Assert.Equal("B", table.Rows[1].Cells[1].GetText());
+    }
+
+    [Fact]
+    public void Import_ColspanWidensLaterRow_ShorterRowsArePadded()
+    {
+        var doc = new HtmlImporter().Import(
+            "<table><tr><td>A</td></tr><tr><td colspan=\"2\">B</td><td>C</td></tr><tr><td>D</td></tr></table>");
+
+        var table = Assert.IsType<TableBlock>(doc.Blocks[0]);
+        Assert.Equal(3, table.ColumnCount);
+        Assert.All(table.Rows, r => Assert.Equal(3, r.Cells.Count));
+        Assert.Equal("C", table.Rows[1].Cells[2].GetText());
+        foreach (int row in new[] { 0, 2 })
+        {
+            Assert.All(table.Rows[row].Cells.Skip(1), c =>
+            {
+                Assert.False(c.IsMerged);
+                Assert.Same(table.Rows[row], c.Parent);
+            });
+        }
+    }
+
+    [Fact]
+    public void Import_NestedTable_DoesNotEndOuterTable()
+    {
+        var doc = new HtmlImporter().Import(
+            "<table><tr><td><table><tr><td>inner</td></tr></table></td><td>B</td></tr>" +
+            "<tr><td>C</td><td>D</td></tr></table>");
+
+        var outer = Assert.IsType<TableBlock>(Assert.Single(doc.Blocks));
+        Assert.Equal(2, outer.RowCount);
+        Assert.Equal(2, outer.Rows[0].Cells.Count);
+        Assert.IsType<TableBlock>(outer.Rows[0].Cells[0].Blocks[0]);
+        Assert.Equal("B", outer.Rows[0].Cells[1].GetText());
+        Assert.Equal("D", outer.Rows[1].Cells[1].GetText());
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // CSS colour parsing
+    // ──────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("#f00", 255, 0, 0, 255)]
+    [InlineData("#F008", 255, 0, 0, 136)]
+    [InlineData("#0a141e", 10, 20, 30, 255)]
+    [InlineData("#0A141E80", 10, 20, 30, 128)]
+    [InlineData("rgb(10, 20, 30)", 10, 20, 30, 255)]
+    [InlineData("RGB(10,20,30)", 10, 20, 30, 255)]
+    [InlineData("rgba(10, 20, 30, 0.5)", 10, 20, 30, 128)]
+    [InlineData("rgba(10,20,30,0.502)", 10, 20, 30, 128)]
+    [InlineData("rgba(10, 20, 30, 25%)", 10, 20, 30, 64)]
+    [InlineData("rgba(10, 20, 30, .25)", 10, 20, 30, 64)]
+    [InlineData("rgba(10, 20, 30, 0)", 10, 20, 30, 0)]
+    [InlineData("rgba(10, 20, 30, 1)", 10, 20, 30, 255)]
+    [InlineData("rgba(10, 20, 30, 2)", 10, 20, 30, 255)]
+    [InlineData("rgb(10, 20, 30, 0.5)", 10, 20, 30, 128)]
+    [InlineData("rgb(10 20 30)", 10, 20, 30, 255)]
+    [InlineData("rgb(10 20 30 / 50%)", 10, 20, 30, 128)]
+    [InlineData("rgb(100%, 0%, 50%)", 255, 0, 128, 255)]
+    [InlineData("rgb(300, -5, 20)", 255, 0, 20, 255)]
+    [InlineData("rgb(10.4, 20.6, 30)", 10, 21, 30, 255)]
+    [InlineData("Yellow", 255, 255, 0, 255)]
+    [InlineData("transparent", 0, 0, 0, 0)]
+    [InlineData("  #fff !important", 255, 255, 255, 255)]
+    public void TryParseCssColor_ValidValues(string css, int r, int g, int b, int a)
+    {
+        Assert.True(HtmlImporter.TryParseCssColor(css, out var color));
+        Assert.Equal(new EditorColor((byte)r, (byte)g, (byte)b, (byte)a), color);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("#ff")]
+    [InlineData("#ggg")]
+    [InlineData("#12345")]
+    [InlineData("rgb(1, 2)")]
+    [InlineData("rgb(1, 2, x)")]
+    [InlineData("rgba(1, 2, 3, 4, 5)")]
+    [InlineData("rgb(1 2 3 / 4 / 5)")]
+    [InlineData("rgb(255 0 / 50%)")]
+    [InlineData("rgb(1 2 3 4)")]
+    [InlineData("rgb(1 2 3 4 / 50%)")]
+    [InlineData("hsl(0, 100%, 50%)")]
+    [InlineData("notacolor")]
+    public void TryParseCssColor_InvalidValues_ReturnFalse(string css)
+    {
+        Assert.False(HtmlImporter.TryParseCssColor(css, out _));
+    }
+
+    [Theory]
+    [InlineData("rgb(1,2)")]
+    [InlineData("rgb(255 0 / 50%)")]
+    [InlineData("rgb(255 0 0 50%)")]
+    public void Import_InvalidColor_KeepsInheritedColor(string css)
+    {
+        var doc = new HtmlImporter().Import(
+            $"<p><span style=\"color:#0000ff\"><span style=\"color:{css}\">x</span></span></p>");
+
+        var run = Assert.IsType<TextRun>(((Paragraph)doc.Blocks[0]).Inlines[0]);
+        Assert.Equal(EditorColor.Blue, run.Style.TextColor);
+    }
+
     // ──────────────────────────────────────────────────────────────────
     // Public API extension methods
     // ──────────────────────────────────────────────────────────────────

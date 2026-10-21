@@ -110,6 +110,31 @@ inputController.KeyBindings.Add(new EditorKeyBinding(
 
 ---
 
+## Find and Replace
+
+`MintedEditorView` has a programmatic find/replace API. It has no built-in find bar, so wire these methods to your own UI.
+
+| Method | Description |
+|---|---|
+| `bool FindNext(string query, bool matchCase = false, bool wholeWord = false, bool wrapAround = true)` | Selects and scrolls to the first match after the current selection. Wraps to the start of the document unless `wrapAround` is `false`. Returns `false` and leaves the selection alone when there is no match. |
+| `bool FindPrevious(string query, bool matchCase = false, bool wholeWord = false, bool wrapAround = true)` | Same, searching backwards from the selection and wrapping to the end. |
+| `bool Replace(string query, string replacement, bool matchCase = false, bool wholeWord = false)` | Replaces the selected match (or, if the selection is not a match, the next one) and selects the following match. Returns `true` when a replacement was made. |
+| `int ReplaceAll(string query, string replacement, bool matchCase = false, bool wholeWord = false)` | Replaces every match and returns how many were replaced. |
+
+Each `Replace` or `ReplaceAll` call is one step on `editor.UndoManager`, so a single `Undo()` restores the text. The replacement takes the formatting of the first character of the match. `Replace` and `ReplaceAll` do nothing when `IsReadOnly` is set; finding still works. The search covers top-level paragraphs only; text inside table cells is not searched.
+
+```csharp
+if (!editor.FindNext(SearchBox.Text, matchCase: MatchCaseCheck.IsChecked))
+    StatusLabel.Text = "No matches";
+
+int count = editor.ReplaceAll("colour", "color");
+editor.Undo();   // restores every "colour"
+```
+
+Without the MAUI control, use `EditorFindReplace` (namespace `MintedTextEditor.Core.Editing`) with a `Document`, `Selection` and optional `UndoManager`; it has the same operations taking a `FindOptions`. The lower-level `FindReplaceEngine` finds matches and edits the document directly, without undo.
+
+---
+
 ## Events
 
 `MintedEditorView` raises the following events. Event argument types are in `MintedTextEditor.Core.Events`.
@@ -229,6 +254,19 @@ editor.TextFormattingChanged += (sender, e) => HeadingPicker.SelectedItem = e.Fo
 ```
 
 Caret and selection moves, typing, shortcuts and toolbar formatting raise these events straight away. Other document changes (undo, redo, changes made through the document or engine APIs) raise them once the change has finished, on the next turn of the UI dispatcher.
+
+### FindReplaceCompleted
+
+Raised after each `FindNext`, `FindPrevious`, `Replace` or `ReplaceAll` call. `e.SearchTerm` is the query, `e.MatchCount` the number of matches in the document after the operation (after `ReplaceAll`, the matches left over, usually 0), and `e.CurrentMatchIndex` the 1-based index of the selected match, or 0 when none is selected.
+
+```csharp
+editor.FindReplaceCompleted += (sender, e) =>
+{
+    MatchLabel.Text = e.MatchCount == 0
+        ? "No matches"
+        : $"{e.CurrentMatchIndex} of {e.MatchCount}";
+};
+```
 
 ### UndoStackChanged
 

@@ -77,9 +77,9 @@ string text = para.GetText();
 | `HeadingLevel` | `int` | 0 = body text, 1–6 = H1–H6 |
 | `ListType` | `ListType` | `None`, `Bullet`, or `Number` |
 | `IndentLevel` | `int` | Indentation depth (0 = none) |
-| `LineSpacing` | `float` | Line height multiplier |
+| `LineSpacing` | `float` | Line height multiplier (default 1). Once set, the theme's `LineSpacing` no longer applies to the paragraph |
 | `SpaceBefore` | `float` | Extra space before paragraph (logical units) |
-| `SpaceAfter` | `float` | Extra space after paragraph (default 8) |
+| `SpaceAfter` | `float` | Extra space after paragraph (default 8). Until set, the theme's `ParagraphSpacing` is used instead |
 | `IsBlockQuote` | `bool` | Renders as a block quote |
 | `Direction` | `TextDirection` | `LeftToRight` or `RightToLeft` |
 

@@ -78,7 +78,26 @@ public class SpanishEditorStrings : EditorStrings
 EditorStrings.Current = new SpanishEditorStrings();
 ```
 
-The built-in toolbar labels and the insert prompts in `MintedEditorView` are currently fixed English text and do not read `EditorStrings`; use it for your own UI and custom toolbars (see the sample app's Localization page).
+The editor reads `EditorStrings.Current` for its own text:
+
+| Where | Strings | When it is read |
+|---|---|---|
+| Built-in toolbars (`ToolbarDefinition.CreateDefault()`, `CreateMinimal()`, `CreateFormattingOnly()`, `CreateInsertOnly()`) | Item labels: `Bold`, `FontFamily`, `InsertLink`, `HeadingLevel`, `EditMenu`, … | Every time `ToolbarItem.Label` is read, so on every draw |
+| `MintedEditorView` toolbar menus | Font family "Default" entry (`DefaultFontFamily`), heading levels (`NormalText`, `Heading1`–`Heading6`), the Edit, Object and Table menu options (`Copy`, `RemoveImage`, `InsertTableEllipsis`, `DeleteRow`, …) | When the toolbar is set up, and again whenever `EditorStrings.Current` changes |
+| `ContextMenuFactory.CreateDefault(ctx)` | Item labels: `Cut`, `SelectAll`, `EditLink`, `InsertRowAbove`, … | Each time the menu is created; `CreateDefault(ctx, strings)` takes the strings explicitly |
+| `MintedEditorView` insert prompts | `HyperlinkDialog*`, `ImageDialog*`, `TableDialog*` | Each time a prompt is shown |
+
+Setting `EditorStrings.Current` raises the static `EditorStrings.CurrentChanged` event; `MintedEditorView` listens to it while loaded and redraws, so switching language at runtime updates an editor that is already on screen. The event is static, so a subscriber stays alive until it unsubscribes; `EditorStrings.SubscribeCurrentChangedWeak(target, static t => ...)` listens without keeping `target` alive and returns an `IDisposable` that unsubscribes.
+
+Toolbar labels are drawn only when an item has no icon (or for a dropdown with nothing selected), so for icon buttons they mostly serve as names. A built-in item resolves its label through `ToolbarItem.LocalizedLabel` (for example `s => s.Bold`). Assigning `Label` clears `LocalizedLabel` and fixes the text; set `LocalizedLabel` on your own items to make them follow `EditorStrings` too:
+
+```csharp
+var button = new ToolbarButton { LocalizedLabel = s => s.ClearFormat, Command = new ClearFormattingCommand() };
+```
+
+Because the default English labels come from `EditorStrings`, find built-in toolbar items by `Icon` (for example `"bold"`) rather than by `Label` when the app may be localized.
+
+`HyperlinkDialogUrlLabel`, `HyperlinkDialogTextLabel`, `HyperlinkDialogOk` and `HyperlinkDialogInvalidUrl` are for a custom hyperlink dialog; the built-in prompt does not use them. The accessibility strings are not applied yet (see [Customize Accessible Labels](#customize-accessible-labels)). The sample app's Localization page switches between English, Spanish and French.
 
 ## Platform-Specific Notes
 

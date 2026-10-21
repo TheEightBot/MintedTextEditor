@@ -38,7 +38,7 @@ MintedTextEditor is structured in three layers, each with a clear responsibility
 │  ├─ UndoManager, IUndoableAction (+ actions)                        │
 │  ├─ ClipboardOperations, IClipboardProvider                        │
 │  ├─ Magnifier, MagnifierOptions                                    │
-│  └─ FindReplaceEngine, ISpellCheckProvider, IPrintProvider         │
+│  └─ FindReplaceEngine                                              │
 │                                                                    │
 │  Formatting                                                        │
 │  ├─ FormattingEngine, FontFormattingEngine                         │
@@ -100,13 +100,11 @@ This layer provides the `IDrawingContext` implementation backed by SkiaSharp. It
 
 **Text shaping**: text is shaped with HarfBuzz (`HarfBuzzTextShaper`), giving kerning, ligatures and complex-script shaping. Each script in a run is shaped with its own rules, and glyphs stay in logical order to match caret placement. Shaped runs are cached; runs longer than 256 characters go into a small least-recently-used cache. Set `SkiaDrawingContext.ShapeAllText = false` once at startup, before any layout, to shape only emoji and fallback-font text and draw the rest with Skia's faster unshaped text.
 
-`SkiaSharpEngine` is a placeholder (`IsAvailable`) and is not part of the rendering path.
-
 ### MintedTextEditor.Maui
 
 The MAUI layer hosts the core and the Skia renderer in a MAUI control. It targets `net10.0-android`, `net10.0-ios` and `net10.0-maccatalyst`, plus `net10.0-windows10.0.19041.0` when built on Windows.
 
-**MintedEditorView** is the public `ContentView`. It owns the `Document`, `UndoManager`, formatting engines, `EditorInputController`, `LayoutCache` and renderers. It exposes bindable properties (`Theme`, `ThemeMode`, `UseSystemTheme`, `IsReadOnly`, `PlaceholderText`, `IsWordWrap`, `ShowLineNumbers`, `ShowScrollbar`, `ShowToolbar`, `ToolbarDefinition`, `ToolbarItems`, `ToolbarIconPack`, `ToolbarMaxRows`, `IsMagnifierEnabled`, `MagnifierOptions`) and events (`TextChanged`, `SelectionChanged`, `HyperlinkClicked`, `IsHyperlinkSelectedChanged`, `EditorFocusChanged`, `ImageRequested`, `ContentLoaded`, `IsReadOnlyChanged`, `ImageInserted`, `ImageRemoved`, and the formatting "changed" events listed in [Commands & Events](commands-events.md#formatting-state-events)). Core's `FormattingStateTracker` and `DocumentImageTracker` decide when the formatting and image events fire.
+**MintedEditorView** is the public `ContentView`. It owns the `Document`, `UndoManager`, formatting engines, `EditorInputController`, `LayoutCache` and renderers. It exposes bindable properties (`Theme`, `ThemeMode`, `UseSystemTheme`, `IsReadOnly`, `PlaceholderText`, `IsWordWrap`, `ShowLineNumbers`, `ShowScrollbar`, `ShowFocusRing`, `ShowToolbar`, `ToolbarDefinition`, `ToolbarItems`, `ToolbarIconPack`, `ToolbarMaxRows`, `IsMagnifierEnabled`, `MagnifierOptions`) and events (`TextChanged`, `SelectionChanged`, `HyperlinkClicked`, `IsHyperlinkSelectedChanged`, `EditorFocusChanged`, `ImageRequested`, `ContentLoaded`, `IsReadOnlyChanged`, `ImageInserted`, `ImageRemoved`, and the formatting "changed" events listed in [Commands & Events](commands-events.md#formatting-state-events)). Core's `FormattingStateTracker` and `DocumentImageTracker` decide when the formatting and image events fire.
 
 On touch screens a long press picks up the caret (`LongPressDetector`) and dragging moves it; `MagnifierRenderer` draws the document again, zoomed, inside the lens.
 
@@ -148,3 +146,13 @@ Edits
 | Custom string localization | `EditorStrings` | Replace UI strings |
 | Custom command | `IEditorCommand` | Add new operations (e.g. as toolbar buttons) |
 | Text shaping mode | `SkiaDrawingContext.ShapeAllText` | Trade shaping quality for speed |
+
+## Experimental APIs
+
+These public types in `MintedTextEditor.Core` are planned extension points that the editor does **not** use yet: implementing them has no effect, and their shape may change once they are wired in. They are marked `[Experimental]`, so using one reports a compiler diagnostic (an error by default). Suppress it where you use the type deliberately, with `<NoWarn>$(NoWarn);MTE001</NoWarn>` in the project or `#pragma warning disable MTE001` around the code.
+
+| Diagnostic | Types | Status |
+|---|---|---|
+| `MTE001` | `Editing.ISpellCheckProvider` | Spell checking is not implemented; the control does not call a provider. |
+| `MTE002` | `Editing.IPrintProvider` | Printing is not implemented; the control does not call a provider. |
+| `MTE003` | `Rendering.ITextShaper`, `Rendering.ShapedTextResult`, `Rendering.DefaultTextShaper` | Not used by layout or rendering. The SkiaSharp backend shapes text with its own internal HarfBuzz shaper (see `SkiaDrawingContext.ShapeAllText`). |

@@ -10,11 +10,67 @@ public class EditorStrings
 {
     private static EditorStrings _current = new();
 
-    /// <summary>Gets or sets the active string provider. Defaults to built-in English strings.</summary>
+    /// <summary>
+    /// Gets or sets the active string provider. Defaults to built-in English strings.
+    /// The built-in toolbar labels are resolved from this value each time they are read, context
+    /// menus and prompts read it when they are shown, and <see cref="CurrentChanged"/> is raised
+    /// when it is replaced so views can redraw.
+    /// </summary>
     public static EditorStrings Current
     {
         get => _current;
-        set => _current = value ?? throw new ArgumentNullException(nameof(value));
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            if (ReferenceEquals(_current, value)) return;
+            _current = value;
+            CurrentChanged?.Invoke(null, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Raised after <see cref="Current"/> is replaced with a different instance. The sender is null.
+    /// Handlers may run on any thread (the thread that set <see cref="Current"/>).
+    /// </summary>
+    public static event EventHandler? CurrentChanged;
+
+    /// <summary>
+    /// Subscribes to <see cref="CurrentChanged"/> without keeping <paramref name="target"/> alive.
+    /// The static event holds only a weak reference to the target, so a view that is discarded
+    /// without unsubscribing can still be garbage collected; the subscription removes itself the
+    /// next time the event is raised after the target has been collected.
+    /// </summary>
+    /// <typeparam name="TTarget">Type of the object being notified.</typeparam>
+    /// <param name="target">Object to notify. Held weakly.</param>
+    /// <param name="onChanged">
+    /// Called with the target when <see cref="Current"/> changes, on the thread that set it.
+    /// It is held strongly, so it must not capture <paramref name="target"/> (use a static lambda).
+    /// </param>
+    /// <returns>A subscription; dispose it to unsubscribe. Disposing more than once is harmless.</returns>
+    public static IDisposable SubscribeCurrentChangedWeak<TTarget>(TTarget target, Action<TTarget> onChanged)
+        where TTarget : class
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(onChanged);
+        var subscription = new WeakCurrentChangedSubscription<TTarget>(target, onChanged);
+        CurrentChanged += subscription.OnCurrentChanged;
+        return subscription;
+    }
+
+    private sealed class WeakCurrentChangedSubscription<TTarget>(TTarget target, Action<TTarget> onChanged)
+        : IDisposable where TTarget : class
+    {
+        private readonly WeakReference<TTarget> _target = new(target);
+
+        public void OnCurrentChanged(object? sender, EventArgs e)
+        {
+            if (_target.TryGetTarget(out var t))
+                onChanged(t);
+            else
+                Dispose();
+        }
+
+        public void Dispose() => CurrentChanged -= OnCurrentChanged;
     }
 
     // ── Toolbar ─────────────────────────────────────────────────────────
@@ -63,6 +119,24 @@ public class EditorStrings
     public virtual string Highlight      => "Highlight color";
     /// <summary>Toolbar label for the clear formatting command. Default: "Clear formatting"</summary>
     public virtual string ClearFormat    => "Clear formatting";
+    /// <summary>Toolbar label for the subscript command. Default: "Subscript"</summary>
+    public virtual string Subscript      => "Subscript";
+    /// <summary>Toolbar label for the superscript command. Default: "Superscript"</summary>
+    public virtual string Superscript    => "Superscript";
+    /// <summary>Toolbar label for the heading level picker. Default: "Heading level"</summary>
+    public virtual string HeadingLevel   => "Heading level";
+    /// <summary>Toolbar label for the edit actions menu (copy, cut, paste, select all). Default: "Edit"</summary>
+    public virtual string EditMenu       => "Edit";
+    /// <summary>Toolbar label for the object actions menu (hyperlink and image actions). Default: "Object"</summary>
+    public virtual string ObjectMenu     => "Object";
+    /// <summary>Toolbar label for the table actions menu. Default: "Table"</summary>
+    public virtual string TableMenu      => "Table";
+    /// <summary>Font family option that clears the font family (uses the editor default). Default: "Default"</summary>
+    public virtual string DefaultFontFamily => "Default";
+    /// <summary>Object menu item that removes the selected image. Default: "Remove image"</summary>
+    public virtual string RemoveImage    => "Remove image";
+    /// <summary>Table menu item that opens the insert table prompt. Default: "Insert table…"</summary>
+    public virtual string InsertTableEllipsis => "Insert table…";
 
     // ── Heading levels ───────────────────────────────────────────────────
 
@@ -114,18 +188,44 @@ public class EditorStrings
 
     // ── Dialog / prompt strings ──────────────────────────────────────────
 
-    /// <summary>Title of the hyperlink dialog. Default: "Insert hyperlink"</summary>
+    /// <summary>Title of the hyperlink prompt. Default: "Insert hyperlink"</summary>
     public virtual string HyperlinkDialogTitle        => "Insert hyperlink";
-    /// <summary>Label of the URL field in the hyperlink dialog. Default: "URL"</summary>
-    public virtual string HyperlinkDialogUrlLabel     => "URL";
-    /// <summary>Label of the display text field in the hyperlink dialog. Default: "Display text"</summary>
-    public virtual string HyperlinkDialogTextLabel    => "Display text";
-    /// <summary>Confirm button text in the hyperlink dialog. Default: "OK"</summary>
-    public virtual string HyperlinkDialogOk           => "OK";
-    /// <summary>Cancel button text in the hyperlink dialog. Default: "Cancel"</summary>
+    /// <summary>Message of the built-in hyperlink prompt. Default: "Enter URL:"</summary>
+    public virtual string HyperlinkDialogMessage      => "Enter URL:";
+    /// <summary>Confirm button text of the built-in hyperlink prompt. Default: "Insert"</summary>
+    public virtual string HyperlinkDialogInsert       => "Insert";
+    /// <summary>Cancel button text of the hyperlink prompt. Default: "Cancel"</summary>
     public virtual string HyperlinkDialogCancel       => "Cancel";
-    /// <summary>Validation message shown in the hyperlink dialog when the URL is invalid. Default: "Please enter a valid URL."</summary>
+    /// <summary>Label of the URL field in a custom hyperlink dialog. Not used by the built-in prompt. Default: "URL"</summary>
+    public virtual string HyperlinkDialogUrlLabel     => "URL";
+    /// <summary>Label of the display text field in a custom hyperlink dialog. Not used by the built-in prompt. Default: "Display text"</summary>
+    public virtual string HyperlinkDialogTextLabel    => "Display text";
+    /// <summary>Confirm button text in a custom hyperlink dialog. Not used by the built-in prompt. Default: "OK"</summary>
+    public virtual string HyperlinkDialogOk           => "OK";
+    /// <summary>Validation message for an invalid URL in a custom hyperlink dialog. Not used by the built-in prompt. Default: "Please enter a valid URL."</summary>
     public virtual string HyperlinkDialogInvalidUrl   => "Please enter a valid URL.";
+
+    /// <summary>Title of the built-in image prompt. Default: "Insert image"</summary>
+    public virtual string ImageDialogTitle            => "Insert image";
+    /// <summary>Message of the built-in image prompt. Default: "Enter image URL or path:"</summary>
+    public virtual string ImageDialogMessage          => "Enter image URL or path:";
+    /// <summary>Confirm button text of the built-in image prompt. Default: "Insert"</summary>
+    public virtual string ImageDialogInsert           => "Insert";
+    /// <summary>Cancel button text of the built-in image prompt. Default: "Cancel"</summary>
+    public virtual string ImageDialogCancel           => "Cancel";
+
+    /// <summary>Title of the built-in table prompts. Default: "Insert table"</summary>
+    public virtual string TableDialogTitle            => "Insert table";
+    /// <summary>Message of the built-in prompt that asks for the number of rows. Default: "Rows:"</summary>
+    public virtual string TableDialogRows             => "Rows:";
+    /// <summary>Message of the built-in prompt that asks for the number of columns. Default: "Columns:"</summary>
+    public virtual string TableDialogColumns          => "Columns:";
+    /// <summary>Button text that moves from the rows prompt to the columns prompt. Default: "Next"</summary>
+    public virtual string TableDialogNext             => "Next";
+    /// <summary>Confirm button text of the columns prompt. Default: "Insert"</summary>
+    public virtual string TableDialogInsert           => "Insert";
+    /// <summary>Cancel button text of the table prompts. Default: "Cancel"</summary>
+    public virtual string TableDialogCancel           => "Cancel";
 
     // ── Accessibility labels ─────────────────────────────────────────────
 

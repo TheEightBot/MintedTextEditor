@@ -30,8 +30,22 @@ public class SelectionRenderer
     {
         if (selection.IsEmpty) return;
 
-        var range = selection.Range; // guaranteed Start <= End
         var paint = new EditorPaint { Color = SelectionColor, IsAntiAlias = false };
+        foreach (var rect in GetSelectionRects(selection, layout, document, context))
+            context.FillRect(rect, paint);
+    }
+
+    /// <summary>
+    /// Returns one highlight rectangle per visual line the selection covers, in document
+    /// content coordinates (the space <see cref="Render"/> draws in). Empty when the selection is empty.
+    /// Pass the result to <see cref="DocumentRenderer.SelectionRects"/> to recolour selected text.
+    /// </summary>
+    public IReadOnlyList<EditorRect> GetSelectionRects(Selection selection, DocumentLayout layout, Document.Document document, IDrawingContext context)
+    {
+        var rects = new List<EditorRect>();
+        if (selection.IsEmpty) return rects;
+
+        var range = selection.Range; // guaranteed Start <= End
 
         foreach (var block in layout.Blocks)
         {
@@ -65,9 +79,11 @@ public class SelectionRenderer
                 if (endX <= startX) continue;
 
                 float y = block.Y + line.Y;
-                context.FillRect(new EditorRect(startX, y, endX - startX, line.Height), paint);
+                rects.Add(new EditorRect(startX, y, endX - startX, line.Height));
             }
         }
+
+        return rects;
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────
