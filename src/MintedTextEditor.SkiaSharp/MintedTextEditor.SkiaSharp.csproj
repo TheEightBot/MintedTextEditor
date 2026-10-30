@@ -21,8 +21,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="HarfBuzzSharp" Version="14.2.1.301" />
-    <PackageReference Include="SkiaSharp" Version="4.153.1" />
+    <PackageReference Include="HarfBuzzSharp" Version="14.2.1.400" />
+    <PackageReference Include="SkiaSharp" Version="4.154.0" />
   </ItemGroup>
 
 </Project>
