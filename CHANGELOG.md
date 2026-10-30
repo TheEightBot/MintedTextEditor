@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- The caret and hit-testing between kerned letters (e.g. "AV", "To") now match where the letters are drawn on fonts whose kerning HarfBuzz applies as a glyph offset, such as Helvetica on iOS and macOS. The caret previously landed halfway between the kerned and unkerned positions.
+
 ---
 
 ## [0.4.0] — 2026-10-21
