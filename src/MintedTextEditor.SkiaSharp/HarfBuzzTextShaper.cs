@@ -10,7 +10,7 @@ namespace MintedTextEditor.SkiaSharp;
 /// The glyphs and pen positions produced by shaping a string, ready to draw with the
 /// <see cref="SKFont"/> it was shaped for. Positions are relative to the run origin.
 /// Glyphs are in logical order; <see cref="Clusters"/> gives the UTF-16 index each glyph
-/// starts at and <see cref="GlyphX"/> the pen x before it.
+/// starts at and <see cref="GlyphX"/> the x it is drawn at (pen position plus its offset).
 /// </summary>
 internal sealed record ShapedRun(ushort[] Glyphs, SKPoint[] Positions, float Width, int[] Clusters, float[] GlyphX, int TextLength)
 {
@@ -256,8 +256,13 @@ internal sealed class HarfBuzzTextShaper
             {
                 glyphs.Add((ushort)infos[i].Codepoint);
                 clusters.Add((int)infos[i].Cluster);
-                glyphX.Add(penX);
-                points.Add(new SKPoint(penX + positions[i].XOffset * scale, -positions[i].YOffset * scale));
+                // The caret goes where the glyph is drawn, so include its x offset: HarfBuzz
+                // applies a legacy 'kern' table (e.g. Helvetica on Apple platforms) by giving
+                // half the kerning to the first glyph's advance and moving the second glyph
+                // back by the rest, rather than adjusting the first advance alone.
+                float drawX = penX + positions[i].XOffset * scale;
+                glyphX.Add(drawX);
+                points.Add(new SKPoint(drawX, -positions[i].YOffset * scale));
                 penX += positions[i].XAdvance * scale;
             }
         }
