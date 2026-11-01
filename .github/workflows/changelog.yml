@@ -75,7 +75,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # README.md ships inside every NuGet package; relative links break on nuget.org.
       - name: Reject relative links in README.md
